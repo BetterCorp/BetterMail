@@ -58,7 +58,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: 10.0.201
           cache: true
           cache-dependency-path: Directory.Packages.props
       - run: dotnet tool restore
@@ -80,7 +80,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: 10.0.201
           cache: true
           cache-dependency-path: Directory.Packages.props
       - name: Restore
@@ -105,7 +105,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: 10.0.201
           cache: true
           cache-dependency-path: Directory.Packages.props
       - run: dotnet tool restore
