@@ -7,6 +7,9 @@ namespace BetterMail.App;
 
 public sealed partial class ConversationThreadView : UserControl
 {
+    private bool _layoutInitialized;
+    private bool _isCompactLayout;
+
     public ConversationThreadView()
     {
         InitializeComponent();
@@ -19,6 +22,13 @@ public sealed partial class ConversationThreadView : UserControl
     private void ApplyResponsiveLayout(double width)
     {
         var compact = IsCompactWidth(width);
+        if (_layoutInitialized && _isCompactLayout == compact)
+        {
+            return;
+        }
+
+        _layoutInitialized = true;
+        _isCompactLayout = compact;
         ThreadHeaderLayout.ColumnDefinitions.Clear();
         ThreadHeaderLayout.RowDefinitions.Clear();
         if (compact)

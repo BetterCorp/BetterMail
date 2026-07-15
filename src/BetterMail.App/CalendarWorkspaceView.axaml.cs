@@ -6,6 +6,8 @@ namespace BetterMail.App;
 
 public sealed partial class CalendarWorkspaceView : UserControl
 {
+    private bool _layoutInitialized;
+    private bool _isCompactWidth;
     private bool _isPhoneWidth;
     private bool _phoneShowingCalendars;
 
@@ -26,14 +28,25 @@ public sealed partial class CalendarWorkspaceView : UserControl
     internal static bool IsCompactWidth(double width) => width < 760;
     internal static bool IsPhoneWidth(double width) => width < 560;
 
-    private void ApplyResponsiveLayout(double width)
+    private void ApplyResponsiveLayout(double width, bool force = false)
     {
         var compact = IsCompactWidth(width);
         var phone = IsPhoneWidth(width);
+        if (!force && _layoutInitialized && _isCompactWidth == compact && _isPhoneWidth == phone)
+        {
+            if (DataContext is CalendarWorkspaceViewModel existingViewModel)
+            {
+                existingViewModel.SetViewportWidth(width - (compact ? 0 : 238));
+            }
+            return;
+        }
+
         if (phone && !_isPhoneWidth)
         {
             _phoneShowingCalendars = false;
         }
+        _layoutInitialized = true;
+        _isCompactWidth = compact;
         _isPhoneWidth = phone;
         RootGrid.ColumnDefinitions.Clear();
         RootGrid.RowDefinitions.Clear();
@@ -122,7 +135,7 @@ public sealed partial class CalendarWorkspaceView : UserControl
     private void CalendarPaneButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
     {
         _phoneShowingCalendars = true;
-        ApplyResponsiveLayout(Bounds.Width);
+        ApplyResponsiveLayout(Bounds.Width, force: true);
         CalendarSidebarBackButton.Focus();
     }
 
@@ -134,7 +147,7 @@ public sealed partial class CalendarWorkspaceView : UserControl
     private void ShowPhoneCalendar()
     {
         _phoneShowingCalendars = false;
-        ApplyResponsiveLayout(Bounds.Width);
+        ApplyResponsiveLayout(Bounds.Width, force: true);
         CalendarPaneButton.Focus();
     }
 

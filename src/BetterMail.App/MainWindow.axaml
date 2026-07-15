@@ -18,6 +18,13 @@
       <Setter Property="BorderBrush" Value="{DynamicResource BetterMailAccentBrush}" />
       <Setter Property="BorderThickness" Value="2" />
     </Style>
+    <Style Selector="Border.settingsCard">
+      <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BetterMailDividerBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="18" />
+    </Style>
   </Window.Styles>
   <Window.KeyBindings>
     <KeyBinding Gesture="Ctrl+N" Command="{Binding ComposeCommand}" />
@@ -814,7 +821,17 @@
           </Grid>
         </Border>
         <ScrollViewer Grid.Row="1">
-          <StackPanel x:Name="SettingsContent" MaxWidth="620" Margin="28" Spacing="24" HorizontalAlignment="Stretch">
+          <StackPanel x:Name="SettingsContent" MaxWidth="820" Margin="28" Spacing="18" HorizontalAlignment="Stretch">
+            <Border Height="176"
+                    CornerRadius="8"
+                    BorderBrush="{DynamicResource BetterMailDividerBrush}"
+                    BorderThickness="1"
+                    ClipToBounds="True"
+                    AutomationProperties.Name="BetterMail settings banner">
+              <Image Source="/Assets/BetterMailSettingsBanner.png"
+                     Stretch="UniformToFill"
+                     AutomationProperties.Name="BetterMail" />
+            </Border>
             <Border x:Name="AboutSection"
                     Background="{DynamicResource BetterMailSelectionBrush}"
                     BorderBrush="{DynamicResource BetterMailAccentBrush}"
@@ -854,30 +871,48 @@
                             CommandParameter="{Binding LicenseUri}"
                             Click="OpenWorkspaceLinkClicked"
                             AutomationProperties.Name="Open BetterMail license" />
+                    <Button Classes="command"
+                            Margin="0,0,6,6"
+                            Content="Check for updates"
+                            Click="CheckForUpdatesClicked"
+                            AutomationProperties.Name="Check for BetterMail updates" />
                   </WrapPanel>
                 </StackPanel>
               </Grid>
             </Border>
-            <StackPanel Spacing="9">
-              <TextBlock Text="Appearance" FontSize="18" FontWeight="SemiBold" />
-              <TextBlock Text="Theme" FontWeight="SemiBold" />
-              <ComboBox ItemsSource="{Binding ThemeModes}" SelectedItem="{Binding SelectedThemeMode}" />
-              <TextBlock Text="Accent" FontWeight="SemiBold" />
-              <ComboBox ItemsSource="{Binding AccentNames}" SelectedItem="{Binding SelectedAccentName}" />
-              <ToggleSwitch Content="Compact message list" IsChecked="{Binding IsCompact}" />
-              <ToggleSwitch Content="Desktop notifications for new Inbox mail"
-                            IsChecked="{Binding DesktopNotificationsEnabled}"
-                            AutomationProperties.Name="Desktop notifications for new Inbox mail" />
-            </StackPanel>
-            <StackPanel Spacing="9">
+            <Border Classes="settingsCard">
+              <StackPanel Spacing="9">
+                <TextBlock Text="Appearance" FontSize="18" FontWeight="SemiBold" />
+                <TextBlock Text="Theme" FontWeight="SemiBold" />
+                <ComboBox ItemsSource="{Binding ThemeModes}" SelectedItem="{Binding SelectedThemeMode}" />
+                <TextBlock Text="Accent" FontWeight="SemiBold" />
+                <ComboBox ItemsSource="{Binding AccentNames}" SelectedItem="{Binding SelectedAccentName}" />
+                <ToggleSwitch Content="Compact message list" IsChecked="{Binding IsCompact}" />
+              </StackPanel>
+            </Border>
+            <Border Classes="settingsCard">
+              <StackPanel Spacing="9">
+                <TextBlock Text="Notifications" FontSize="18" FontWeight="SemiBold" />
+                <ToggleSwitch Content="Desktop notifications for new Inbox mail"
+                              IsChecked="{Binding DesktopNotificationsEnabled}"
+                              AutomationProperties.Name="Desktop notifications for new Inbox mail" />
+                <TextBlock Text="Show an operating-system notification when background sync finds new Inbox mail."
+                           Opacity="0.62"
+                           TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+            <Border Classes="settingsCard">
+              <StackPanel Spacing="9">
               <TextBlock Text="Mail sync" FontSize="18" FontWeight="SemiBold" />
               <TextBlock Text="Download messages from" FontWeight="SemiBold" />
               <ComboBox ItemsSource="{Binding MailSyncRanges}"
                         SelectedItem="{Binding MailSyncRange}"
                         AutomationProperties.Name="Mail sync history" />
               <TextBlock Text="Changing this starts a background sync. Existing local mail is kept." Opacity="0.62" TextWrapping="Wrap" />
-            </StackPanel>
-            <StackPanel x:Name="MailStatisticsSection" Spacing="9">
+              </StackPanel>
+            </Border>
+            <Border Classes="settingsCard">
+              <StackPanel x:Name="MailStatisticsSection" Spacing="9">
               <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Text="Mail statistics" FontSize="18" FontWeight="SemiBold" />
                 <ProgressBar Grid.Column="1" IsIndeterminate="True" Width="70" Height="3" IsVisible="{Binding IsLoadingMailStatistics}" VerticalAlignment="Center" />
@@ -901,8 +936,10 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
-            </StackPanel>
-            <StackPanel Spacing="9">
+              </StackPanel>
+            </Border>
+            <Border Classes="settingsCard">
+              <StackPanel Spacing="9">
               <TextBlock Text="Compose" FontSize="18" FontWeight="SemiBold" />
               <TextBlock Text="Fallback signature" FontWeight="SemiBold" />
               <TextBox Text="{Binding Signature}"
@@ -940,8 +977,10 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
-            </StackPanel>
-            <StackPanel Spacing="9">
+              </StackPanel>
+            </Border>
+            <Border Classes="settingsCard">
+              <StackPanel Spacing="9">
               <TextBlock Text="Accounts" FontSize="18" FontWeight="SemiBold" />
               <ItemsControl ItemsSource="{Binding SettingsAccounts}">
                 <ItemsControl.ItemTemplate>
@@ -998,7 +1037,8 @@
                   </StackPanel>
                 </StackPanel>
               </Border>
-            </StackPanel>
+              </StackPanel>
+            </Border>
           </StackPanel>
         </ScrollViewer>
       </Grid>

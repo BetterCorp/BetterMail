@@ -1,4 +1,5 @@
 using BetterMail.App;
+using Velopack.Sources;
 
 namespace BetterMail.Tests;
 
@@ -46,7 +47,10 @@ public sealed class AppUpdaterTests
     [Fact]
     public void UsesProductionReleaseFeedAndDailyChecks()
     {
-        Assert.Equal("https://github.com/BetterCorp/BetterMail", AppUpdater.RepositoryUrl);
+        var source = Assert.IsType<SimpleWebSource>(AppUpdater.CreateSource());
+
+        Assert.Equal("https://github.com/BetterCorp/BetterMail/releases/latest/download", AppUpdater.UpdateFeedUrl);
+        Assert.Equal(AppUpdater.UpdateFeedUrl, source.BaseUri.ToString().TrimEnd('/'));
         Assert.Equal(TimeSpan.FromHours(24), AppUpdater.CheckInterval);
     }
 

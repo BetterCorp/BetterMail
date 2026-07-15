@@ -9,6 +9,8 @@ namespace BetterMail.App;
 public sealed partial class NotesWorkspaceView : UserControl
 {
     private NotesWorkspaceViewModel? _viewModel;
+    private bool _layoutInitialized;
+    private bool _isCompactWidth;
     private bool _isPhoneWidth;
     private bool _phoneShowingPage;
 
@@ -26,7 +28,7 @@ public sealed partial class NotesWorkspaceView : UserControl
             {
                 _viewModel.PropertyChanged += ViewModel_PropertyChanged;
             }
-            ApplyResponsiveLayout(Bounds.Width);
+            ApplyResponsiveLayout(Bounds.Width, force: true);
         };
         SizeChanged += (_, args) => ApplyResponsiveLayout(args.NewSize.Width);
         KeyDown += HandleKeyDown;
@@ -35,14 +37,21 @@ public sealed partial class NotesWorkspaceView : UserControl
     internal static bool IsCompactWidth(double width) => width < 760;
     internal static bool IsPhoneWidth(double width) => width < 560;
 
-    private void ApplyResponsiveLayout(double width)
+    private void ApplyResponsiveLayout(double width, bool force = false)
     {
         var compact = IsCompactWidth(width);
         var phone = IsPhoneWidth(width);
+        if (!force && _layoutInitialized && _isCompactWidth == compact && _isPhoneWidth == phone)
+        {
+            return;
+        }
+
         if (phone && !_isPhoneWidth)
         {
             _phoneShowingPage = _viewModel?.SelectedPage is not null;
         }
+        _layoutInitialized = true;
+        _isCompactWidth = compact;
         _isPhoneWidth = phone;
         RootGrid.ColumnDefinitions.Clear();
         RootGrid.RowDefinitions.Clear();
@@ -122,7 +131,7 @@ public sealed partial class NotesWorkspaceView : UserControl
             _viewModel?.SelectedPage is not null)
         {
             _phoneShowingPage = true;
-            ApplyResponsiveLayout(Bounds.Width);
+            ApplyResponsiveLayout(Bounds.Width, force: true);
             NotesBackButton.Focus();
         }
     }
@@ -133,7 +142,7 @@ public sealed partial class NotesWorkspaceView : UserControl
     private void ShowPhoneNavigation()
     {
         _phoneShowingPage = false;
-        ApplyResponsiveLayout(Bounds.Width);
+        ApplyResponsiveLayout(Bounds.Width, force: true);
         NotesTree.Focus();
     }
 

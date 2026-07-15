@@ -7,6 +7,8 @@ namespace BetterMail.App;
 public sealed partial class TasksWorkspaceView : UserControl
 {
     private TasksWorkspaceViewModel? _loadedViewModel;
+    private bool _layoutInitialized;
+    private bool _isCompactWidth;
     private bool _isPhoneWidth;
     private bool _phoneShowingTasks;
 
@@ -29,14 +31,21 @@ public sealed partial class TasksWorkspaceView : UserControl
     internal static bool IsCompactWidth(double width) => width < 760;
     internal static bool IsPhoneWidth(double width) => width < 560;
 
-    private void ApplyResponsiveLayout(double width)
+    private void ApplyResponsiveLayout(double width, bool force = false)
     {
         var compact = IsCompactWidth(width);
         var phone = IsPhoneWidth(width);
+        if (!force && _layoutInitialized && _isCompactWidth == compact && _isPhoneWidth == phone)
+        {
+            return;
+        }
+
         if (phone && !_isPhoneWidth)
         {
             _phoneShowingTasks = _loadedViewModel?.SelectedList is not null;
         }
+        _layoutInitialized = true;
+        _isCompactWidth = compact;
         _isPhoneWidth = phone;
         SetToolbarLayout(compact);
         RootGrid.ColumnDefinitions.Clear();
@@ -115,7 +124,7 @@ public sealed partial class TasksWorkspaceView : UserControl
             return;
         }
         _phoneShowingTasks = true;
-        ApplyResponsiveLayout(Bounds.Width);
+        ApplyResponsiveLayout(Bounds.Width, force: true);
         TasksBackButton.Focus();
     }
 
@@ -125,7 +134,7 @@ public sealed partial class TasksWorkspaceView : UserControl
     private void ShowPhoneLists()
     {
         _phoneShowingTasks = false;
-        ApplyResponsiveLayout(Bounds.Width);
+        ApplyResponsiveLayout(Bounds.Width, force: true);
         AllTasksButton.Focus();
     }
 

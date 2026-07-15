@@ -119,6 +119,8 @@ public sealed partial class App : Application
         });
         if (_updater is not null)
         {
+            var updater = _updater;
+            mainWindow.CheckForUpdatesAsync = () => updater.CheckNowAsync(mainWindow);
             await _updater.StartAsync(mainWindow);
         }
     }

@@ -6,7 +6,7 @@ namespace BetterMail.App;
 
 internal sealed class AppUpdater : IDisposable
 {
-    internal const string RepositoryUrl = "https://github.com/BetterCorp/BetterMail";
+    internal const string UpdateFeedUrl = "https://github.com/BetterCorp/BetterMail/releases/latest/download";
     internal static readonly TimeSpan CheckInterval = TimeSpan.FromHours(24);
 
     private readonly UpdateManager _manager = CreateManager();
@@ -14,6 +14,7 @@ internal sealed class AppUpdater : IDisposable
     private readonly UpdateReleaseTracker _releases = new();
     private readonly UpdateStaging _staging = new();
     private readonly CancellationTokenSource _stopping = new();
+    private readonly SemaphoreSlim _checkGate = new(1, 1);
 
     private AppUpdater(Func<Task> gracefulShutdown)
     {
@@ -37,15 +38,38 @@ internal sealed class AppUpdater : IDisposable
         var update = await CheckQuietlyAsync();
         if (update is not null)
         {
-            _releases.Observe(update.TargetFullRelease.Version.ToString());
-            var download = StartStaging(update);
-            if (await UpdateWindow.PromptAsync(owner, update.TargetFullRelease.Version.ToString()))
-            {
-                await FinishUpdateNowAsync(owner, update.TargetFullRelease, download);
-            }
+            await OfferUpdateAsync(owner, update);
         }
 
         _ = MonitorAsync();
+    }
+
+    public async Task CheckNowAsync(Window owner)
+    {
+        UpdateInfo? update;
+        try
+        {
+            update = await CheckAsync();
+        }
+        catch (Exception exception)
+        {
+            await UpdateWindow.MessageAsync(
+                owner,
+                "Update check failed",
+                $"BetterMail could not check for updates. {exception.Message}");
+            return;
+        }
+
+        if (update is null)
+        {
+            await UpdateWindow.MessageAsync(
+                owner,
+                "BetterMail is up to date",
+                "You already have the latest available version.");
+            return;
+        }
+
+        await OfferUpdateAsync(owner, update);
     }
 
     public void Dispose()
@@ -54,8 +78,11 @@ internal sealed class AppUpdater : IDisposable
         _stopping.Dispose();
     }
 
+    internal static IUpdateSource CreateSource() =>
+        new SimpleWebSource(UpdateFeedUrl, timeout: 0.25);
+
     private static UpdateManager CreateManager() => new(
-        new GithubSource(RepositoryUrl, null, false, null),
+        CreateSource(),
         null,
         null);
 
@@ -63,11 +90,34 @@ internal sealed class AppUpdater : IDisposable
     {
         try
         {
-            return await _manager.CheckForUpdatesAsync();
+            return await CheckAsync();
         }
         catch
         {
             return null;
+        }
+    }
+
+    private async Task<UpdateInfo?> CheckAsync()
+    {
+        await _checkGate.WaitAsync(_stopping.Token);
+        try
+        {
+            return await _manager.CheckForUpdatesAsync();
+        }
+        finally
+        {
+            _checkGate.Release();
+        }
+    }
+
+    private async Task OfferUpdateAsync(Window owner, UpdateInfo update)
+    {
+        _releases.Observe(update.TargetFullRelease.Version.ToString());
+        var download = StartStaging(update);
+        if (await UpdateWindow.PromptAsync(owner, update.TargetFullRelease.Version.ToString()))
+        {
+            await FinishUpdateNowAsync(owner, update.TargetFullRelease, download);
         }
     }
 

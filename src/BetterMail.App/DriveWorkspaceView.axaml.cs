@@ -9,6 +9,8 @@ namespace BetterMail.App;
 public sealed partial class DriveWorkspaceView : UserControl
 {
     private DriveWorkspaceViewModel? _loadedViewModel;
+    private bool _layoutInitialized;
+    private bool _isCompactLayout;
     private bool _isPhoneLayout;
     private bool _showPhoneTree = true;
 
@@ -42,7 +44,15 @@ public sealed partial class DriveWorkspaceView : UserControl
     private void ApplyResponsiveLayout(double width)
     {
         var compact = IsCompactWidth(width);
-        _isPhoneLayout = IsPhoneWidth(width);
+        var phone = IsPhoneWidth(width);
+        if (_layoutInitialized && _isCompactLayout == compact && _isPhoneLayout == phone)
+        {
+            return;
+        }
+
+        _layoutInitialized = true;
+        _isCompactLayout = compact;
+        _isPhoneLayout = phone;
         RootGrid.ColumnDefinitions.Clear();
         RootGrid.RowDefinitions.Clear();
         if (compact)

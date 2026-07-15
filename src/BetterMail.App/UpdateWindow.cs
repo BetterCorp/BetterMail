@@ -74,6 +74,38 @@ internal sealed class UpdateWindow : Window
     public static Task<bool> PromptAsync(Window owner, string version) =>
         new UpdateWindow(version, prompt: true).ShowDialog<bool>(owner);
 
+    public static Task MessageAsync(Window owner, string title, string message)
+    {
+        var window = new UpdateWindow(title, message);
+        return window.ShowDialog(owner);
+    }
+
+    private UpdateWindow(string title, string message)
+    {
+        Title = title;
+        Width = 420;
+        Height = 205;
+        CanResize = false;
+        WindowStartupLocation = WindowStartupLocation.CenterOwner;
+
+        var close = new Button
+        {
+            Content = "Close",
+            HorizontalAlignment = HorizontalAlignment.Right,
+            MinWidth = 90
+        };
+        close.Click += (_, _) => Close();
+        Content = Layout(
+            new TextBlock
+            {
+                Text = title,
+                FontSize = 20,
+                FontWeight = FontWeight.SemiBold
+            },
+            new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+            close);
+    }
+
     public void ReportProgress(int value) => Dispatcher.UIThread.Post(() =>
     {
         if (_progress is not null)

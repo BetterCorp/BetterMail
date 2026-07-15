@@ -14,8 +14,11 @@ namespace BetterMail.App;
 
 public sealed partial class MainWindow : Window
 {
+    internal Func<Task>? CheckForUpdatesAsync { get; set; }
+
     private MainWindowViewModel? _viewModel;
     private ResponsiveLayoutMode _layoutMode;
+    private bool _layoutInitialized;
     private bool _showFolders;
     private bool _showPhoneMessage;
     private PointerPressedEventArgs? _mailDragStart;
@@ -84,7 +87,16 @@ public sealed partial class MainWindow : Window
 
     private void ApplyResponsiveLayout(double width)
     {
-        _layoutMode = LayoutModeFor(width);
+        var nextMode = LayoutModeFor(width);
+        InlineMailActions.IsVisible = UsesInlineMailActions(width);
+        GlobalSearchResultsPanel.Width = Math.Clamp(width - (nextMode == ResponsiveLayoutMode.Phone ? 24 : 360), 300, 1000);
+        if (_layoutInitialized && _layoutMode == nextMode)
+        {
+            return;
+        }
+
+        _layoutInitialized = true;
+        _layoutMode = nextMode;
         var phone = _layoutMode == ResponsiveLayoutMode.Phone;
         var wide = _layoutMode == ResponsiveLayoutMode.Wide;
 
@@ -137,7 +149,6 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(ReadingPane, phone ? 2 : 3);
         Grid.SetColumn(ErrorToast, phone ? 2 : 3);
         FolderToggle.IsVisible = !wide;
-        InlineMailActions.IsVisible = UsesInlineMailActions(width);
         PhoneBack.IsVisible = phone;
         var showMail = _viewModel?.ShowMailSurface ?? true;
         FolderSplitter.IsVisible = showMail && wide;
@@ -158,7 +169,6 @@ public sealed partial class MainWindow : Window
         }
 
         SettingsContent.Margin = new Thickness(phone ? 16 : 28);
-        GlobalSearchResultsPanel.Width = Math.Clamp(width - (phone ? 24 : 360), 300, 1000);
         UpdateMailPanes();
     }
 
@@ -674,6 +684,14 @@ public sealed partial class MainWindow : Window
         catch
         {
             // The module remains usable when Windows has no handler for the link.
+        }
+    }
+
+    private async void CheckForUpdatesClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (CheckForUpdatesAsync is not null)
+        {
+            await CheckForUpdatesAsync();
         }
     }
 }

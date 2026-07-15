@@ -15,6 +15,10 @@ public sealed class MainWindowXamlTests
         Assert.True(xaml.IndexOf("AboutSection", StringComparison.Ordinal) <
             xaml.IndexOf("Text=" + (char)34 + "Appearance", StringComparison.Ordinal));
         Assert.Contains("/Assets/BetterMail.png", about);
+        Assert.Contains("/Assets/BetterMailSettingsBanner.png", xaml);
+        Assert.Contains("Text=" + (char)34 + "Notifications" + (char)34, xaml);
+        Assert.Equal(1, Count(xaml, "Content=" + (char)34 + "Desktop notifications for new Inbox mail" + (char)34));
+        Assert.Contains("CheckForUpdatesClicked", about);
         Assert.Contains("BetterMailSelectionBrush", about);
         Assert.Contains("BetterMailAccentBrush", about);
         Assert.Contains("{Binding Version", about);
@@ -28,6 +32,29 @@ public sealed class MainWindowXamlTests
         Assert.Equal(
             typeof(BetterMail.App.AppInfo).Assembly.GetName().Version?.ToString(3) ?? "Unknown",
             new BetterMail.App.AppInfo().Version);
+    }
+
+    [Fact]
+    public void ResponsiveViewsRebuildOnlyWhenTheirBreakpointChanges()
+    {
+        var root = FindRepositoryRoot();
+        foreach (var file in new[]
+                 {
+                     "MainWindow.axaml.cs",
+                     "ConversationThreadView.axaml.cs",
+                     "CalendarWorkspaceView.axaml.cs",
+                     "DriveWorkspaceView.axaml.cs",
+                     "NotesWorkspaceView.axaml.cs",
+                     "TasksWorkspaceView.axaml.cs"
+                 })
+        {
+            var source = File.ReadAllText(Path.Combine(root, "src", "BetterMail.App", file));
+            var guard = source.IndexOf("_layoutInitialized &&", StringComparison.Ordinal);
+            var rebuild = source.IndexOf(".ColumnDefinitions.Clear()", StringComparison.Ordinal);
+
+            Assert.True(guard >= 0, $"{file} is missing its responsive layout guard.");
+            Assert.True(rebuild < 0 || guard < rebuild, $"{file} rebuilds layout before checking its breakpoint.");
+        }
     }
 
     [Fact]
