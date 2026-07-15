@@ -1,4 +1,4 @@
-![BetterMail - Local-first Microsoft 365 desktop client](asset-pack/03-github/bettermail-readme-banner.png)
+![BetterMail - Local-first desktop email. Less digging, more finding.](asset-pack/03-github/bettermail-readme-banner.png)
 
 ![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet)
 ![Avalonia 12](https://img.shields.io/badge/Avalonia-12-8B44AC)
