@@ -8,7 +8,9 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        VelopackApp.Build().Run();
+        VelopackApp.Build()
+            .SetAutoApplyOnStartup(true)
+            .Run();
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 

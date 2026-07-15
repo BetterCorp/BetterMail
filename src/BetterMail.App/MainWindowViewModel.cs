@@ -89,6 +89,15 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _isLoadingMailStatistics;
     private int _errorVersion;
 
+    internal string DataDirectory => _dataDirectory;
+    internal string MailListContextKey => IsSearchResultsView
+        ? $"search:{SearchText}"
+        : IsDraftsView
+            ? "drafts"
+            : _selectedFolder is null
+                ? "unified"
+                : $"{_selectedFolder.MailboxId}:{_selectedFolder.ProviderId}";
+
     public MainWindowViewModel(
         EncryptedMailStore? store,
         string dataDirectory,
@@ -388,6 +397,30 @@ public sealed class MainWindowViewModel : ViewModelBase
         ((AsyncCommand)ForwardCommand).Refresh();
         RefreshMailActionCommands();
     }
+
+    internal async Task<CachedMailPreview?> GetCachedPreviewAsync(
+        PreviewWindowSession session,
+        CancellationToken cancellationToken = default)
+    {
+        if (_store is null)
+        {
+            return null;
+        }
+
+        var selected = await _store.GetMessageAsync(
+            session.MailboxId,
+            session.ProviderMessageId,
+            cancellationToken);
+        if (selected is null)
+        {
+            return null;
+        }
+
+        var thread = BetterMail.Core.ConversationThread.ThreadIdentity(selected);
+        IReadOnlyList<MailMessage> messages = await _store.GetThreadMessagesAsync(thread, cancellationToken);
+        return new CachedMailPreview(selected, messages.Count == 0 ? [selected] : messages);
+    }
+
     public bool HasSelectedMessage => SelectedMessage is not null;
     public bool HasBlockedRemoteContent => HasSelectedMessage && !_allowRemoteContent && _renderer.HasRemoteImages(
         SelectedMessage?.Body,
@@ -3632,6 +3665,10 @@ internal sealed record AccountContactResult(
     MailAccount Account,
     IReadOnlyList<ContactInfo> Contacts,
     string? Error);
+
+internal sealed record CachedMailPreview(
+    MailMessage Selected,
+    IReadOnlyList<MailMessage> Messages);
 
 public sealed record GlobalSearchResult(
     string Category,

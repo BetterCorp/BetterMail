@@ -10,6 +10,9 @@
         MinWidth="320"
         MinHeight="480"
         WindowStartupLocation="CenterScreen">
+  <Window.Resources>
+    <app:AppInfo x:Key="AppInfo" />
+  </Window.Resources>
   <Window.Styles>
     <Style Selector="Button:focus-visible /template/ ContentPresenter">
       <Setter Property="BorderBrush" Value="{DynamicResource BetterMailAccentBrush}" />
@@ -812,6 +815,49 @@
         </Border>
         <ScrollViewer Grid.Row="1">
           <StackPanel x:Name="SettingsContent" MaxWidth="620" Margin="28" Spacing="24" HorizontalAlignment="Stretch">
+            <Border x:Name="AboutSection"
+                    Background="{DynamicResource BetterMailSelectionBrush}"
+                    BorderBrush="{DynamicResource BetterMailAccentBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="20"
+                    DataContext="{StaticResource AppInfo}"
+                    AutomationProperties.Name="About BetterMail, version information, license, source code, and releases">
+              <Grid ColumnDefinitions="Auto,*" ColumnSpacing="16">
+                <Image Source="/Assets/BetterMail.png"
+                       Width="72"
+                       Height="72"
+                       VerticalAlignment="Top"
+                       AutomationProperties.Name="BetterMail logo" />
+                <StackPanel Grid.Column="1" Spacing="5">
+                  <TextBlock Text="About BetterMail" FontSize="20" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding Version, StringFormat='Version {0}'}" />
+                  <TextBlock Text="Copyright &#x00A9; 2026 BetterCorp." Opacity="0.72" />
+                  <TextBlock Text="GNU Affero General Public License v3.0 only (AGPL-3.0-only)"
+                             TextWrapping="Wrap" />
+                  <WrapPanel Margin="0,7,0,0" Orientation="Horizontal">
+                    <Button Classes="command"
+                            Margin="0,0,6,6"
+                            Content="Source code"
+                            CommandParameter="{Binding RepositoryUri}"
+                            Click="OpenWorkspaceLinkClicked"
+                            AutomationProperties.Name="Open BetterMail source code" />
+                    <Button Classes="command"
+                            Margin="0,0,6,6"
+                            Content="Releases"
+                            CommandParameter="{Binding ReleasesUri}"
+                            Click="OpenWorkspaceLinkClicked"
+                            AutomationProperties.Name="Open BetterMail releases" />
+                    <Button Classes="command"
+                            Margin="0,0,6,6"
+                            Content="License"
+                            CommandParameter="{Binding LicenseUri}"
+                            Click="OpenWorkspaceLinkClicked"
+                            AutomationProperties.Name="Open BetterMail license" />
+                  </WrapPanel>
+                </StackPanel>
+              </Grid>
+            </Border>
             <StackPanel Spacing="9">
               <TextBlock Text="Appearance" FontSize="18" FontWeight="SemiBold" />
               <TextBlock Text="Theme" FontWeight="SemiBold" />

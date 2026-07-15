@@ -11,6 +11,7 @@ namespace BetterMail.App;
 public sealed partial class App : Application
 {
     private EncryptedMailStore? _store;
+    private AppUpdater? _updater;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
@@ -34,14 +35,12 @@ public sealed partial class App : Application
                 }
                 started = true;
                 await Task.Delay(50);
-                StartMainWindow(desktop, startupWindow, dataDirectory, preferences);
+                await StartMainWindowAsync(desktop, startupWindow, dataDirectory, preferences);
             };
             desktop.Exit += async (_, _) =>
             {
-                if (_store is not null)
-                {
-                    await _store.DisposeAsync();
-                }
+                _updater?.Dispose();
+                await DisposeStoreAsync();
             };
 
         }
@@ -49,7 +48,7 @@ public sealed partial class App : Application
         base.OnFrameworkInitializationCompleted();
     }
 
-    private void StartMainWindow(
+    private async Task StartMainWindowAsync(
         IClassicDesktopStyleApplicationLifetime desktop,
         StartupWindow startupWindow,
         string dataDirectory,
@@ -110,7 +109,27 @@ public sealed partial class App : Application
         desktop.MainWindow = mainWindow;
         mainWindow.Show();
         startupWindow.Close();
-        _ = viewModel.InitializeAsync();
+        await viewModel.InitializeAsync();
+        await mainWindow.RestorePreviewWindowsAsync();
+
+        _updater = AppUpdater.Create(async () =>
+        {
+            await DisposeStoreAsync();
+            desktop.Shutdown();
+        });
+        if (_updater is not null)
+        {
+            await _updater.StartAsync(mainWindow);
+        }
+    }
+
+    private async Task DisposeStoreAsync()
+    {
+        var store = Interlocked.Exchange(ref _store, null);
+        if (store is not null)
+        {
+            await store.DisposeAsync();
+        }
     }
 
     private void ApplyTheme(string mode)

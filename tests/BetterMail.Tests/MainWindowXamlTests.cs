@@ -5,6 +5,47 @@ namespace BetterMail.Tests;
 public sealed class MainWindowXamlTests
 {
     [Fact]
+    public void SettingsIncludesDiscoverableBrandedAboutInformation()
+    {
+        var root = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(root, "src", "BetterMail.App", "MainWindow.axaml"));
+        var about = Between(xaml, "x:Name=" + (char)34 + "AboutSection", "Text=" + (char)34 + "Appearance");
+        var appInfoSource = File.ReadAllText(Path.Combine(root, "src", "BetterMail.App", "AppInfo.cs"));
+
+        Assert.True(xaml.IndexOf("AboutSection", StringComparison.Ordinal) <
+            xaml.IndexOf("Text=" + (char)34 + "Appearance", StringComparison.Ordinal));
+        Assert.Contains("/Assets/BetterMail.png", about);
+        Assert.Contains("BetterMailSelectionBrush", about);
+        Assert.Contains("BetterMailAccentBrush", about);
+        Assert.Contains("{Binding Version", about);
+        Assert.Contains("AGPL-3.0-only", about);
+        Assert.Contains("BetterCorp", about);
+        Assert.Contains("RepositoryUri", about);
+        Assert.Contains("ReleasesUri", about);
+        Assert.Contains("LicenseUri", about);
+        Assert.Equal(3, Count(about, "Click=" + (char)34 + "OpenWorkspaceLinkClicked" + (char)34));
+        Assert.Contains("typeof(AppInfo).Assembly.GetName().Version", appInfoSource);
+        Assert.Equal(
+            typeof(BetterMail.App.AppInfo).Assembly.GetName().Version?.ToString(3) ?? "Unknown",
+            new BetterMail.App.AppInfo().Version);
+    }
+
+    [Fact]
+    public void PreviewWindowsRestoreFromLocalCacheAndSyncRestoresScrollAfterLayout()
+    {
+        var root = FindRepositoryRoot();
+        var app = File.ReadAllText(Path.Combine(root, "src", "BetterMail.App", "App.axaml.cs"));
+        var window = File.ReadAllText(Path.Combine(root, "src", "BetterMail.App", "MainWindow.axaml.cs"));
+        var viewModel = File.ReadAllText(Path.Combine(root, "src", "BetterMail.App", "MainWindowViewModel.cs"));
+
+        Assert.Contains("await mainWindow.RestorePreviewWindowsAsync()", app);
+        Assert.Contains("GetCachedPreviewAsync", viewModel);
+        Assert.Contains("new WindowSessionStore(_viewModel.DataDirectory)", window);
+        Assert.Contains("MessageList.LayoutUpdated +=", window);
+        Assert.DoesNotContain("DispatcherPriority.Loaded", window);
+    }
+
+    [Fact]
     public void ShellKeepsCanonicalActionsContextualAccountsAndAccessibleNavigation()
     {
         var xaml = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "BetterMail.App", "MainWindow.axaml"));

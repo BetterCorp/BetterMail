@@ -6,7 +6,6 @@ using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
-using Avalonia.Threading;
 using Avalonia.VisualTree;
 using BetterMail.Core;
 using System.Windows.Input;
@@ -23,6 +22,11 @@ public sealed partial class MainWindow : Window
     private Point _mailDragOrigin;
     private IReadOnlyList<MailMessage> _draggedMessages = [];
     private Vector? _messageScrollOffsetBeforeSync;
+    private string? _messageScrollContextBeforeSync;
+    private EventHandler? _messageScrollRestoreHandler;
+    private WindowSessionStore? _windowSessions;
+    private readonly Dictionary<PreviewWindowSession, Window> _previewWindows = [];
+    private bool _isClosing;
 
     public MainWindow()
     {
@@ -30,6 +34,11 @@ public sealed partial class MainWindow : Window
         DataContextChanged += (_, _) => BindViewModel(DataContext as MainWindowViewModel);
         SizeChanged += (_, args) => ApplyResponsiveLayout(args.NewSize.Width);
         KeyDown += MainWindowKeyDown;
+        Closing += (_, _) =>
+        {
+            _isClosing = true;
+            _windowSessions?.Save(_previewWindows.Keys);
+        };
         ApplyResponsiveLayout(Width);
     }
 
@@ -371,30 +380,74 @@ public sealed partial class MainWindow : Window
     private void CloseErrorClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
         _viewModel?.DismissError();
 
-    private void MessageRowDoubleTapped(object? sender, TappedEventArgs args)
+    private async void MessageRowDoubleTapped(object? sender, TappedEventArgs args)
     {
         if (sender is not Border { DataContext: MailMessage message } || _viewModel is null)
         {
             return;
         }
 
-        var identity = BetterMail.Core.ConversationThread.ThreadIdentity(message);
-        var previewViewModel = new ConversationThreadViewModel();
-        previewViewModel.Reconcile(
-            _viewModel.Messages.Where(candidate =>
-                BetterMail.Core.ConversationThread.ThreadIdentity(candidate) == identity),
-            message);
-        new Window
+        args.Handled = true;
+        var session = new PreviewWindowSession(message.MailboxId, message.ProviderId);
+        var preview = await _viewModel.GetCachedPreviewAsync(session);
+        if (preview is not null)
         {
-            Title = message.Subject,
+            ShowPreviewWindow(session, preview);
+        }
+    }
+
+    public async Task RestorePreviewWindowsAsync(CancellationToken cancellationToken = default)
+    {
+        if (_viewModel is null || _windowSessions is null)
+        {
+            return;
+        }
+
+        foreach (var session in _windowSessions.Load())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var preview = await _viewModel.GetCachedPreviewAsync(session, cancellationToken);
+            if (preview is not null)
+            {
+                ShowPreviewWindow(session, preview);
+            }
+        }
+
+        _windowSessions.Save(_previewWindows.Keys);
+    }
+
+    private void ShowPreviewWindow(PreviewWindowSession session, CachedMailPreview preview)
+    {
+        if (_previewWindows.TryGetValue(session, out var existing))
+        {
+            existing.Activate();
+            return;
+        }
+
+        var previewViewModel = new ConversationThreadViewModel();
+        previewViewModel.Reconcile(preview.Messages, preview.Selected);
+        var window = new Window
+        {
+            Title = preview.Selected.Subject,
             Icon = Icon,
             Width = 920,
             Height = 720,
             MinWidth = 420,
             MinHeight = 360,
             Content = new ConversationThreadView { DataContext = previewViewModel }
-        }.Show(this);
-        args.Handled = true;
+        };
+        _previewWindows[session] = window;
+        window.Closing += (_, _) =>
+        {
+            if (!_isClosing)
+            {
+                _previewWindows.Remove(session);
+                _windowSessions?.Save(_previewWindows.Keys);
+            }
+        };
+        window.Closed += (_, _) => _previewWindows.Remove(session);
+        window.Show(this);
+        _windowSessions?.Save(_previewWindows.Keys);
     }
 
     private void MessageReplyClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
@@ -482,6 +535,7 @@ public sealed partial class MainWindow : Window
         _viewModel = viewModel;
         if (_viewModel is not null)
         {
+            _windowSessions = new WindowSessionStore(_viewModel.DataDirectory);
             _viewModel.ComposeRequested += OpenCompose;
             _viewModel.SharedMailboxRequested += OpenSharedMailbox;
             _viewModel.SearchFocusRequested += FocusMailSearch;
@@ -497,20 +551,26 @@ public sealed partial class MainWindow : Window
         {
             if (_viewModel.IsSyncing)
             {
+                if (_messageScrollRestoreHandler is not null)
+                {
+                    MessageList.LayoutUpdated -= _messageScrollRestoreHandler;
+                    _messageScrollRestoreHandler = null;
+                }
                 _messageScrollOffsetBeforeSync = MessageList
                     .GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault()?.Offset;
+                _messageScrollContextBeforeSync = _viewModel.MailListContextKey;
             }
             else if (_messageScrollOffsetBeforeSync is { } offset)
             {
-                Dispatcher.UIThread.Post(() =>
+                if (_messageScrollContextBeforeSync == _viewModel.MailListContextKey)
                 {
-                    var scroll = MessageList.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
-                    if (scroll is not null)
-                    {
-                        scroll.Offset = offset;
-                    }
+                    RestoreMessageScrollAfterLayout(offset);
+                }
+                else
+                {
                     _messageScrollOffsetBeforeSync = null;
-                }, DispatcherPriority.Loaded);
+                    _messageScrollContextBeforeSync = null;
+                }
             }
         }
         if (args.PropertyName is nameof(MainWindowViewModel.ShowMailSurface)
@@ -519,6 +579,24 @@ public sealed partial class MainWindow : Window
         {
             UpdateMailPanes();
         }
+    }
+
+    private void RestoreMessageScrollAfterLayout(Vector offset)
+    {
+        _messageScrollRestoreHandler = (_, _) =>
+        {
+            MessageList.LayoutUpdated -= _messageScrollRestoreHandler;
+            _messageScrollRestoreHandler = null;
+            var scroll = MessageList.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+            if (scroll is not null)
+            {
+                scroll.Offset = offset;
+            }
+            _messageScrollOffsetBeforeSync = null;
+            _messageScrollContextBeforeSync = null;
+        };
+        MessageList.LayoutUpdated += _messageScrollRestoreHandler;
+        MessageList.InvalidateMeasure();
     }
 
     private void FocusMailSearch()

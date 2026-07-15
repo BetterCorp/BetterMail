@@ -286,6 +286,17 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         return QueryMessagesAsync(filters.Count == 0 ? "" : $"WHERE {string.Join(" AND ", filters)}", limit, cancellationToken, parameters.ToArray());
     }
 
+    public async Task<MailMessage?> GetMessageAsync(
+        string mailboxId,
+        string providerMessageId,
+        CancellationToken cancellationToken = default) =>
+        (await QueryMessagesAsync(
+            "WHERE mailbox_id = $mailbox AND provider_id = $provider",
+            1,
+            cancellationToken,
+            ("$mailbox", mailboxId),
+            ("$provider", providerMessageId)).ConfigureAwait(false)).SingleOrDefault();
+
     public Task<MailStoreCounts> GetMessageCountsAsync(
         string? mailboxId = null,
         CancellationToken cancellationToken = default) =>

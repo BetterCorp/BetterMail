@@ -129,6 +129,9 @@ public sealed class EncryptedMailStoreTests
                 Message(mailbox.Id, "two", "Ordinary message", "Nothing special here.")
             ], "cursor-1", false), cancellationToken);
 
+            Assert.Equal("one", (await store.GetMessageAsync(mailbox.Id, "one", cancellationToken))?.ProviderId);
+            Assert.Null(await store.GetMessageAsync(mailbox.Id, "missing", cancellationToken));
+
             var results = await store.SearchAsync("narwhal", cancellationToken: cancellationToken);
             Assert.Single(results);
             Assert.Equal("one", results[0].ProviderId);
