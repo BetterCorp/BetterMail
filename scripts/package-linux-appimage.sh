@@ -16,8 +16,9 @@ dotnet publish "$root/src/BetterMail.App/BetterMail.App.csproj" \
 
 install -m 755 "$root/scripts/AppRun" "$appdir/AppRun"
 install -m 644 "$root/packaging/BetterMail.desktop" "$appdir/BetterMail.desktop"
-install -m 644 "$root/packaging/BetterMail.svg" "$appdir/BetterMail.svg"
-install -m 644 "$root/packaging/BetterMail.svg" "$appdir/usr/share/icons/hicolor/scalable/apps/BetterMail.svg"
+icon="$root/asset-pack/04-desktop/linux/hicolor/scalable/apps/bettermail.svg"
+install -m 644 "$icon" "$appdir/BetterMail.svg"
+install -m 644 "$icon" "$appdir/usr/share/icons/hicolor/scalable/apps/BetterMail.svg"
 
 linuxdeploy --appdir "$appdir" --desktop-file "$appdir/BetterMail.desktop" --icon-file "$appdir/BetterMail.svg"
 ARCH=x86_64 appimagetool "$appdir" "$root/artifacts/BetterMail-x86_64.AppImage"

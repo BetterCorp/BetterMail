@@ -15,9 +15,9 @@ $publishDirectory = Join-Path $repositoryRoot "artifacts/publish/$Runtime"
 $releaseDirectory = Join-Path $repositoryRoot "$OutputDirectory/$Runtime"
 $mainExecutable = if ($Runtime -eq "win-x64") { "BetterMail.exe" } else { "BetterMail" }
 $icon = switch ($Runtime) {
-    "win-x64" { Join-Path $repositoryRoot "src/BetterMail.App/Assets/BetterMail.ico" }
-    "linux-x64" { Join-Path $repositoryRoot "packaging/BetterMail.png" }
-    "osx-arm64" { Join-Path $repositoryRoot "packaging/BetterMail.icns" }
+    "win-x64" { Join-Path $repositoryRoot "asset-pack/04-desktop/windows/BetterMail.ico" }
+    "linux-x64" { Join-Path $repositoryRoot "asset-pack/04-desktop/linux/hicolor/512x512/apps/bettermail.png" }
+    "osx-arm64" { Join-Path $repositoryRoot "asset-pack/04-desktop/macos/BetterMail.icns" }
 }
 
 Remove-Item -Recurse -Force $publishDirectory -ErrorAction SilentlyContinue

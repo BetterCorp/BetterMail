@@ -1,4 +1,4 @@
-![BetterMail - Local-first Microsoft 365 desktop client](docs/images/bettermail-readme-banner.png)
+![BetterMail - Local-first Microsoft 365 desktop client](asset-pack/03-github/bettermail-readme-banner.png)
 
 ![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet)
 ![Avalonia 12](https://img.shields.io/badge/Avalonia-12-8B44AC)
@@ -16,7 +16,7 @@ selecting messages and searching does not depend on Microsoft Graph round trips.
 > BetterMail is under active development. Keep independent backups of important data and
 > review changes before using it as your primary client.
 
-![BetterMail mail workspace with personal information redacted](docs/images/bettermail-desktop-redacted.png)
+![BetterMail mail workspace with personal information redacted](asset-pack/08-screen-shots/bettermail-desktop-redacted.png)
 
 *Microsoft 365 mail workspace. Personal and organizational information has been redacted.*
 
@@ -45,19 +45,19 @@ local store.
 
 ### Cross-account search
 
-![BetterMail cross-account search with sensitive results redacted](docs/images/bettermail-search-redacted.png)
+![BetterMail cross-account search with sensitive results redacted](asset-pack/08-screen-shots/bettermail-search-redacted.png)
 
 ### Calendar
 
-![BetterMail calendar with sensitive calendar details redacted](docs/images/bettermail-calendar-redacted.png)
+![BetterMail calendar with sensitive calendar details redacted](asset-pack/08-screen-shots/bettermail-calendar-redacted.png)
 
 ### People
 
-![BetterMail People workspace with sensitive contact details redacted](docs/images/bettermail-people-redacted.png)
+![BetterMail People workspace with sensitive contact details redacted](asset-pack/08-screen-shots/bettermail-people-redacted.png)
 
 ### OneDrive
 
-![BetterMail OneDrive workspace with sensitive file details redacted](docs/images/bettermail-drive-redacted.png)
+![BetterMail OneDrive workspace with sensitive file details redacted](asset-pack/08-screen-shots/bettermail-drive-redacted.png)
 
 ## Quick start
 
@@ -210,6 +210,7 @@ Removing an account deletes its local cache only. It does not delete Microsoft 3
 | `BetterMail.Core` | Provider contracts, encrypted local store, models, draft reconciliation, and sync engine |
 | `BetterMail.Microsoft365` | Microsoft identity, Graph requests, throttling, mail, and workspace adapters |
 | `BetterMail.Tests` | xUnit regression and behavior checks |
+| `asset-pack` | Canonical logos, desktop icons, web assets, banners, and redacted screenshots |
 
 ## Platform notes
 
