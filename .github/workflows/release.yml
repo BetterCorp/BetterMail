@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   version:
-    name: 1 - Validate release version
+    name: Validate release version
     runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -26,14 +26,14 @@ jobs:
           echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
   build:
-    name: 2-4 - Build all platforms
+    name: Build all platforms
     needs: version
-    uses: ./.github/workflows/build.yml
+    uses: ./.github/workflows/platform-builds.yml
     with:
       version: ${{ needs.version.outputs.version }}
 
   release:
-    name: 5 - Create GitHub release
+    name: Create GitHub release
     needs: [version, build]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:

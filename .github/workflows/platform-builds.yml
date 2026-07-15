@@ -1,0 +1,79 @@
+name: Platform builds
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Exact package version
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Build Windows
+    runs-on: blacksmith-2vcpu-windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.201
+          cache: true
+          cache-dependency-path: Directory.Packages.props
+      - run: dotnet tool restore
+      - name: Package Windows
+        shell: pwsh
+        run: ./scripts/package-release.ps1 -Runtime win-x64 -Version '${{ inputs.version }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BetterMail-windows-${{ inputs.version }}
+          path: artifacts/release/win-x64/*
+          if-no-files-found: error
+          retention-days: 14
+
+  linux:
+    name: Build Linux
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.201
+          cache: true
+          cache-dependency-path: Directory.Packages.props
+      - name: Restore
+        run: dotnet tool restore && dotnet restore BetterMail.slnx
+      - name: Test
+        run: dotnet test --solution BetterMail.slnx --configuration Release --no-restore
+      - name: Package Linux
+        shell: pwsh
+        run: ./scripts/package-release.ps1 -Runtime linux-x64 -Version '${{ inputs.version }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BetterMail-linux-${{ inputs.version }}
+          path: artifacts/release/linux-x64/*
+          if-no-files-found: error
+          retention-days: 14
+
+  macos:
+    name: Build macOS
+    runs-on: blacksmith-6vcpu-macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.201
+          cache: true
+          cache-dependency-path: Directory.Packages.props
+      - run: dotnet tool restore
+      - name: Package macOS
+        shell: pwsh
+        run: ./scripts/package-release.ps1 -Runtime osx-arm64 -Version '${{ inputs.version }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BetterMail-macos-${{ inputs.version }}
+          path: artifacts/release/osx-arm64/*
+          if-no-files-found: error
+          retention-days: 14

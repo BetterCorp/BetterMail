@@ -4,23 +4,13 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
-  workflow_call:
-    inputs:
-      version:
-        description: Exact package version supplied by the release workflow
-        required: false
-        type: string
-    outputs:
-      version:
-        description: Version embedded in the build artifacts
-        value: ${{ jobs.version.outputs.version }}
 
 permissions:
   contents: read
 
 jobs:
   version:
-    name: 1 - Resolve build version
+    name: Resolve build version
     runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -28,93 +18,21 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Use release version or derive master build version
+      - name: Derive master build version
         id: version
-        env:
-          REQUESTED_VERSION: ${{ inputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -n "$REQUESTED_VERSION" ]]; then
-            version="$REQUESTED_VERSION"
-          else
-            latest=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
-            base=${latest#v}
-            base=${base:-0.1.0}
-            version="${base}-build.${GITHUB_RUN_NUMBER}.$(date -u +%Y%m%d%H%M%S)"
-          fi
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid package version: $version" >&2
-            exit 1
-          fi
+          latest=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
+          base=${latest#v}
+          base=${base:-0.1.0}
+          version="${base}-build.${GITHUB_RUN_NUMBER}.$(date -u +%Y%m%d%H%M%S)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Building BetterMail $version"
 
-  build-windows:
-    name: 2 - Build Windows
+  platforms:
+    name: Build all platforms
     needs: version
-    runs-on: blacksmith-2vcpu-windows-2025
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.201
-          cache: true
-          cache-dependency-path: Directory.Packages.props
-      - run: dotnet tool restore
-      - name: Package Windows
-        shell: pwsh
-        run: ./scripts/package-release.ps1 -Runtime win-x64 -Version '${{ needs.version.outputs.version }}'
-      - uses: actions/upload-artifact@v4
-        with:
-          name: BetterMail-windows-${{ needs.version.outputs.version }}
-          path: artifacts/release/win-x64/*
-          if-no-files-found: error
-          retention-days: 14
-
-  build-linux:
-    name: 3 - Build Linux
-    needs: version
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.201
-          cache: true
-          cache-dependency-path: Directory.Packages.props
-      - name: Restore
-        run: dotnet tool restore && dotnet restore BetterMail.slnx
-      - name: Test
-        run: dotnet test --solution BetterMail.slnx --configuration Release --no-restore
-      - name: Package Linux
-        shell: pwsh
-        run: ./scripts/package-release.ps1 -Runtime linux-x64 -Version '${{ needs.version.outputs.version }}'
-      - uses: actions/upload-artifact@v4
-        with:
-          name: BetterMail-linux-${{ needs.version.outputs.version }}
-          path: artifacts/release/linux-x64/*
-          if-no-files-found: error
-          retention-days: 14
-
-  build-macos:
-    name: 4 - Build macOS
-    needs: version
-    runs-on: blacksmith-6vcpu-macos-15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.201
-          cache: true
-          cache-dependency-path: Directory.Packages.props
-      - run: dotnet tool restore
-      - name: Package macOS
-        shell: pwsh
-        run: ./scripts/package-release.ps1 -Runtime osx-arm64 -Version '${{ needs.version.outputs.version }}'
-      - uses: actions/upload-artifact@v4
-        with:
-          name: BetterMail-macos-${{ needs.version.outputs.version }}
-          path: artifacts/release/osx-arm64/*
-          if-no-files-found: error
-          retention-days: 14
+    uses: ./.github/workflows/platform-builds.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
