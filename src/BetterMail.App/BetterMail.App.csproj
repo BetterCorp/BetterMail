@@ -16,7 +16,9 @@
     <AvaloniaResource Include="Assets\**" />
     <AvaloniaResource Include="..\..\asset-pack\06-banners\website-header-1500x500.png"
                       Link="Assets\BetterMailSettingsBanner.png" />
-    <Content Include="Assets\BetterMail.ico" CopyToOutputDirectory="PreserveNewest" Link="BetterMail.ico" />
+    <Content Include="Assets\BetterMail.ico"
+             CopyToOutputDirectory="PreserveNewest"
+             Link="BetterMail.ico" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" />

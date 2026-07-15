@@ -177,6 +177,8 @@ public sealed class MainWindowXamlTests
 
         var project = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "BetterMail.App", "BetterMail.App.csproj"));
         Assert.Contains("CopyToOutputDirectory=" + (char)34 + "PreserveNewest" + (char)34, project);
+        var packaging = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "scripts", "package-release.ps1"));
+        Assert.Contains("Join-Path $publishDirectory " + (char)34 + "BetterMail.ico" + (char)34, packaging);
 
         Assert.Contains("ReauthenticateAccountCommand", accounts);
         Assert.Contains("AddSharedMailboxForAccountCommand", accounts);

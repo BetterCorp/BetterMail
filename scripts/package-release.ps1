@@ -36,6 +36,10 @@ dotnet publish (Join-Path $repositoryRoot "src/BetterMail.App/BetterMail.App.csp
 
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed for $Runtime" }
 
+if ($Runtime -eq "win-x64") {
+    Copy-Item -LiteralPath $icon -Destination (Join-Path $publishDirectory "BetterMail.ico")
+}
+
 if ($Runtime -ne "win-x64") {
     chmod +x (Join-Path $publishDirectory $mainExecutable)
 }
