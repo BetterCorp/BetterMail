@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -e
+here="$(dirname "$(readlink -f "$0")")"
+exec "$here/usr/bin/BetterMail" "$@"

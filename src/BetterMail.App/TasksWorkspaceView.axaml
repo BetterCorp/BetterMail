@@ -1,0 +1,341 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="using:BetterMail.App"
+             x:Class="BetterMail.App.TasksWorkspaceView">
+  <Grid x:Name="RootGrid" RowDefinitions="Auto,*" ColumnDefinitions="270,*">
+    <Border x:Name="TasksToolbar"
+            Grid.ColumnSpan="2"
+            Padding="12,8"
+            BorderBrush="{DynamicResource BetterMailDividerBrush}"
+            BorderThickness="0,0,0,1">
+      <Grid x:Name="ToolbarLayout"
+            ColumnDefinitions="*,Auto,Auto,Auto"
+            RowDefinitions="Auto"
+            ColumnSpacing="6"
+            RowSpacing="6">
+        <TextBox x:Name="SearchBox"
+                 Text="{Binding SearchText}"
+                 PlaceholderText="Search tasks, lists, and accounts"
+                 AutomationProperties.Name="Search tasks across linked accounts"
+                 TabIndex="300" />
+        <Button x:Name="SearchButton"
+                Grid.Column="1"
+                Classes="command"
+                Content="Search"
+                Command="{Binding SearchCommand}"
+                AutomationProperties.Name="Search tasks"
+                TabIndex="301" />
+        <Button x:Name="NewTaskButton"
+                Grid.Column="2"
+                Classes="primary"
+                Content="New task"
+                Command="{Binding NewTaskCommand}"
+                AutomationProperties.Name="Create task in selected list"
+                TabIndex="302" />
+        <Button x:Name="RefreshButton"
+                Grid.Column="3"
+                Classes="command"
+                Content="Refresh"
+                Command="{Binding RefreshCommand}"
+                AutomationProperties.Name="Refresh To Do"
+                TabIndex="303" />
+      </Grid>
+    </Border>
+
+    <Border x:Name="ListsPane"
+            Grid.Row="1"
+            Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+            BorderBrush="{DynamicResource BetterMailDividerBrush}"
+            BorderThickness="0,0,1,0">
+      <Grid RowDefinitions="Auto,Auto,*">
+        <Button x:Name="AllTasksButton"
+                Classes="listRow"
+                Classes.selected="{Binding IsAllTasksSelected}"
+                Margin="6"
+                Padding="10,8"
+                HorizontalContentAlignment="Left"
+                Command="{Binding ShowAllTasksCommand}"
+                Click="ShowTasksPane_Click"
+                AutomationProperties.Name="Show tasks from every linked account"
+                TabIndex="310">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="✓" />
+            <TextBlock Text="All tasks" FontWeight="SemiBold" />
+          </StackPanel>
+        </Button>
+        <Border Grid.Row="1"
+                Margin="8,0,8,6"
+                Padding="8,6"
+                Background="#18D9493D"
+                BorderBrush="#55D9493D"
+                BorderThickness="1"
+                IsVisible="{Binding HasPartialErrors}">
+          <TextBlock Text="{Binding PartialErrorText}"
+                     Foreground="#B3261E"
+                     TextWrapping="Wrap"
+                     AutomationProperties.LiveSetting="Polite" />
+        </Border>
+        <ScrollViewer Grid.Row="2">
+          <ItemsControl ItemsSource="{Binding AccountGroups}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="app:TaskAccountGroup">
+                <Expander IsExpanded="True"
+                          Margin="6,2"
+                          AutomationProperties.Name="{Binding Identity}">
+                  <Expander.Header>
+                    <StackPanel>
+                      <TextBlock Text="{Binding DisplayName}"
+                                 FontWeight="SemiBold"
+                                 TextTrimming="CharacterEllipsis" />
+                      <TextBlock Text="{Binding Identity}"
+                                 FontSize="11"
+                                 Opacity="0.62"
+                                 TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                  </Expander.Header>
+                  <StackPanel Margin="8,2,0,4">
+                    <TextBlock Text="{Binding Error}"
+                               Foreground="#B3261E"
+                               FontSize="11"
+                               TextWrapping="Wrap"
+                               IsVisible="{Binding HasError}" />
+                    <ItemsControl ItemsSource="{Binding Lists}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="app:TaskListChoice">
+                          <StackPanel>
+                            <Button Classes="listRow"
+                                    Classes.selected="{Binding IsSelected}"
+                                    Margin="0,1"
+                                    Padding="8,6"
+                                    HorizontalContentAlignment="Left"
+                                    Command="{Binding $parent[UserControl].DataContext.SelectListCommand}"
+                                    CommandParameter="{Binding}"
+                                    Click="ShowTasksPane_Click"
+                                    AutomationProperties.Name="{Binding Provenance}">
+                              <Grid ColumnDefinitions="*,Auto">
+                                <TextBlock Text="{Binding DisplayName}"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding Tasks.Count}"
+                                           Opacity="0.62"
+                                           Margin="8,0,0,0" />
+                              </Grid>
+                            </Button>
+                            <TextBlock Text="{Binding Error}"
+                                       Foreground="#B3261E"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       IsVisible="{Binding HasError}" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Expander>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Grid>
+    </Border>
+
+    <Grid x:Name="TasksPane"
+          Grid.Row="1"
+          Grid.Column="1"
+          RowDefinitions="Auto,*">
+      <Border Padding="16,10"
+              BorderBrush="{DynamicResource BetterMailDividerBrush}"
+              BorderThickness="0,0,0,1">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+          <Button x:Name="TasksBackButton"
+                  Classes="command"
+                  Content="Back"
+                  Click="TasksBackButton_Click"
+                  IsVisible="False"
+                  AutomationProperties.Name="Back to task lists"
+                  TabIndex="319" />
+          <StackPanel Grid.Column="1">
+            <TextBlock Text="{Binding Heading}" FontSize="21" FontWeight="SemiBold" />
+            <TextBlock Opacity="0.62">
+              <Run Text="{Binding OpenCount}" /><Run Text=" open · " /><Run Text="{Binding CompletedCount}" /><Run Text=" completed" />
+            </TextBlock>
+          </StackPanel>
+          <TextBlock Grid.Column="2"
+                     Text="{Binding SelectedList.Provenance}"
+                     Opacity="0.62"
+                     VerticalAlignment="Center"
+                     TextTrimming="CharacterEllipsis" />
+        </Grid>
+      </Border>
+
+      <ListBox Grid.Row="1"
+               ItemsSource="{Binding VisibleTasks}"
+               SelectedItem="{Binding SelectedTask}"
+               Background="Transparent"
+               BorderThickness="0"
+               AutomationProperties.Name="Tasks"
+               TabIndex="320">
+        <ListBox.ItemTemplate>
+          <DataTemplate x:DataType="app:TaskWorkspaceItem">
+            <Border Padding="10,8"
+                    BorderBrush="{DynamicResource BetterMailDividerBrush}"
+                    BorderThickness="0,0,0,1">
+              <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
+                <Button Classes="command"
+                        Content="{Binding CompletionGlyph}"
+                        Command="{Binding $parent[UserControl].DataContext.ToggleCompleteCommand}"
+                        CommandParameter="{Binding}"
+                        AutomationProperties.Name="{Binding CompletionAction}"
+                        AutomationProperties.HelpText="{Binding Provenance}" />
+                <StackPanel Grid.Column="1">
+                  <TextBlock Text="{Binding Info.Title}"
+                             FontWeight="SemiBold"
+                             TextTrimming="CharacterEllipsis" />
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <TextBlock Text="{Binding Info.DueText}"
+                               Foreground="#0F6CBD" />
+                    <TextBlock Text="{Binding Provenance}"
+                               Opacity="0.62"
+                               TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                </StackPanel>
+                <Button Grid.Column="2"
+                        Classes="command"
+                        Content="Edit"
+                        Command="{Binding $parent[UserControl].DataContext.EditTaskCommand}"
+                        CommandParameter="{Binding}"
+                        AutomationProperties.Name="Edit task" />
+                <Button Grid.Column="3"
+                        Classes="command"
+                        Content="Delete"
+                        Command="{Binding $parent[UserControl].DataContext.RequestDeleteItemCommand}"
+                        CommandParameter="{Binding}"
+                        AutomationProperties.Name="Delete task" />
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+
+      <ProgressBar Grid.Row="1"
+                   IsIndeterminate="True"
+                   Width="240"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   IsVisible="{Binding IsLoading}" />
+      <StackPanel Grid.Row="1"
+                  IsVisible="{Binding HasNoTasks}"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  Spacing="7">
+        <TextBlock Text="✓" FontSize="30" Opacity="0.35" HorizontalAlignment="Center" />
+        <TextBlock Text="No tasks to show" FontSize="17" FontWeight="SemiBold" />
+        <TextBlock Text="Select a list to add a task, or change your search." Opacity="0.62" />
+      </StackPanel>
+
+      <Border Grid.RowSpan="2"
+              ZIndex="10"
+              Margin="16"
+              Padding="12"
+              VerticalAlignment="Top"
+              Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+              BorderBrush="{DynamicResource BetterMailDividerBrush}"
+              BorderThickness="1"
+              IsVisible="{Binding IsDeleteConfirmationOpen}">
+        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+          <TextBlock Text="{Binding DeleteConfirmationText}"
+                     TextWrapping="Wrap"
+                     VerticalAlignment="Center" />
+          <Button Grid.Column="1"
+                  Content="Cancel"
+                  Command="{Binding CancelDeleteCommand}"
+                  AutomationProperties.Name="Cancel deleting task"
+                  TabIndex="321" />
+          <Button Grid.Column="2"
+                  Content="Delete"
+                  Command="{Binding ConfirmDeleteCommand}"
+                  AutomationProperties.Name="Confirm deleting task"
+                  TabIndex="322" />
+        </Grid>
+      </Border>
+    </Grid>
+
+    <Border x:Name="EditorOverlay"
+            Grid.RowSpan="2"
+            Grid.ColumnSpan="2"
+            ZIndex="30"
+            Background="#66000000"
+            IsVisible="{Binding IsEditorOpen}">
+      <Border x:Name="TaskEditor"
+              Width="520"
+              MaxWidth="680"
+              Padding="20"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center"
+              Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+              BorderBrush="{DynamicResource BetterMailDividerBrush}"
+              BorderThickness="1">
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="10">
+          <TextBlock Text="{Binding EditorHeading}" FontSize="21" FontWeight="SemiBold" />
+          <TextBox Grid.Row="1"
+                   Text="{Binding EditorTitle}"
+                   PlaceholderText="Task title"
+                   AutomationProperties.Name="Task title"
+                   TabIndex="330" />
+          <CheckBox Grid.Row="2"
+                    Content="Set a due date"
+                    IsChecked="{Binding EditorHasDueDate}"
+                    AutomationProperties.Name="Set task due date"
+                    TabIndex="331" />
+          <Grid Grid.Row="3"
+                ColumnDefinitions="*,*"
+                ColumnSpacing="8"
+                IsVisible="{Binding EditorHasDueDate}">
+            <CalendarDatePicker SelectedDate="{Binding EditorDueDate}"
+                                AutomationProperties.Name="Task due date"
+                                TabIndex="332" />
+            <TimePicker Grid.Column="1"
+                        SelectedTime="{Binding EditorDueTime}"
+                        ClockIdentifier="24HourClock"
+                        AutomationProperties.Name="Task due time"
+                        TabIndex="333" />
+          </Grid>
+          <Grid Grid.Row="4" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+            <TextBlock Text="{Binding EditorError}"
+                       Foreground="#B3261E"
+                       TextWrapping="Wrap"
+                       IsVisible="{Binding HasEditorError}"
+                       AutomationProperties.LiveSetting="Assertive" />
+            <Button Grid.Column="1"
+                    Content="Cancel"
+                    Command="{Binding CloseEditorCommand}"
+                    AutomationProperties.Name="Cancel editing task"
+                    TabIndex="334" />
+            <Button Grid.Column="2"
+                    Classes="primary"
+                    Content="Save"
+                    Command="{Binding SaveEditorCommand}"
+                    AutomationProperties.Name="Save task"
+                    TabIndex="335" />
+          </Grid>
+        </Grid>
+      </Border>
+    </Border>
+
+    <Border Grid.Row="1"
+            Grid.Column="1"
+            Margin="16"
+            Padding="10,7"
+            VerticalAlignment="Bottom"
+            ZIndex="40"
+            Background="#FDE7E9"
+            BorderBrush="#D13438"
+            BorderThickness="1"
+            IsVisible="{Binding HasOperationError}">
+      <TextBlock Text="{Binding OperationError}"
+                 Foreground="#A4262C"
+                 TextWrapping="Wrap"
+                 AutomationProperties.LiveSetting="Assertive" />
+    </Border>
+  </Grid>
+</UserControl>

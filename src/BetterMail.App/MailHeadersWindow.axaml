@@ -1,0 +1,36 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="BetterMail.App.MailHeadersWindow"
+        Title="Message headers" Icon="/Assets/BetterMail.ico"
+        Width="1100" Height="720" MinWidth="720" MinHeight="420"
+        WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="Auto,*">
+    <TextBlock Text="{Binding Subject}" FontSize="20" FontWeight="SemiBold"
+               TextTrimming="CharacterEllipsis" Margin="18,14" />
+    <Grid Grid.Row="1" ColumnDefinitions="*,*">
+      <Grid Margin="14,0,7,14" RowDefinitions="Auto,*">
+        <TextBlock Text="Raw headers" FontWeight="SemiBold" Margin="4,0,0,8" />
+        <TextBox Grid.Row="1" Text="{Binding RawText}" IsReadOnly="True" AcceptsReturn="True"
+                 TextWrapping="NoWrap" FontFamily="Consolas" FontSize="12"
+                 ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                 AutomationProperties.Name="Raw message headers" />
+      </Grid>
+      <Grid Grid.Column="1" Margin="7,0,14,14" RowDefinitions="Auto,*">
+        <TextBlock Text="What they mean" FontWeight="SemiBold" Margin="4,0,0,8" />
+        <ListBox Grid.Row="1" ItemsSource="{Binding FriendlyHeaders}"
+                 BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1"
+                 AutomationProperties.Name="Readable message headers">
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <StackPanel Margin="8,5" Spacing="3">
+                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                <SelectableTextBlock Text="{Binding Value}" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding Explanation}" FontSize="11" Opacity="0.62" TextWrapping="Wrap" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </Grid>
+    </Grid>
+  </Grid>
+</Window>

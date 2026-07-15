@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="src/BetterMail.Core/BetterMail.Core.csproj" />
+  <Project Path="src/BetterMail.Microsoft365/BetterMail.Microsoft365.csproj" />
+  <Project Path="src/BetterMail.App/BetterMail.App.csproj" />
+  <Project Path="tests/BetterMail.Tests/BetterMail.Tests.csproj" />
+</Solution>

@@ -1,0 +1,126 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:core="using:BetterMail.Core"
+        x:Class="BetterMail.App.ComposeWindow"
+        Title="New message" Icon="/Assets/BetterMail.ico"
+        Width="820" Height="720" MinWidth="560" MinHeight="500"
+        KeyDown="ComposeWindowKeyDown" WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto" Margin="18">
+    <Grid ColumnDefinitions="80,*" Margin="0,0,0,10">
+      <TextBlock Text="From" VerticalAlignment="Center" Opacity="0.7" />
+      <ComboBox Grid.Column="1" ItemsSource="{Binding Senders}" SelectedItem="{Binding SelectedSender}">
+        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding DisplayName}" /></DataTemplate></ComboBox.ItemTemplate>
+      </ComboBox>
+    </Grid>
+    <ItemsControl Grid.Row="1" ItemsSource="{Binding RecipientFields}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate>
+          <Grid ColumnDefinitions="80,*" Margin="0,0,0,8">
+            <TextBlock Text="{Binding Label}" VerticalAlignment="Center" Opacity="0.7" />
+            <Border Grid.Column="1" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1" CornerRadius="2" Padding="5,3">
+              <Grid>
+                <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
+                  <ItemsControl ItemsSource="{Binding Tokens}">
+                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Border Background="{DynamicResource BetterMailSelectionBrush}" CornerRadius="10" Padding="7,2" Margin="0,0,4,1">
+                          <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="{Binding Text}" ToolTip.Tip="{Binding Address}" />
+                            <Button Content="×" Padding="2,0" Background="Transparent" BorderThickness="0"
+                                    Command="{Binding $parent[ItemsControl].DataContext.RemoveTokenCommand}"
+                                    CommandParameter="{Binding}" AutomationProperties.Name="Remove recipient" />
+                          </StackPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <TextBox x:Name="RecipientQuery" Text="{Binding Query}" MinWidth="180" BorderThickness="0"
+                           Background="Transparent" PlaceholderText="Type a name or address"
+                           KeyDown="RecipientQueryKeyDown" />
+                </WrapPanel>
+                <Popup IsOpen="{Binding IsSearchOpen}" PlacementTarget="{Binding #RecipientQuery}" Placement="BottomEdgeAlignedLeft"
+                       IsLightDismissEnabled="True">
+                  <Border Width="420" MaxHeight="280" Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                          BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1" BoxShadow="0 6 18 0 #44000000">
+                    <ListBox ItemsSource="{Binding Suggestions}" Background="Transparent" BorderThickness="0">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate>
+                          <Button Classes="command" HorizontalContentAlignment="Stretch" Padding="10,7"
+                                  Command="{Binding $parent[ListBox].DataContext.AddSuggestionCommand}" CommandParameter="{Binding}">
+                            <StackPanel>
+                              <TextBlock Text="{Binding PrimaryText}" FontWeight="SemiBold" />
+                              <TextBlock Text="{Binding SecondaryText}" FontSize="11" Opacity="0.65" />
+                            </StackPanel>
+                          </Button>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
+                  </Border>
+                </Popup>
+              </Grid>
+            </Border>
+          </Grid>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+    <Grid Grid.Row="2" ColumnDefinitions="80,*" Margin="0,0,0,10">
+      <TextBlock Text="Subject" VerticalAlignment="Center" Opacity="0.7" />
+      <TextBox Grid.Column="1" Text="{Binding Subject}" />
+    </Grid>
+
+    <Grid Grid.Row="3" ColumnDefinitions="Auto,Auto,*" Margin="0,0,0,10">
+      <Button Classes="command" Content="Attach file" Click="AttachFileClicked" />
+      <Button Grid.Column="1" Classes="command" Content="Attach from OneDrive" Click="AttachDriveClicked" Margin="4,0,0,0" />
+      <ItemsControl Grid.Column="2" ItemsSource="{Binding Attachments}" Margin="10,0,0,0">
+        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="core:DraftAttachment">
+            <Border BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1" CornerRadius="2" Padding="7,4" Margin="0,0,6,2">
+              <StackPanel Orientation="Horizontal" Spacing="5">
+                <TextBlock Text="{Binding Name}" MaxWidth="170" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding SizeText}" Opacity="0.6" />
+                <Button Content="x" Padding="3,0" Background="Transparent"
+                        Command="{Binding $parent[Window].DataContext.RemoveAttachmentCommand}" CommandParameter="{Binding}" />
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </Grid>
+
+    <Border Grid.Row="4" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1" CornerRadius="2">
+      <Grid RowDefinitions="Auto,*">
+        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                      BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1">
+          <StackPanel Orientation="Horizontal" Spacing="2" Margin="5,4">
+            <Button Classes="command" Content="Undo" CommandParameter="undo" Click="FormatClicked" />
+            <Button Classes="command" Content="Redo" CommandParameter="redo" Click="FormatClicked" />
+            <Border Width="1" Height="22" Background="{DynamicResource BetterMailDividerBrush}" Margin="3,2" />
+            <Button Classes="command" Content="B" FontWeight="Bold" Width="34" CommandParameter="bold" Click="FormatClicked" ToolTip.Tip="Bold" />
+            <Button Classes="command" Content="I" FontStyle="Italic" Width="34" CommandParameter="italic" Click="FormatClicked" ToolTip.Tip="Italic" />
+            <Button Classes="command" Content="U" Width="34" CommandParameter="underline" Click="FormatClicked" ToolTip.Tip="Underline" />
+            <Button Classes="command" Content="Bullets" CommandParameter="insertUnorderedList" Click="FormatClicked" />
+            <Button Classes="command" Content="Numbering" CommandParameter="insertOrderedList" Click="FormatClicked" />
+            <Button Classes="command" Content="Quote" CommandParameter="formatBlock" Tag="blockquote" Click="FormatClicked" />
+            <Button Classes="command" Content="Link" CommandParameter="createLink" Click="FormatClicked" />
+            <Button Classes="command" Content="Clear format" CommandParameter="removeFormat" Click="FormatClicked" />
+          </StackPanel>
+        </ScrollViewer>
+        <NativeWebView x:Name="Composer" Grid.Row="1"
+                       NavigationCompleted="ComposerNavigationCompleted"
+                       WebMessageReceived="ComposerWebMessageReceived"
+                       AutomationProperties.Name="Rich text message body" />
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="5" ColumnDefinitions="*,Auto,Auto" Margin="0,14,0,0">
+      <StackPanel VerticalAlignment="Center">
+        <TextBlock Text="{Binding Error}" Foreground="#D9493D" TextWrapping="Wrap" />
+        <TextBlock Text="{Binding DraftStatus}" FontSize="11" Opacity="0.6" />
+      </StackPanel>
+      <Button Grid.Column="1" Content="Cancel" Click="CancelClicked" Margin="8,0" />
+      <Button Grid.Column="2" Classes="primary" Content="Send" Click="SendClicked" />
+    </Grid>
+  </Grid>
+</Window>

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=BetterMail
+Comment=Fast local-first Microsoft 365 mail
+Exec=BetterMail
+Icon=BetterMail
+Categories=Network;Email;
+Terminal=false

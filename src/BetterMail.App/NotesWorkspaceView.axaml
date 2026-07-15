@@ -1,0 +1,280 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="using:BetterMail.App"
+             x:Class="BetterMail.App.NotesWorkspaceView">
+  <Grid x:Name="RootGrid" RowDefinitions="Auto,*" ColumnDefinitions="300,*">
+    <Border x:Name="NotesToolbar" Grid.ColumnSpan="2"
+            Padding="12,8"
+            BorderBrush="{DynamicResource BetterMailDividerBrush}"
+            BorderThickness="0,0,0,1">
+      <Grid x:Name="ToolbarLayout"
+            ColumnDefinitions="*,Auto,Auto,Auto,Auto"
+            RowDefinitions="Auto"
+            ColumnSpacing="6"
+            RowSpacing="6">
+        <TextBox x:Name="SearchBox"
+                 Text="{Binding SearchText}"
+                 PlaceholderText="Search all linked OneNote accounts"
+                 AutomationProperties.Name="Search OneNote pages across accounts"
+                 TabIndex="200" />
+        <Button x:Name="SearchButton" Grid.Column="1" Classes="command"
+                Content="Search"
+                Command="{Binding SearchCommand}"
+                AutomationProperties.Name="Search OneNote"
+                TabIndex="201" />
+        <Button x:Name="NewPageButton" Grid.Column="2" Classes="primary"
+                Content="New page"
+                Command="{Binding NewPageCommand}"
+                AutomationProperties.Name="Create page in selected section"
+                TabIndex="202" />
+        <Button x:Name="EditPageButton" Grid.Column="3" Classes="command"
+                Content="Edit"
+                Command="{Binding EditPageCommand}"
+                AutomationProperties.Name="Edit selected OneNote page"
+                TabIndex="203" />
+        <Button x:Name="RefreshButton" Grid.Column="4" Classes="command"
+                Content="Refresh"
+                Command="{Binding RefreshCommand}"
+                AutomationProperties.Name="Refresh selected OneNote item"
+                TabIndex="204" />
+      </Grid>
+    </Border>
+
+    <Border x:Name="NavigationPane"
+            Grid.Row="1"
+            BorderBrush="{DynamicResource BetterMailDividerBrush}"
+            BorderThickness="0,0,1,0"
+            Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
+      <Grid RowDefinitions="Auto,*">
+        <Border Margin="8"
+                Padding="8,6"
+                Background="#18D9493D"
+                BorderBrush="#55D9493D"
+                BorderThickness="1"
+                IsVisible="{Binding HasPartialErrors}">
+          <TextBlock Text="{Binding PartialErrorText}"
+                     Foreground="#B3261E"
+                     TextWrapping="Wrap"
+                     AutomationProperties.LiveSetting="Polite" />
+        </Border>
+        <TreeView x:Name="NotesTree" Grid.Row="1"
+                  ItemsSource="{Binding VisibleRoots}"
+                  SelectedItem="{Binding SelectedNode}"
+                  Background="Transparent"
+                  BorderThickness="0"
+                  Margin="4"
+                  AutomationProperties.Name="OneNote account notebook section and page tree"
+                  TabIndex="210">
+          <TreeView.Styles>
+            <Style Selector="TreeViewItem">
+              <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+            </Style>
+          </TreeView.Styles>
+          <TreeView.DataTemplates>
+            <TreeDataTemplate x:DataType="app:NoteTreeNode" ItemsSource="{Binding Children}">
+              <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="18,*">
+                <TextBlock Text="{Binding Glyph}" Opacity="0.7" VerticalAlignment="Center" />
+                <StackPanel Grid.Column="1">
+                  <TextBlock Text="{Binding DisplayName}"
+                             FontWeight="SemiBold"
+                             TextTrimming="CharacterEllipsis"
+                             AutomationProperties.Name="{Binding AutomationName}" />
+                  <TextBlock Text="{Binding SecondaryText}"
+                             FontSize="11"
+                             Opacity="0.62"
+                             TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <TextBlock Grid.Row="1" Grid.Column="1"
+                           Text="{Binding Error}"
+                           Foreground="#B3261E"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           IsVisible="{Binding HasError}" />
+              </Grid>
+            </TreeDataTemplate>
+          </TreeView.DataTemplates>
+        </TreeView>
+      </Grid>
+    </Border>
+
+    <Grid x:Name="ReadingPane" Grid.Row="1" Grid.Column="1" RowDefinitions="Auto,Auto,*">
+      <Border Padding="16,10"
+              BorderBrush="{DynamicResource BetterMailDividerBrush}"
+              BorderThickness="0,0,0,1"
+              IsVisible="{Binding HasSelectedPage}">
+        <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="6">
+          <Button x:Name="NotesBackButton"
+                  Classes="command"
+                  Content="Back"
+                  Click="NotesBackButton_Click"
+                  IsVisible="False"
+                  AutomationProperties.Name="Back to OneNote notebooks"
+                  TabIndex="219" />
+          <StackPanel Grid.Column="1">
+            <TextBlock Text="{Binding SelectedPage.Title}"
+                       FontSize="20"
+                       FontWeight="SemiBold"
+                       TextTrimming="CharacterEllipsis" />
+            <TextBlock Text="{Binding SelectedNode.Account.EmailAddress}"
+                       Opacity="0.62"
+                       TextTrimming="CharacterEllipsis" />
+          </StackPanel>
+          <Button Grid.Column="2"
+                  Classes="command"
+                  Content="Edit"
+                  Command="{Binding EditPageCommand}"
+                  AutomationProperties.Name="Edit this OneNote page"
+                  TabIndex="220" />
+          <Button Grid.Column="3"
+                  Classes="command"
+                  Content="Delete"
+                  Command="{Binding RequestDeleteCommand}"
+                  AutomationProperties.Name="Delete this OneNote page"
+                  TabIndex="221" />
+        </Grid>
+      </Border>
+
+      <Border Grid.Row="1"
+              Padding="10,6"
+              Background="#FFF4CE"
+              BorderBrush="#E5C365"
+              BorderThickness="0,0,0,1"
+              IsVisible="{Binding HasBlockedRemoteContent}">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <TextBlock Text="External pictures are blocked for this page."
+                     Foreground="#5C4B00"
+                     VerticalAlignment="Center" />
+          <Button Grid.Column="1"
+                  Content="Load pictures"
+                  Command="{Binding AllowRemoteContentCommand}"
+                  AutomationProperties.Name="Load external pictures for this OneNote page"
+                  TabIndex="222" />
+        </Grid>
+      </Border>
+
+      <NativeWebView Grid.Row="2"
+                     Source="{Binding PageBodyUri}"
+                     IsVisible="{Binding HasSelectedPage}"
+                     NavigationStarted="PageWebView_NavigationStarted"
+                     AutomationProperties.Name="OneNote page content" />
+      <ProgressBar Grid.Row="2"
+                   IsIndeterminate="True"
+                   Width="240"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   IsVisible="{Binding IsLoadingPage}" />
+      <StackPanel Grid.Row="2"
+                  IsVisible="{Binding HasNoSelectedPage}"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  Spacing="8">
+        <TextBlock Text="▤" FontSize="30" Opacity="0.35" HorizontalAlignment="Center" />
+        <TextBlock Text="Select a OneNote page" FontSize="17" FontWeight="SemiBold" />
+        <TextBlock Text="Expand an account, notebook, and section to browse pages." Opacity="0.62" />
+      </StackPanel>
+
+      <Border Grid.RowSpan="3"
+              ZIndex="10"
+              Margin="16"
+              Padding="12"
+              VerticalAlignment="Top"
+              Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+              BorderBrush="{DynamicResource BetterMailDividerBrush}"
+              BorderThickness="1"
+              IsVisible="{Binding IsDeleteConfirmationOpen}">
+        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+          <TextBlock Text="{Binding DeleteConfirmationText}"
+                     TextWrapping="Wrap"
+                     VerticalAlignment="Center" />
+          <Button Grid.Column="1"
+                  Content="Cancel"
+                  Command="{Binding CancelDeleteCommand}"
+                  AutomationProperties.Name="Cancel deleting OneNote page"
+                  TabIndex="223" />
+          <Button Grid.Column="2"
+                  Content="Delete"
+                  Command="{Binding ConfirmDeleteCommand}"
+                  AutomationProperties.Name="Confirm deleting OneNote page"
+                  TabIndex="224" />
+        </Grid>
+      </Border>
+    </Grid>
+
+    <Border x:Name="EditorOverlay"
+            Grid.RowSpan="2"
+            Grid.ColumnSpan="2"
+            ZIndex="30"
+            Background="#66000000"
+            IsVisible="{Binding IsEditorOpen}">
+      <Border x:Name="PageEditor"
+              Width="560"
+              MaxWidth="760"
+              MaxHeight="720"
+              Padding="20"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center"
+              Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+              BorderBrush="{DynamicResource BetterMailDividerBrush}"
+              BorderThickness="1">
+        <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,Auto" RowSpacing="10">
+          <TextBlock Text="{Binding EditorHeading}" FontSize="21" FontWeight="SemiBold" />
+          <TextBox Grid.Row="1"
+                   Text="{Binding EditorTitle}"
+                   PlaceholderText="Page title"
+                   AutomationProperties.Name="OneNote page title"
+                   TabIndex="230" />
+          <TextBlock Grid.Row="2"
+                     Text="{Binding EditorBodyLabel}"
+                     FontWeight="SemiBold" />
+          <TextBox Grid.Row="3"
+                   Text="{Binding EditorBody}"
+                   AcceptsReturn="True"
+                   TextWrapping="Wrap"
+                   MinHeight="220"
+                   VerticalContentAlignment="Top"
+                   AutomationProperties.Name="{Binding EditorBodyLabel}"
+                   TabIndex="231" />
+          <TextBlock Grid.Row="4"
+                     Text="{Binding EditorHelpText}"
+                     Opacity="0.62"
+                     TextWrapping="Wrap" />
+          <Grid Grid.Row="5" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+            <TextBlock Text="{Binding EditorError}"
+                       Foreground="#B3261E"
+                       TextWrapping="Wrap"
+                       IsVisible="{Binding HasEditorError}"
+                       AutomationProperties.LiveSetting="Assertive" />
+            <Button Grid.Column="1"
+                    Content="Cancel"
+                    Command="{Binding CloseEditorCommand}"
+                    AutomationProperties.Name="Cancel editing OneNote page"
+                    TabIndex="232" />
+            <Button Grid.Column="2"
+                    Classes="primary"
+                    Content="Save"
+                    Command="{Binding SaveEditorCommand}"
+                    AutomationProperties.Name="Save OneNote page"
+                    TabIndex="233" />
+          </Grid>
+        </Grid>
+      </Border>
+    </Border>
+
+    <Border Grid.Row="1"
+            Grid.Column="1"
+            Margin="16"
+            Padding="10,7"
+            VerticalAlignment="Bottom"
+            HorizontalAlignment="Stretch"
+            ZIndex="40"
+            Background="#FDE7E9"
+            BorderBrush="#D13438"
+            BorderThickness="1"
+            IsVisible="{Binding HasOperationError}">
+      <TextBlock Text="{Binding OperationError}"
+                 Foreground="#A4262C"
+                 TextWrapping="Wrap"
+                 AutomationProperties.LiveSetting="Assertive" />
+    </Border>
+  </Grid>
+</UserControl>

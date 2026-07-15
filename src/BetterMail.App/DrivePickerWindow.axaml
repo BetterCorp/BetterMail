@@ -1,0 +1,98 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="using:BetterMail.App"
+        x:Class="BetterMail.App.DrivePickerWindow"
+        Title="Attach from OneDrive"
+        Icon="/Assets/BetterMail.ico"
+        Width="920" Height="650" MinWidth="620" MinHeight="440"
+        WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="Auto,Auto,*,Auto">
+    <Grid Margin="14,12,14,10" ColumnDefinitions="*,Auto,Auto,220" ColumnSpacing="6">
+      <TextBox x:Name="SearchBox" Text="{Binding SearchQuery}" PlaceholderText="Search all linked drives"
+               KeyDown="SearchKeyDown" AutomationProperties.Name="Search OneDrive files" />
+      <Button Grid.Column="1" Content="Search" Command="{Binding SearchCommand}" />
+      <Button Grid.Column="2" Content="Clear" Command="{Binding ClearSearchCommand}" />
+      <ComboBox Grid.Column="3" ItemsSource="{Binding AccountFilters}" SelectedItem="{Binding SelectedAccountFilter}">
+        <ComboBox.ItemTemplate>
+          <DataTemplate x:DataType="app:DriveAccountFilter">
+            <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+          </DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+    </Grid>
+
+    <Border Grid.Row="1" IsVisible="{Binding HasLoadIssues}" Background="#18D13438" Padding="14,6">
+      <ItemsControl ItemsSource="{Binding LoadIssues}">
+        <ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" Foreground="#D13438" /></DataTemplate></ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </Border>
+
+    <Grid Grid.Row="2" ColumnDefinitions="260,*">
+      <Border BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,1,0"
+              Background="{DynamicResource SystemControlBackgroundAltHighBrush}" Padding="8">
+        <Grid RowDefinitions="Auto,*">
+          <TextBlock Text="OneDrive folders" FontSize="15" FontWeight="SemiBold" Margin="5,4,5,9" />
+          <TreeView Grid.Row="1" ItemsSource="{Binding Roots}" Classes="workspaceTree">
+            <TreeView.Styles>
+              <Style Selector="TreeViewItem"><Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" /></Style>
+            </TreeView.Styles>
+            <TreeView.ItemTemplate>
+              <TreeDataTemplate DataType="{x:Type app:DriveTreeNode}" ItemsSource="{Binding Children}">
+                <Button Classes="workspaceItem" Padding="5,4" HorizontalContentAlignment="Stretch"
+                        Command="{Binding $parent[Window].DataContext.ToggleNodeCommand}" CommandParameter="{Binding}"
+                        IsEnabled="{Binding !IsPlaceholder}">
+                  <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+                </Button>
+              </TreeDataTemplate>
+            </TreeView.ItemTemplate>
+          </TreeView>
+        </Grid>
+      </Border>
+
+      <Grid Grid.Column="1">
+        <Grid IsVisible="{Binding !IsSearchMode}" RowDefinitions="Auto,*">
+          <TextBlock Text="{Binding DirectoryTitle}" FontSize="18" FontWeight="SemiBold" Margin="14,12" TextTrimming="CharacterEllipsis" />
+          <ListBox Grid.Row="1" ItemsSource="{Binding CurrentItems}" SelectedItem="{Binding SelectedItem}"
+                   Classes="workspaceList" DoubleTapped="FileDoubleTapped">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="app:DriveItemEntry">
+                <Button Classes="workspaceItem" Padding="12,8" HorizontalContentAlignment="Stretch"
+                        Command="{Binding $parent[Window].DataContext.OpenItemCommand}" CommandParameter="{Binding}">
+                  <Grid ColumnDefinitions="*,160,Auto">
+                    <TextBlock Text="{Binding Item.Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="1" Text="{Binding TypeText}" Opacity="0.65" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="2" Text="{Binding Item.SizeText}" Opacity="0.65" />
+                  </Grid>
+                </Button>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Grid>
+
+        <Grid IsVisible="{Binding IsSearchMode}" RowDefinitions="Auto,*">
+          <TextBlock Text="Search results" FontSize="18" FontWeight="SemiBold" Margin="14,12" />
+          <ListBox Grid.Row="1" ItemsSource="{Binding SearchResults}" SelectedItem="{Binding SelectedSearchResult}"
+                   Classes="workspaceList" DoubleTapped="FileDoubleTapped">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="app:DriveSearchResult">
+                <Grid ColumnDefinitions="*,Auto" Margin="12,8">
+                  <StackPanel>
+                    <TextBlock Text="{Binding File.Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding SourceText}" FontSize="11" Opacity="0.65" TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                  <TextBlock Grid.Column="1" Text="{Binding File.SizeText}" VerticalAlignment="Center" Opacity="0.65" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Grid>
+      </Grid>
+    </Grid>
+
+    <Grid Grid.Row="3" ColumnDefinitions="*,Auto,Auto" Margin="14,10">
+      <TextBlock Text="{Binding OperationError}" Foreground="#D13438" TextWrapping="Wrap" VerticalAlignment="Center" />
+      <Button Grid.Column="1" Content="Cancel" Click="CancelClicked" Margin="8,0" />
+      <Button Grid.Column="2" Classes="primary" Content="Attach" Command="{Binding ChooseItemCommand}" />
+    </Grid>
+  </Grid>
+</Window>

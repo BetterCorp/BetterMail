@@ -1,0 +1,31 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:core="using:BetterMail.Core"
+        x:Class="BetterMail.App.SharedMailboxWindow"
+        Title="Add shared mailbox"
+        Icon="/Assets/BetterMail.ico"
+        Width="520"
+        Height="330"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="Auto,Auto,Auto,Auto,*" Margin="22">
+    <TextBlock Text="Add shared mailbox" FontSize="24" FontWeight="SemiBold" />
+    <StackPanel Grid.Row="1" Margin="0,18,0,0" Spacing="6">
+      <TextBlock Text="Microsoft account" Opacity="0.7" />
+      <TextBlock Text="{Binding AccountAddress}" FontWeight="SemiBold" />
+    </StackPanel>
+    <StackPanel Grid.Row="2" Margin="0,14,0,0" Spacing="6">
+      <TextBlock Text="Shared mailbox address" Opacity="0.7" />
+      <TextBox Text="{Binding Address}" PlaceholderText="support@example.com" />
+    </StackPanel>
+    <StackPanel Grid.Row="3" Margin="0,14,0,0" Spacing="6">
+      <TextBlock Text="Sending permission granted by your administrator" Opacity="0.7" />
+      <ComboBox ItemsSource="{Binding PermissionModes}" SelectedItem="{Binding SelectedPermissionMode}" />
+    </StackPanel>
+    <Grid Grid.Row="4" ColumnDefinitions="*,Auto,Auto" VerticalAlignment="Bottom" Margin="0,18,0,0">
+      <TextBlock Text="{Binding Error}" Foreground="#D9493D" TextWrapping="Wrap" VerticalAlignment="Center" />
+      <Button Grid.Column="1" Content="Cancel" Click="CancelClicked" Margin="8,0" />
+      <Button Grid.Column="2" Classes="primary" Content="Validate and add" Command="{Binding AddCommand}" />
+    </Grid>
+  </Grid>
+</Window>

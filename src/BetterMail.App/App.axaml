@@ -1,0 +1,158 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="BetterMail.App.App"
+             RequestedThemeVariant="Default">
+  <Application.Resources>
+    <ResourceDictionary>
+      <Color x:Key="BetterMailAccentColor">#0F6CBD</Color>
+      <SolidColorBrush x:Key="BetterMailAccentBrush" Color="{DynamicResource BetterMailAccentColor}" />
+      <SolidColorBrush x:Key="BetterMailHeaderBrush" Color="#0F6CBD" />
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="BetterMailSelectionBrush" Color="#E5F1FB" />
+          <SolidColorBrush x:Key="BetterMailHoverBrush" Color="#F1F1F1" />
+          <SolidColorBrush x:Key="BetterMailDividerBrush" Color="#E1E1E1" />
+          <SolidColorBrush x:Key="BetterMailSearchBackgroundBrush" Color="#EAF3FA" />
+          <SolidColorBrush x:Key="BetterMailSearchForegroundBrush" Color="#1B1B1B" />
+          <SolidColorBrush x:Key="BetterMailNeutralItemBrush" Color="#F5F5F5" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="BetterMailSelectionBrush" Color="#173A55" />
+          <SolidColorBrush x:Key="BetterMailHoverBrush" Color="#292929" />
+          <SolidColorBrush x:Key="BetterMailDividerBrush" Color="#3A3A3A" />
+          <SolidColorBrush x:Key="BetterMailSearchBackgroundBrush" Color="#253746" />
+          <SolidColorBrush x:Key="BetterMailSearchForegroundBrush" Color="#F5F5F5" />
+          <SolidColorBrush x:Key="BetterMailNeutralItemBrush" Color="#252525" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+  <Application.Styles>
+    <FluentTheme />
+    <Style Selector="Window">
+      <Setter Property="FontFamily" Value="Segoe UI, Inter" />
+      <Setter Property="FontSize" Value="13" />
+    </Style>
+    <Style Selector="Button.primary">
+      <Setter Property="Background" Value="{DynamicResource BetterMailAccentBrush}" />
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="CornerRadius" Value="3" />
+      <Setter Property="Padding" Value="12,6" />
+      <Setter Property="MinHeight" Value="32" />
+    </Style>
+    <Style Selector="Button.rail">
+      <Setter Property="Width" Value="42" />
+      <Setter Property="Height" Value="42" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+      <Setter Property="CornerRadius" Value="3" />
+      <Setter Property="FontSize" Value="18" />
+      <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="Button.rail.selected">
+      <Setter Property="Background" Value="{DynamicResource BetterMailSelectionBrush}" />
+      <Setter Property="Foreground" Value="#0F6CBD" />
+    </Style>
+    <Style Selector="Button.rail:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource BetterMailHoverBrush}" />
+    </Style>
+    <Style Selector="Button.folder">
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+      <Setter Property="CornerRadius" Value="2" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="8,5" />
+      <Setter Property="MinHeight" Value="30" />
+    </Style>
+    <Style Selector="Button.folder:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource BetterMailHoverBrush}" />
+    </Style>
+    <Style Selector="Button.command">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+      <Setter Property="CornerRadius" Value="3" />
+      <Setter Property="Padding" Value="9,5" />
+      <Setter Property="MinHeight" Value="30" />
+    </Style>
+    <Style Selector="Button.command:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource BetterMailHoverBrush}" />
+    </Style>
+    <Style Selector="Button.command:focus /template/ ContentPresenter">
+      <Setter Property="BorderBrush" Value="{DynamicResource BetterMailAccentBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Button.searchResult">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="Padding" Value="16,7" />
+    </Style>
+    <Style Selector="Button.searchResult:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource BetterMailHoverBrush}" />
+    </Style>
+    <Style Selector="Button.calendarEvent">
+      <Setter Property="Background" Value="{DynamicResource BetterMailNeutralItemBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="2" />
+    </Style>
+    <Style Selector="Button.calendarEvent:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource BetterMailHoverBrush}" />
+    </Style>
+    <Style Selector="Button.workspaceItem">
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="0" />
+    </Style>
+    <Style Selector="Button.workspaceItem:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.workspaceItem:focus /template/ ContentPresenter">
+      <Setter Property="BorderBrush" Value="{DynamicResource BetterMailAccentBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="ListBox.workspaceList ListBoxItem">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="ListBox.workspaceList ListBoxItem:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource BetterMailHoverBrush}" />
+    </Style>
+    <Style Selector="ListBox.workspaceList ListBoxItem:selected /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource BetterMailSelectionBrush}" />
+    </Style>
+    <Style Selector="ListBox.workspaceList ListBoxItem:focus /template/ ContentPresenter">
+      <Setter Property="BorderBrush" Value="{DynamicResource BetterMailAccentBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="TreeView.workspaceTree TreeViewItem:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource BetterMailHoverBrush}" />
+    </Style>
+    <Style Selector="TreeView.workspaceTree TreeViewItem:selected /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource BetterMailSelectionBrush}" />
+    </Style>
+    <Style Selector="TreeView.workspaceTree TreeViewItem:focus /template/ ContentPresenter">
+      <Setter Property="BorderBrush" Value="{DynamicResource BetterMailAccentBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="TextBox.search">
+      <Setter Property="CornerRadius" Value="3" />
+      <Setter Property="Padding" Value="12,6" />
+      <Setter Property="MinHeight" Value="32" />
+      <Setter Property="Background" Value="{DynamicResource BetterMailSearchBackgroundBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource BetterMailSearchForegroundBrush}" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="TextBox.moduleSearch">
+      <Setter Property="CornerRadius" Value="3" />
+      <Setter Property="Padding" Value="10,5" />
+      <Setter Property="MinHeight" Value="30" />
+    </Style>
+  </Application.Styles>
+</Application>

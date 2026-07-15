@@ -1,0 +1,184 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="using:BetterMail.App"
+             x:Class="BetterMail.App.DriveWorkspaceView"
+             Focusable="True">
+  <Grid x:Name="RootGrid" RowDefinitions="Auto,Auto,*" ColumnDefinitions="260,*">
+    <Border x:Name="DriveToolbar" Grid.ColumnSpan="2" Padding="10,8"
+            BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1">
+      <Grid x:Name="SearchGrid" ColumnDefinitions="*,Auto,Auto,Auto">
+        <TextBox x:Name="SearchBox" Grid.Column="0" Text="{Binding SearchQuery}"
+                 PlaceholderText="Search all linked drives"
+                 AutomationProperties.Name="Search every linked drive"
+                 TabIndex="300" />
+        <Button x:Name="SearchButton" Grid.Column="1" Content="Search" Command="{Binding SearchCommand}"
+                AutomationProperties.Name="Search drives" TabIndex="301" Margin="6,0,0,0" />
+        <Button x:Name="ClearSearchButton" Grid.Column="2" Content="Clear" Command="{Binding ClearSearchCommand}"
+                AutomationProperties.Name="Clear drive search" TabIndex="302" Margin="4,0,0,0" />
+        <ComboBox x:Name="AccountFilter" Grid.Column="3" ItemsSource="{Binding AccountFilters}"
+                  SelectedItem="{Binding SelectedAccountFilter}"
+                  HorizontalAlignment="Right" MinWidth="190"
+                  AutomationProperties.Name="Filter drive search by account"
+                  TabIndex="303">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="app:DriveAccountFilter">
+              <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+      </Grid>
+    </Border>
+
+    <Border x:Name="IssueBar" Grid.Row="1" Grid.ColumnSpan="2"
+            IsVisible="{Binding HasLoadIssues}"
+            Background="#18D13438" Padding="10,6">
+      <ItemsControl ItemsSource="{Binding LoadIssues}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate>
+            <TextBlock Text="{Binding}" Foreground="#D13438" TextWrapping="Wrap" FontSize="11" />
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </Border>
+
+    <Border x:Name="DriveTreePane" Grid.Row="2"
+            BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,1,0"
+            Background="{DynamicResource SystemControlBackgroundAltHighBrush}" Padding="8">
+      <Grid RowDefinitions="Auto,*,Auto">
+        <TextBlock Text="Drives" FontSize="15" FontWeight="SemiBold" Margin="4,3,4,8" />
+        <TreeView x:Name="DriveTree" Grid.Row="1" ItemsSource="{Binding Roots}" Classes="workspaceTree"
+                  AutomationProperties.Name="Linked account folder tree"
+                  TabIndex="310">
+          <TreeView.Styles>
+            <Style Selector="TreeViewItem">
+              <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+            </Style>
+          </TreeView.Styles>
+          <TreeView.ItemTemplate>
+            <TreeDataTemplate DataType="{x:Type app:DriveTreeNode}" ItemsSource="{Binding Children}">
+              <Button Classes="command" Padding="3,2"
+                      HorizontalContentAlignment="Stretch"
+                      Command="{Binding $parent[UserControl].DataContext.ToggleNodeCommand}"
+                      CommandParameter="{Binding}"
+                      IsEnabled="{Binding !IsPlaceholder}"
+                      AutomationProperties.Name="{Binding DisplayName}">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                  <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Grid.Column="2" Text="…" IsVisible="{Binding IsLoading}" Margin="6,0,0,0" />
+                </Grid>
+              </Button>
+            </TreeDataTemplate>
+          </TreeView.ItemTemplate>
+        </TreeView>
+        <ScrollViewer Grid.Row="2" MaxHeight="100">
+          <ItemsControl ItemsSource="{Binding Roots}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="app:DriveTreeNode">
+                <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}"
+                           Foreground="#D13438" FontSize="11" TextWrapping="Wrap" Margin="4,2" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Grid>
+    </Border>
+
+    <Grid x:Name="DriveContent" Grid.Row="2" Grid.Column="1" RowDefinitions="Auto,Auto,*">
+      <Border Padding="10,7" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1">
+        <WrapPanel Orientation="Horizontal">
+          <Button x:Name="DriveBackButton" Content="Back" IsVisible="False"
+                  Click="DriveBackClicked"
+                  AutomationProperties.Name="Back to linked drive accounts and folders"
+                  Margin="0,0,8,0" />
+          <TextBox Width="180" Text="{Binding NewFolderName}" PlaceholderText="New folder name"
+                   AutomationProperties.Name="New drive folder name" TabIndex="320" />
+          <Button Content="New folder" Command="{Binding CreateFolderCommand}"
+                  AutomationProperties.Name="Create drive folder" TabIndex="321" Margin="5,0,10,0" />
+          <Button Content="Upload" Command="{Binding UploadCommand}"
+                  AutomationProperties.Name="Upload local file" TabIndex="322" />
+          <Button Content="Download" Command="{Binding DownloadCommand}"
+                  AutomationProperties.Name="Download selected file" TabIndex="323" />
+          <TextBox Width="170" Text="{Binding RenameName}" PlaceholderText="Rename selected item"
+                   AutomationProperties.Name="New name for selected drive item" TabIndex="324" Margin="10,0,0,0" />
+          <Button Content="Rename" Command="{Binding RenameCommand}"
+                  AutomationProperties.Name="Rename selected drive item" TabIndex="325" />
+          <Button Content="Delete" Command="{Binding RequestDeleteCommand}"
+                  AutomationProperties.Name="Delete selected drive item" TabIndex="326" />
+          <Button Content="Refresh" Command="{Binding RefreshCommand}"
+                  AutomationProperties.Name="Refresh selected drive directory" TabIndex="327" />
+          <Button Content="Share âŒ„" AutomationProperties.Name="Share selected drive file" TabIndex="328">
+            <Button.Flyout>
+              <Flyout Placement="BottomEdgeAlignedRight">
+                <StackPanel MinWidth="190">
+                  <Button Classes="command" Content="Share as link" HorizontalContentAlignment="Left"
+                          Command="{Binding ShareLinkCommand}" />
+                  <Button Classes="command" Content="Share as attachment" HorizontalContentAlignment="Left"
+                          Command="{Binding ChooseItemCommand}" />
+                </StackPanel>
+              </Flyout>
+            </Button.Flyout>
+          </Button>
+        </WrapPanel>
+      </Border>
+
+      <Border Grid.Row="1" IsVisible="{Binding HasOperationError}" Background="#18D13438" Padding="10,5">
+        <TextBlock Text="{Binding OperationError}" Foreground="#D13438" TextWrapping="Wrap" />
+      </Border>
+
+      <Grid Grid.Row="2">
+        <Grid IsVisible="{Binding !IsSearchMode}" RowDefinitions="Auto,*">
+          <TextBlock Text="{Binding DirectoryTitle}" FontSize="18" FontWeight="SemiBold"
+                     TextTrimming="CharacterEllipsis" Margin="12,9" />
+          <ListBox Grid.Row="1" ItemsSource="{Binding CurrentItems}" SelectedItem="{Binding SelectedItem}" Classes="workspaceList"
+                   AutomationProperties.Name="Selected directory contents" TabIndex="330">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="app:DriveItemEntry">
+                <Button Classes="workspaceItem" Padding="8,6"
+                        Command="{Binding $parent[UserControl].DataContext.OpenItemCommand}"
+                        CommandParameter="{Binding}"
+                        AutomationProperties.Name="{Binding Item.Name}">
+                  <Grid ColumnDefinitions="3*,*,Auto">
+                    <TextBlock Text="{Binding Item.Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="1" Text="{Binding TypeText}" Opacity="0.68" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="2" Text="{Binding Item.SizeText}" HorizontalAlignment="Right" Opacity="0.68" />
+                  </Grid>
+                </Button>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Grid>
+
+        <Grid IsVisible="{Binding IsSearchMode}" RowDefinitions="Auto,*">
+          <TextBlock Text="Search results" FontSize="18" FontWeight="SemiBold" Margin="12,9" />
+          <ListBox Grid.Row="1" ItemsSource="{Binding SearchResults}" SelectedItem="{Binding SelectedSearchResult}" Classes="workspaceList"
+                   AutomationProperties.Name="Cross-account drive search results" TabIndex="340">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="app:DriveSearchResult">
+                <Grid ColumnDefinitions="3*,Auto" Margin="10,7">
+                  <StackPanel>
+                    <TextBlock Text="{Binding File.Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding SourceText}" FontSize="11" Opacity="0.68" TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                  <TextBlock Grid.Column="1" Text="{Binding File.SizeText}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Grid>
+
+        <Border IsVisible="{Binding IsDeletePending}" Background="#CC202020"
+                HorizontalAlignment="Center" VerticalAlignment="Center" Padding="18" CornerRadius="3">
+          <StackPanel Spacing="10" Width="300">
+            <TextBlock Text="{Binding DeletePrompt}" Foreground="White" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+              <Button Content="Cancel" Command="{Binding CancelDeleteCommand}"
+                      AutomationProperties.Name="Cancel drive item deletion" TabIndex="350" />
+              <Button Content="Delete" Command="{Binding ConfirmDeleteCommand}"
+                      AutomationProperties.Name="Confirm drive item deletion" TabIndex="351" Margin="6,0,0,0" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+      </Grid>
+    </Grid>
+  </Grid>
+</UserControl>

@@ -1,0 +1,288 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="using:BetterMail.App"
+             x:Class="BetterMail.App.CalendarWorkspaceView">
+  <Grid x:Name="RootGrid" RowDefinitions="Auto,*" ColumnDefinitions="238,*">
+    <Border x:Name="CalendarSidebar" Grid.RowSpan="2"
+            BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,1,0"
+            Background="{DynamicResource SystemControlBackgroundAltHighBrush}" Padding="10">
+      <ScrollViewer>
+        <StackPanel Spacing="12">
+          <Button x:Name="CalendarSidebarBackButton"
+                  Classes="command"
+                  Content="Back to calendar"
+                  Click="CalendarSidebarBackButton_Click"
+                  IsVisible="False"
+                  AutomationProperties.Name="Back to calendar"
+                  TabIndex="99" />
+          <Calendar x:Name="MiniCalendar"
+                    SelectedDate="{Binding CalendarSelectedDate}"
+                    AutomationProperties.Name="Choose calendar date"
+                    TabIndex="100" />
+          <TextBlock Text="My calendars" FontWeight="SemiBold" FontSize="15" />
+          <ItemsControl ItemsSource="{Binding CalendarGroups}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="app:CalendarAccountGroup">
+                <Expander IsExpanded="True" AutomationProperties.Name="{Binding DisplayName}">
+                  <Expander.Header>
+                    <StackPanel>
+                      <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                      <TextBlock Text="{Binding Account.EmailAddress}" FontSize="11" Opacity="0.62" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                  </Expander.Header>
+                  <ItemsControl ItemsSource="{Binding Calendars}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="app:CalendarChoice">
+                        <CheckBox IsChecked="{Binding IsVisible}"
+                                  AutomationProperties.Name="{Binding Name, StringFormat='Show {0} calendar'}"
+                                  Margin="4,4">
+                          <StackPanel Orientation="Horizontal" Spacing="7">
+                            <Border Width="10" Height="10" CornerRadius="5" Background="{Binding Color}" />
+                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                          </StackPanel>
+                        </CheckBox>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </Expander>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <ItemsControl ItemsSource="{Binding LoadIssues}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <TextBlock Text="{Binding}" Foreground="#D13438" FontSize="11" TextWrapping="Wrap" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </ScrollViewer>
+    </Border>
+
+    <Border x:Name="CalendarToolbar" Grid.Column="1" Padding="12,8"
+            BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1">
+      <WrapPanel Orientation="Horizontal">
+        <Button x:Name="CalendarPaneButton" Classes="command" Content="Calendars"
+                Click="CalendarPaneButton_Click" IsVisible="False"
+                AutomationProperties.Name="Choose visible calendars" TabIndex="109" Margin="0,0,6,0" />
+        <Button Classes="primary" Content="New event" Command="{Binding NewEventCommand}"
+                AutomationProperties.Name="New calendar event" TabIndex="110" Margin="0,0,8,0" />
+        <Button Classes="command" Content="Today" Command="{Binding TodayCommand}" AutomationProperties.Name="Go to today" TabIndex="111" />
+        <Button Classes="command" Content="‹" Command="{Binding PreviousCommand}" AutomationProperties.Name="Previous date range" TabIndex="112" />
+        <Button Classes="command" Content="›" Command="{Binding NextCommand}" AutomationProperties.Name="Next date range" TabIndex="113" />
+        <TextBlock Text="{Binding DateTitle}" FontSize="18" FontWeight="SemiBold" Margin="12,5,18,0" />
+        <Button x:Name="DayViewButton" Classes="command" Content="Day" Command="{Binding DayCommand}" AutomationProperties.Name="Day view" TabIndex="114" />
+        <Button x:Name="WorkWeekViewButton" Classes="command" Content="Work week" Command="{Binding WorkWeekCommand}" AutomationProperties.Name="Work week view" TabIndex="115" />
+        <Button x:Name="WeekViewButton" Classes="command" Content="Week" Command="{Binding WeekCommand}" AutomationProperties.Name="Week view" TabIndex="116" />
+        <Button x:Name="MonthViewButton" Classes="command" Content="Month" Command="{Binding MonthCommand}" AutomationProperties.Name="Month view" TabIndex="117" />
+        <Button Classes="command" Content="Refresh" Command="{Binding RefreshCommand}" AutomationProperties.Name="Refresh calendars" TabIndex="118" />
+      </WrapPanel>
+    </Border>
+
+    <Grid x:Name="CalendarContent" Grid.Row="1" Grid.Column="1">
+      <ScrollViewer IsVisible="{Binding IsTimelineView}"
+                    HorizontalScrollBarVisibility="Auto"
+                    VerticalScrollBarVisibility="Auto"
+                    AutomationProperties.Name="Calendar timeline">
+        <ItemsControl ItemsSource="{Binding DayColumns}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="app:CalendarDayColumn">
+              <Grid Width="{Binding Width}" RowDefinitions="34,1152">
+                <Border BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1">
+                  <TextBlock Text="{Binding Heading}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <Grid Grid.Row="1">
+                  <ItemsControl ItemsSource="{Binding $parent[UserControl].DataContext.Hours}" IsHitTestVisible="False">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Border Height="48" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1">
+                          <TextBlock Text="{Binding StringFormat='{}{0:00}:00'}" FontSize="10" Opacity="0.55" Margin="3,2" />
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <ItemsControl ItemsSource="{Binding Events}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate><Canvas Height="1152" /></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.Styles>
+                      <Style Selector="ContentPresenter">
+                        <Setter Property="Canvas.Top" Value="{Binding Top}" />
+                        <Setter Property="Canvas.Left" Value="{Binding Left}" />
+                      </Style>
+                    </ItemsControl.Styles>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="app:CalendarEventItem">
+                        <Button Classes="calendarEvent" Width="{Binding Width}" Height="{Binding Height}" Padding="0"
+                                HorizontalContentAlignment="Stretch" VerticalContentAlignment="Top"
+                                Command="{Binding $parent[UserControl].DataContext.EditEventCommand}"
+                                CommandParameter="{Binding}"
+                                DoubleTapped="CalendarEventDoubleTapped"
+                                AutomationProperties.Name="{Binding Subject}"
+                                AutomationProperties.HelpText="{Binding CalendarIdentity}">
+                          <Grid ColumnDefinitions="3,*">
+                            <Border Background="{Binding Color}" />
+                            <StackPanel Grid.Column="1" Margin="5,3">
+                              <TextBlock Text="{Binding Subject}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                              <TextBlock Text="{Binding TimeAndAvailability}" FontSize="10" Opacity="0.9" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                          </Grid>
+                        </Button>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </Grid>
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+
+      <ScrollViewer IsVisible="{Binding IsMonthView}">
+        <ItemsControl ItemsSource="{Binding MonthCells}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><UniformGrid Columns="7" /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="app:CalendarMonthCell">
+              <Border MinHeight="112" Padding="5"
+                      BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,1,1">
+                <Grid RowDefinitions="Auto,*">
+                  <TextBlock Text="{Binding DayNumber}" FontWeight="SemiBold" HorizontalAlignment="Right" />
+                  <ItemsControl Grid.Row="1" ItemsSource="{Binding Events}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="app:CalendarEventItem">
+                        <Button Classes="calendarEvent" Height="23" Margin="0,1" Padding="0"
+                                HorizontalContentAlignment="Stretch"
+                                Command="{Binding $parent[UserControl].DataContext.EditEventCommand}"
+                                CommandParameter="{Binding}"
+                                DoubleTapped="CalendarEventDoubleTapped"
+                                AutomationProperties.Name="{Binding Subject}">
+                          <Grid ColumnDefinitions="3,*,Auto">
+                            <Border Background="{Binding Color}" />
+                            <TextBlock Grid.Column="1" Margin="4,1" Text="{Binding Subject}" TextTrimming="CharacterEllipsis" FontSize="11" />
+                            <TextBlock Grid.Column="2" Margin="4,1" Text="{Binding AvailabilityText}" TextTrimming="CharacterEllipsis" FontSize="9" Opacity="0.68" />
+                          </Grid>
+                        </Button>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+
+      <ProgressBar IsIndeterminate="True" Width="240"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   IsVisible="{Binding IsLoading}" />
+      <Border Background="#D13438" CornerRadius="3" Padding="10" Margin="14"
+              HorizontalAlignment="Right" VerticalAlignment="Bottom"
+              IsVisible="{Binding HasError}">
+        <TextBlock Text="{Binding Error}" Foreground="White" TextWrapping="Wrap" MaxWidth="420" />
+      </Border>
+    </Grid>
+
+    <Grid x:Name="EditorOverlay" Grid.RowSpan="2" Grid.ColumnSpan="2"
+          IsVisible="{Binding IsEditorOpen}" ZIndex="20">
+      <Button Background="#99000000" BorderThickness="0" CornerRadius="0"
+              Command="{Binding CloseEditorCommand}"
+              AutomationProperties.Name="Close event editor backdrop" />
+      <Border x:Name="EventEditor" Width="560" MaxWidth="560" MaxHeight="820" Margin="12"
+              HorizontalAlignment="Right" VerticalAlignment="Stretch"
+              Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+              BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1">
+        <ScrollViewer>
+          <StackPanel Margin="20" Spacing="9">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Text="{Binding EditorTitle}" FontSize="22" FontWeight="SemiBold" />
+              <Button Grid.Column="1" Classes="command" Content="Close" Command="{Binding CloseEditorCommand}"
+                      AutomationProperties.Name="Close event editor" TabIndex="140" />
+            </Grid>
+            <TextBlock Text="Calendar" FontWeight="SemiBold" />
+            <ComboBox ItemsSource="{Binding EditableCalendars}" SelectedItem="{Binding SelectedEditorCalendar}"
+                      DisplayMemberBinding="{Binding DisplayName}" AutomationProperties.Name="Event calendar" TabIndex="141" />
+            <TextBlock Text="Subject" FontWeight="SemiBold" />
+            <TextBox Text="{Binding EditorSubject}" AutomationProperties.Name="Event subject" TabIndex="142" />
+            <TextBlock Text="Location" FontWeight="SemiBold" />
+            <TextBox Text="{Binding EditorLocation}" AutomationProperties.Name="Event location" TabIndex="143" />
+            <TextBlock Text="{Binding EditorAvailabilityText, StringFormat='Availability: {0}'}"
+                       Opacity="0.72" IsVisible="{Binding IsEditing}" />
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+              <StackPanel>
+                <TextBlock Text="Starts" FontWeight="SemiBold" />
+                <CalendarDatePicker SelectedDate="{Binding EditorStartDate}" AutomationProperties.Name="Start date" TabIndex="144" />
+                <TimePicker SelectedTime="{Binding EditorStartTime}" ClockIdentifier="24HourClock" AutomationProperties.Name="Start time" TabIndex="145" />
+              </StackPanel>
+              <StackPanel Grid.Column="1">
+                <TextBlock Text="Ends" FontWeight="SemiBold" />
+                <CalendarDatePicker SelectedDate="{Binding EditorEndDate}" AutomationProperties.Name="End date" TabIndex="146" />
+                <TimePicker SelectedTime="{Binding EditorEndTime}" ClockIdentifier="24HourClock" AutomationProperties.Name="End time" TabIndex="147" />
+              </StackPanel>
+            </Grid>
+            <TextBlock Text="Attendees" FontWeight="SemiBold" />
+            <TextBox Text="{Binding EditorAttendees}" PlaceholderText="name@example.com; another@example.com"
+                     AutomationProperties.Name="Event attendees" AutomationProperties.HelpText="Separate addresses with commas or semicolons" TabIndex="148" />
+            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+              <ToggleSwitch Content="Reminder" IsChecked="{Binding EditorReminderOn}" AutomationProperties.Name="Enable reminder" TabIndex="149" />
+              <NumericUpDown Grid.Column="1" Value="{Binding EditorReminderMinutes}" Minimum="0" Maximum="10080"
+                             FormatString="0 minutes before" AutomationProperties.Name="Reminder minutes before start" TabIndex="150" />
+            </Grid>
+            <ToggleSwitch Content="Repeat" IsChecked="{Binding EditorRecurs}" AutomationProperties.Name="Repeat event" TabIndex="151" />
+            <Grid IsVisible="{Binding EditorRecurs}" ColumnDefinitions="*,*" ColumnSpacing="8" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+              <StackPanel>
+                <TextBlock Text="Pattern" FontWeight="SemiBold" />
+                <ComboBox ItemsSource="{Binding RecurrencePatterns}" SelectedItem="{Binding EditorPattern}" />
+              </StackPanel>
+              <StackPanel Grid.Column="1">
+                <TextBlock Text="Every" FontWeight="SemiBold" />
+                <NumericUpDown Value="{Binding EditorInterval}" Minimum="1" Maximum="999" FormatString="0 interval" />
+              </StackPanel>
+              <StackPanel Grid.Row="1">
+                <TextBlock Text="Range" FontWeight="SemiBold" />
+                <ComboBox ItemsSource="{Binding RecurrenceRanges}" SelectedItem="{Binding EditorRange}" />
+              </StackPanel>
+              <StackPanel Grid.Row="1" Grid.Column="1">
+                <TextBlock Text="End date" FontWeight="SemiBold" />
+                <CalendarDatePicker SelectedDate="{Binding EditorRecurrenceEndDate}" />
+              </StackPanel>
+              <StackPanel Grid.Row="2" Grid.ColumnSpan="2">
+                <TextBlock Text="Days of week" FontWeight="SemiBold" />
+                <TextBox Text="{Binding EditorDaysOfWeek}" PlaceholderText="Monday, Wednesday" />
+              </StackPanel>
+              <StackPanel Grid.Row="3">
+                <TextBlock Text="Occurrences" FontWeight="SemiBold" />
+                <NumericUpDown Value="{Binding EditorOccurrences}" Minimum="1" Maximum="999" />
+              </StackPanel>
+              <StackPanel Grid.Row="3" Grid.Column="1">
+                <TextBlock Text="Day of month" FontWeight="SemiBold" />
+                <NumericUpDown Value="{Binding EditorDayOfMonth}" Minimum="1" Maximum="31" />
+              </StackPanel>
+              <StackPanel Grid.Row="4">
+                <TextBlock Text="Index / first day" FontWeight="SemiBold" />
+                <ComboBox ItemsSource="{Binding RecurrenceIndexes}" SelectedItem="{Binding EditorRecurrenceIndex}" />
+                <ComboBox ItemsSource="{Binding WeekDays}" SelectedItem="{Binding EditorFirstDayOfWeek}" />
+              </StackPanel>
+              <StackPanel Grid.Row="4" Grid.Column="1">
+                <TextBlock Text="Month" FontWeight="SemiBold" />
+                <NumericUpDown Value="{Binding EditorMonth}" Minimum="1" Maximum="12" />
+              </StackPanel>
+            </Grid>
+            <TextBlock Text="{Binding EditorError}" Foreground="#D13438" TextWrapping="Wrap" IsVisible="{Binding HasEditorError}" />
+            <Grid ColumnDefinitions="Auto,*,Auto">
+              <Button Content="Delete" Command="{Binding DeleteEventCommand}"
+                      Background="#D13438" Foreground="White"
+                      IsVisible="{Binding IsEditing}" AutomationProperties.Name="Delete event" TabIndex="170" />
+              <Button Grid.Column="2" Classes="primary" Content="Save" Command="{Binding SaveEventCommand}"
+                      AutomationProperties.Name="Save event" TabIndex="171" />
+            </Grid>
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+    </Grid>
+  </Grid>
+</UserControl>

@@ -1,0 +1,40 @@
+name: Support request
+description: Ask for help installing, signing in, syncing, or configuring BetterMail.
+title: "[Support]: "
+labels: [support, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: GitHub Issues are public. Never post mail content, access tokens, client secrets, or unredacted screenshots.
+  - type: input
+    id: version
+    attributes:
+      label: BetterMail version
+      placeholder: 1.2.3
+    validations:
+      required: true
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options: [Windows 11, Windows 10, macOS, Linux]
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: What do you need help with?
+      description: Include the action you tried and the redacted result.
+    validations:
+      required: true
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What have you already tried?
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed personal data, access tokens, and secrets.
+          required: true

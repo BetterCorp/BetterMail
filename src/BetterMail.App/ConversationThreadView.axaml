@@ -1,0 +1,174 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="using:BetterMail.App"
+             x:Class="BetterMail.App.ConversationThreadView">
+  <UserControl.Styles>
+    <Style Selector="Border.threadMessage">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BetterMailDividerBrush}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+    <Style Selector="Border.threadMessage.selected">
+      <Setter Property="Background" Value="{DynamicResource BetterMailSelectionBrush}" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,Auto,*">
+    <Border Padding="16,11"
+            BorderBrush="{DynamicResource BetterMailDividerBrush}"
+            BorderThickness="0,0,0,1">
+      <Grid x:Name="ThreadHeaderLayout" ColumnDefinitions="*,Auto" ColumnSpacing="10">
+        <StackPanel x:Name="ThreadHeading">
+          <SelectableTextBlock Text="{Binding SelectedThread.Subject, FallbackValue=Select a conversation}"
+                               FontSize="20"
+                               FontWeight="SemiBold"
+                               TextWrapping="Wrap"
+                               MaxLines="2" />
+          <TextBlock Text="{Binding SelectedThread.Messages.Count, StringFormat='{}{0} messages'}"
+                     FontSize="11"
+                     Opacity="0.62" />
+        </StackPanel>
+
+        <StackPanel x:Name="WideActions"
+                    Grid.Column="1"
+                    Orientation="Horizontal">
+          <Button Classes="command"
+                  Content="Reply"
+                  Command="{Binding ReplyCommand}"
+                  AutomationProperties.Name="Reply to selected conversation message" />
+          <Button Classes="command"
+                  Content="Reply all"
+                  Command="{Binding ReplyAllCommand}"
+                  AutomationProperties.Name="Reply all to selected conversation message" />
+          <Button Classes="command"
+                  Content="Forward"
+                  Command="{Binding ForwardCommand}"
+                  AutomationProperties.Name="Forward selected conversation message" />
+        </StackPanel>
+
+        <Button x:Name="CompactActions"
+                Grid.Row="1"
+                IsVisible="False"
+                Classes="command"
+                Content="More actions"
+                HorizontalAlignment="Left"
+                AutomationProperties.Name="More conversation actions">
+          <Button.Flyout>
+            <Flyout Placement="BottomEdgeAlignedLeft">
+              <StackPanel MinWidth="150">
+                <Button Classes="command"
+                        HorizontalContentAlignment="Left"
+                        Content="Reply"
+                        Command="{Binding ReplyCommand}"
+                        AutomationProperties.Name="Reply to selected conversation message" />
+                <Button Classes="command"
+                        HorizontalContentAlignment="Left"
+                        Content="Reply all"
+                        Command="{Binding ReplyAllCommand}"
+                        AutomationProperties.Name="Reply all to selected conversation message" />
+                <Button Classes="command"
+                        HorizontalContentAlignment="Left"
+                        Content="Forward"
+                        Command="{Binding ForwardCommand}"
+                        AutomationProperties.Name="Forward selected conversation message" />
+              </StackPanel>
+            </Flyout>
+          </Button.Flyout>
+        </Button>
+      </Grid>
+    </Border>
+
+    <ScrollViewer Grid.Row="1"
+                  MaxHeight="184"
+                  VerticalScrollBarVisibility="Auto"
+                  AutomationProperties.Name="Conversation message headers">
+      <ItemsControl x:Name="ThreadMessages"
+                    ItemsSource="{Binding SelectedThread.Messages}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="app:ConversationMessageItem">
+            <Border Classes="threadMessage"
+                    Classes.selected="{Binding IsSelected}">
+              <Grid ColumnDefinitions="3,*">
+                <Border Background="{DynamicResource BetterMailAccentBrush}"
+                        IsVisible="{Binding IsSelected}" />
+                <Button Grid.Column="1"
+                        Classes="command"
+                        Padding="12,8"
+                        HorizontalContentAlignment="Stretch"
+                        Command="{Binding $parent[UserControl].DataContext.ToggleMessageCommand}"
+                        CommandParameter="{Binding}"
+                        AutomationProperties.Name="{Binding Sender, StringFormat='Select message from {0}'}"
+                        AutomationProperties.HelpText="Expands or collapses this message without changing the mail-list selection">
+                  <Grid ColumnDefinitions="*,Auto"
+                        RowDefinitions="Auto,Auto"
+                        ColumnSpacing="10">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                      <SelectableTextBlock Text="{Binding Sender}"
+                                           FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis" />
+                      <SelectableTextBlock Text="{Binding SenderAddress}"
+                                           FontSize="11"
+                                           Opacity="0.58"
+                                           TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <SelectableTextBlock Grid.Column="1"
+                                         Text="{Binding ReceivedText}"
+                                         FontSize="11"
+                                         Opacity="0.62"
+                                         TextTrimming="CharacterEllipsis" />
+                    <SelectableTextBlock Grid.Row="1"
+                                         Grid.ColumnSpan="2"
+                                         Text="{Binding Recipients}"
+                                         FontSize="11"
+                                         Opacity="0.62"
+                                         TextTrimming="CharacterEllipsis" />
+                  </Grid>
+                </Button>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
+
+    <Grid Grid.Row="2"
+          RowDefinitions="Auto,*"
+          IsVisible="{Binding HasThread}">
+      <Border Padding="10,5"
+              Background="#0A0F6CBD"
+              BorderBrush="{DynamicResource BetterMailDividerBrush}"
+              BorderThickness="0,0,0,1"
+              IsVisible="{Binding SelectedMessage.HasBlockedRemoteContent}">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <TextBlock Text="Some pictures were blocked to protect your privacy."
+                     FontSize="11"
+                     VerticalAlignment="Center"
+                     TextTrimming="CharacterEllipsis" />
+          <Button Grid.Column="1"
+                  Classes="command"
+                  Content="Load pictures"
+                  Command="{Binding AllowRemoteContentCommand}"
+                  CommandParameter="{Binding SelectedMessage}"
+                  AutomationProperties.Name="Load blocked pictures for the selected message"
+                  AutomationProperties.HelpText="Downloads external images for only this message"
+                  Padding="7,2" />
+        </Grid>
+      </Border>
+
+      <NativeWebView Grid.Row="1"
+                     Source="{Binding SelectedMessage.BodyUri}"
+                     NavigationStarted="MessageWebView_NavigationStarted"
+                     AutomationProperties.Name="Selected conversation message content" />
+    </Grid>
+
+    <StackPanel Grid.Row="1"
+                Grid.RowSpan="2"
+                IsVisible="{Binding HasNoThread}"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="6">
+      <TextBlock Text="No conversation selected" FontSize="17" Opacity="0.62" />
+      <TextBlock Text="Select a message to read its thread." Opacity="0.52" />
+    </StackPanel>
+  </Grid>
+</UserControl>
