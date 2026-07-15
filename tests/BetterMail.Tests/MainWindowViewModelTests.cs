@@ -521,6 +521,16 @@ public sealed class MainWindowViewModelTests
                     bodyRefreshes++;
                 }
             };
+            var transientSelectionClears = 0;
+            viewModel.Messages.CollectionChanged += (_, args) =>
+            {
+                if (args.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Replace &&
+                    args.OldItems?.OfType<MailMessage>().Any(message => message.ProviderId == "message") == true)
+                {
+                    viewModel.SelectedMessage = null;
+                    transientSelectionClears += viewModel.SelectedMessage is null ? 1 : 0;
+                }
+            };
 
             viewModel.SyncCommand.Execute(null);
             viewModel.SyncCommand.Execute(null);
@@ -537,6 +547,7 @@ public sealed class MainWindowViewModelTests
             Assert.Equal(1, provider.MaxConcurrent);
             Assert.True(viewModel.SelectedMessage?.IsFlagged);
             Assert.Equal(0, bodyRefreshes);
+            Assert.Equal(0, transientSelectionClears);
 
             viewModel.SearchText = "Updated";
             viewModel.SearchCommand.Execute(null);

@@ -88,6 +88,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _isContactActionRunning;
     private bool _isLoadingMailStatistics;
     private int _errorVersion;
+    private bool _isReplacingSelectedMessage;
 
     internal string DataDirectory => _dataDirectory;
     internal string MailListContextKey => IsSearchResultsView
@@ -319,6 +320,11 @@ public sealed class MainWindowViewModel : ViewModelBase
         get => _selectedMessage;
         set
         {
+            if (value is null && _isReplacingSelectedMessage && _selectedMessage is not null)
+            {
+                return;
+            }
+
             var isMetadataUpdate = SameMessage(_selectedMessage, value);
             if (SetProperty(ref _selectedMessage, value))
             {
@@ -2986,7 +2992,15 @@ public sealed class MainWindowViewModel : ViewModelBase
             if (Messages[index] != message)
             {
                 var wasSelected = SameMessage(selected, message);
-                Messages[index] = message;
+                _isReplacingSelectedMessage = wasSelected;
+                try
+                {
+                    Messages[index] = message;
+                }
+                finally
+                {
+                    _isReplacingSelectedMessage = false;
+                }
                 if (wasSelected)
                 {
                     SelectedMessage = message;
