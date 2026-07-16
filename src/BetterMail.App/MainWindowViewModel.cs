@@ -20,12 +20,14 @@ public sealed class MainWindowViewModel : ViewModelBase
     };
     private static readonly MailQuickActionOption[] AvailableMailQuickActions =
     [
+        new("none", "None", "\u2014"),
         new("read", "Read / unread", "✉"),
         new("flag", "Flag / clear flag", "⚑"),
         new("archive", "Archive", "▣"),
         new("delete", "Delete", "×"),
         new("move", "Move to folder", "↪", IsMove: true),
-        new("junk", "Junk / not junk", "!")
+        new("junk", "Junk / not junk", "!"),
+        new("more", "More actions", "\u22EF", IsMore: true)
     ];
     private static readonly string[] DefaultMailQuickActionIds = ["read", "flag", "archive", "delete"];
 
@@ -258,6 +260,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ObservableCollection<MailMessage> Messages { get; } = [];
     public ObservableCollection<MailMessage> SelectedMessages { get; } = [];
     public ObservableCollection<MailQuickActionOption> MailQuickActions { get; } = [];
+    public bool HasMailQuickActions => MailQuickActions.Count > 0;
     public ObservableCollection<MailQuickActionSlot> MailQuickActionSlots { get; } = [];
     public ObservableCollection<MailFolderItem> Folders { get; } = [];
     public ObservableCollection<MailboxFolderGroup> FolderGroups { get; } = [];
@@ -1168,8 +1171,13 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(MailQuickActionsVersion));
     }
 
-    private void RebuildMailQuickActions() =>
-        Replace(MailQuickActions, MailQuickActionSlots.Select(static slot => slot.SelectedOption));
+    private void RebuildMailQuickActions()
+    {
+        Replace(MailQuickActions, MailQuickActionSlots
+            .Select(static slot => slot.SelectedOption)
+            .Where(static action => action.Id != "none"));
+        RaisePropertyChanged(nameof(HasMailQuickActions));
+    }
 
     public async Task InitializeAsync()
     {
@@ -4201,7 +4209,11 @@ public sealed record MailQuickActionOption(
     string Id,
     string Label,
     string Icon,
-    bool IsMove = false);
+    bool IsMove = false,
+    bool IsMore = false)
+{
+    public bool IsStandard => !IsMove && !IsMore;
+}
 
 public sealed class MailQuickActionSlot(
     int position,

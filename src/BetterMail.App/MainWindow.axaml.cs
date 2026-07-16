@@ -500,7 +500,7 @@ public sealed partial class MainWindow : Window
         SelectAndExecute(message, command);
     }
 
-    private void QuickMovePressed(object? sender, PointerPressedEventArgs args)
+    private void QuickFlyoutPressed(object? sender, PointerPressedEventArgs args)
     {
         if (sender is Button { CommandParameter: MailMessage message })
         {

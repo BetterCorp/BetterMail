@@ -90,7 +90,7 @@
           <Border Classes="settingsCard">
             <StackPanel Spacing="9">
               <TextBlock Text="Message quick actions" FontSize="18" FontWeight="SemiBold" />
-              <TextBlock Text="Choose the four actions shown at the right of a message when you hover or select it."
+              <TextBlock Text="Choose up to four actions shown at the right of a message when you hover or select it."
                          Opacity="0.62" TextWrapping="Wrap" />
               <ItemsControl ItemsSource="{Binding MailQuickActionSlots}">
                 <ItemsControl.ItemTemplate>

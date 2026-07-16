@@ -146,11 +146,14 @@ public sealed class MainWindowXamlTests
         Assert.Contains("ShowDraftsCommand", folderPane);
         Assert.DoesNotContain("<Expander Header=" + (char)34 + "{Binding DraftCountText}", folderPane);
         Assert.Contains("QuickActionClicked", xaml);
-        Assert.Contains("QuickMovePressed", xaml);
+        Assert.Contains("QuickFlyoutPressed", xaml);
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding MailQuickActionSlots}" + (char)34, settingsXaml);
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding $parent[Window].DataContext.MailQuickActions}" + (char)34, xaml);
         Assert.Contains("IsVisible=" + (char)34 + "{Binding $parent[Window].DataContext.IsUnifiedInbox}" + (char)34, xaml);
         Assert.Contains("Border.quickActions Button.command", xaml);
+        Assert.Contains("TransformOperationsTransition", xaml);
+        Assert.Contains("BetterMailQuickActionShadow", xaml);
+        Assert.Contains("IsVisible=" + (char)34 + "{Binding IsMore}" + (char)34, xaml);
         Assert.Contains("VerticalContentAlignment" + (char)34 + " Value=" + (char)34 + "Center", xaml);
         Assert.DoesNotContain("quickActionsFade", xaml);
         Assert.DoesNotContain("<Border.OpacityMask>", xaml);

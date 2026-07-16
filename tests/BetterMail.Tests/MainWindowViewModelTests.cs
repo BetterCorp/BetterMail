@@ -228,11 +228,16 @@ public sealed class MainWindowViewModelTests
     {
         var viewModel = new MainWindowViewModel(null, "data", _ => { }, _ => { }, null);
 
-        viewModel.ConfigureMailQuickActions(["delete", "move", "junk", "archive"]);
+        viewModel.ConfigureMailQuickActions(["none", "move", "more", "archive"]);
 
-        Assert.Equal(["delete", "move", "junk", "archive"], viewModel.GetMailQuickActionPreferences());
-        Assert.Equal(4, viewModel.MailQuickActions.Count);
-        Assert.True(viewModel.MailQuickActions[1].IsMove);
+        Assert.Equal(["none", "move", "more", "archive"], viewModel.GetMailQuickActionPreferences());
+        Assert.Equal(3, viewModel.MailQuickActions.Count);
+        Assert.True(viewModel.MailQuickActions[0].IsMove);
+        Assert.True(viewModel.MailQuickActions[1].IsMore);
+        Assert.True(viewModel.HasMailQuickActions);
+        viewModel.ConfigureMailQuickActions(["none", "none", "none", "none"]);
+        Assert.Empty(viewModel.MailQuickActions);
+        Assert.False(viewModel.HasMailQuickActions);
         Assert.Equal(AccountColors.For("mailbox-a"), AccountColors.For("mailbox-a"));
         Assert.StartsWith("#", AccountColors.For("mailbox-a"));
     }

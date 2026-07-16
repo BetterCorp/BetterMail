@@ -153,6 +153,13 @@ public sealed partial class App : Application
         if (Color.TryParse(color, out var parsed))
         {
             Resources["BetterMailAccentColor"] = parsed;
+            Resources["BetterMailQuickActionShadow"] = new BoxShadows(new BoxShadow
+            {
+                OffsetX = -8,
+                Blur = 14,
+                Spread = -3,
+                Color = Color.FromArgb(0x99, parsed.R, parsed.G, parsed.B)
+            });
         }
     }
 }

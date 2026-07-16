@@ -416,17 +416,21 @@
               <Style Selector="Border.quickActions">
                 <Setter Property="Opacity" Value="0" />
                 <Setter Property="IsHitTestVisible" Value="False" />
+                <Setter Property="RenderTransform" Value="translate(160px, 0px)" />
                 <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundAltHighBrush}" />
                 <Setter Property="BorderBrush" Value="{DynamicResource BetterMailDividerBrush}" />
                 <Setter Property="BorderThickness" Value="1,0,0,0" />
+                <Setter Property="BoxShadow" Value="{DynamicResource BetterMailQuickActionShadow}" />
               </Style>
               <Style Selector="ListBoxItem:pointerover Border.quickActions">
                 <Setter Property="Opacity" Value="1" />
                 <Setter Property="IsHitTestVisible" Value="True" />
+                <Setter Property="RenderTransform" Value="translate(0px, 0px)" />
               </Style>
               <Style Selector="ListBoxItem:selected Border.quickActions">
                 <Setter Property="Opacity" Value="1" />
                 <Setter Property="IsHitTestVisible" Value="True" />
+                <Setter Property="RenderTransform" Value="translate(0px, 0px)" />
               </Style>
               <Style Selector="Border.quickActions Button.command">
                 <Setter Property="MinWidth" Value="0" />
@@ -463,7 +467,7 @@
                       <MenuItem Header="Mark read or unread" Click="MessageReadClicked" AutomationProperties.Name="Toggle message read state" />
                     </ContextMenu>
                   </Border.ContextMenu>
-                  <Grid>
+                  <Grid ClipToBounds="True">
                     <Border Width="3" Background="#0F6CBD" IsVisible="{Binding IsUnread}" HorizontalAlignment="Left" />
                     <Grid Margin="{Binding $parent[Window].DataContext.MessageRowMargin}" ColumnDefinitions="4,*,Auto" RowDefinitions="18,18,18" RowSpacing="1">
 
@@ -501,10 +505,16 @@
                     </Grid>
                     </Grid>
                     <Border Classes="quickActions"
-                            Width="160"
+                            IsVisible="{Binding $parent[Window].DataContext.HasMailQuickActions}"
                             HorizontalAlignment="Right"
                             VerticalAlignment="Stretch"
                             ZIndex="2">
+                      <Border.Transitions>
+                        <Transitions>
+                          <DoubleTransition Property="Opacity" Duration="0:0:0.18" />
+                          <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.18" />
+                        </Transitions>
+                      </Border.Transitions>
                       <ItemsControl ItemsSource="{Binding $parent[Window].DataContext.MailQuickActions}">
                         <ItemsControl.ItemsPanel>
                           <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
@@ -515,7 +525,7 @@
                               <Button Classes="command"
                                       Content="{Binding Icon}"
                                       FontFamily="Segoe UI Symbol"
-                                      IsVisible="{Binding !IsMove}"
+                                      IsVisible="{Binding IsStandard}"
                                       CommandParameter="{Binding $parent[ItemsControl].DataContext}"
                                       Click="QuickActionClicked"
                                       ToolTip.Tip="{Binding Label}"
@@ -525,7 +535,7 @@
                                       FontFamily="Segoe UI Symbol"
                                       IsVisible="{Binding IsMove}"
                                       CommandParameter="{Binding $parent[ItemsControl].DataContext}"
-                                      PointerPressed="QuickMovePressed"
+                                      PointerPressed="QuickFlyoutPressed"
                                       ToolTip.Tip="{Binding Label}"
                                       AutomationProperties.Name="{Binding Label}">
                                 <Button.Flyout>
@@ -543,6 +553,48 @@
                                         </ItemsControl.ItemTemplate>
                                       </ItemsControl>
                                     </ScrollViewer>
+                                  </Flyout>
+                                </Button.Flyout>
+                              </Button>
+                              <Button Classes="command"
+                                      Content="{Binding Icon}"
+                                      FontFamily="Segoe UI Symbol"
+                                      IsVisible="{Binding IsMore}"
+                                      CommandParameter="{Binding $parent[ItemsControl].DataContext}"
+                                      PointerPressed="QuickFlyoutPressed"
+                                      ToolTip.Tip="{Binding Label}"
+                                      AutomationProperties.Name="{Binding Label}">
+                                <Button.Flyout>
+                                  <Flyout Placement="BottomEdgeAlignedRight">
+                                    <StackPanel MinWidth="190">
+                                      <Button Classes="command" Content="Reply all" HorizontalContentAlignment="Left" Click="MessageReplyAllClicked" />
+                                      <Button Classes="command" Content="Reply" HorizontalContentAlignment="Left" Click="MessageReplyClicked" />
+                                      <Button Classes="command" Content="Forward" HorizontalContentAlignment="Left" Click="MessageForwardClicked" />
+                                      <Button Classes="command" Content="Archive" HorizontalContentAlignment="Left" Click="MessageArchiveClicked" />
+                                      <Button Classes="command" Content="Delete" HorizontalContentAlignment="Left" Click="MessageDeleteClicked" />
+                                      <Button Classes="command" Content="Move to folder" HorizontalContentAlignment="Left">
+                                        <Button.Flyout>
+                                          <Flyout>
+                                            <ScrollViewer MaxHeight="420" MinWidth="230">
+                                              <ItemsControl ItemsSource="{Binding $parent[Window].DataContext.Folders}">
+                                                <ItemsControl.ItemTemplate>
+                                                  <DataTemplate x:DataType="app:MailFolderItem">
+                                                    <Button Classes="command" Content="{Binding DisplayName}" HorizontalContentAlignment="Left"
+                                                            Command="{Binding $parent[Window].DataContext.MoveToFolderCommand}" CommandParameter="{Binding}" />
+                                                  </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                              </ItemsControl>
+                                            </ScrollViewer>
+                                          </Flyout>
+                                        </Button.Flyout>
+                                      </Button>
+                                      <Border Height="1" Background="{DynamicResource BetterMailDividerBrush}" Margin="4" />
+                                      <Button Classes="command" Content="Junk" HorizontalContentAlignment="Left" Click="MessageJunkClicked" />
+                                      <Button Classes="command" Content="{Binding $parent[Window].DataContext.ToggleFlagText}" HorizontalContentAlignment="Left" Click="MessageFlagClicked" />
+                                      <Button Classes="command" Content="{Binding $parent[Window].DataContext.ToggleReadText}" HorizontalContentAlignment="Left" Click="MessageReadClicked" />
+                                      <Button Classes="command" Content="View headers" HorizontalContentAlignment="Left"
+                                              Command="{Binding $parent[Window].DataContext.ViewHeadersCommand}" />
+                                    </StackPanel>
                                   </Flyout>
                                 </Button.Flyout>
                               </Button>
