@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using AngleSharp.Dom;
+using AngleSharp.Html.Parser;
 using BetterMail.Core;
 using Ganss.Xss;
 
@@ -11,8 +12,8 @@ public sealed class MailContentRenderer
     private static readonly Regex UnsafeStyleUrl = new(
         @"(?:background|background-image)\s*:[^;]*url\s*\([^)]*\)\s*;?",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex BackgroundHexColor = new(
-        @"background(?:-color)?\s*:\s*#(?<hex>[0-9a-f]{3,8})\b",
+    private static readonly Regex FunctionalColor = new(
+        @"rgba?\(\s*(?<red>\d+)\s*,\s*(?<green>\d+)\s*,\s*(?<blue>\d+)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly HashSet<string> SafeInlineImageTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -20,6 +21,7 @@ public sealed class MailContentRenderer
     };
 
     private readonly HtmlSanitizer _sanitizer;
+    private readonly HtmlParser _htmlParser = new();
     private string _themeMode = "System";
 
     public string ThemeMode
@@ -166,7 +168,7 @@ public sealed class MailContentRenderer
     {
         var renderAsHtml = IsHtmlContent(content, isHtml);
         var body = renderAsHtml
-            ? SanitizeHtml(content ?? "", attachments ?? [], allowRemoteContent)
+            ? AdaptDarkText(SanitizeHtml(content ?? "", attachments ?? [], allowRemoteContent))
             : $"<pre>{System.Net.WebUtility.HtmlEncode(content ?? "")}</pre>";
         var imagePolicy = allowRemoteContent ? "data: http: https:" : "data:";
         var colorScheme = ThemeMode switch
@@ -218,11 +220,14 @@ public sealed class MailContentRenderer
 
     private const string DarkContentOverrides =
         "body a { color: #75baff; } " +
+        ".mail-dark-text { color: #f5f5f5 !important; } " +
+        "a.mail-dark-text { color: #75baff !important; } " +
         ".mail-light-content { filter: invert(88%) hue-rotate(180deg); } " +
         ".mail-light-content img { filter: invert(100%) hue-rotate(180deg); } " +
         "blockquote, .gmail_quote, .yahoo_quoted, .moz-cite-prefix, .gmail_signature, .moz-signature { color: #b8b8b8; } " +
         ".gmail_signature, .moz-signature { border-top-color: #555; } " +
         ".mail-image-placeholder { border-color: #666; background: #2d2d2d !important; color: #ccc !important; } " +
+        "::selection { color: #fff; background: #0f6cbd; } " +
         "::-webkit-scrollbar-thumb { background: #666; }";
 
     public bool HasCidImages(string? content, bool isHtml)
@@ -361,6 +366,48 @@ public sealed class MailContentRenderer
         body.AppendChild(wrapper);
     }
 
+    private string AdaptDarkText(string content)
+    {
+        var document = _htmlParser.ParseDocument($"<html><body>{content}</body></html>");
+        var body = document.Body;
+        if (body is null)
+        {
+            return content;
+        }
+        foreach (var element in body.QuerySelectorAll("[style], [color]"))
+        {
+            if (HasDarkForeground(element) && !HasLightBackgroundAtOrAbove(element))
+            {
+                element.SetAttribute(
+                    "class",
+                    $"{element.GetAttribute("class")} mail-dark-text".Trim());
+            }
+        }
+        return body.InnerHtml;
+    }
+
+    private static bool HasDarkForeground(IElement element)
+        => IsDarkColor(StyleValue(element.GetAttribute("style"), "color")) ||
+            IsDarkColor(element.GetAttribute("color"));
+
+    private static bool HasLightBackgroundAtOrAbove(IElement element)
+    {
+        for (IElement? current = element; current is not null; current = current.ParentElement)
+        {
+            if (current.LocalName.Equals("body", StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+            var style = current.GetAttribute("style");
+            var background = current.GetAttribute("bgcolor");
+            if (HasLightBackground($"{style};background-color:{background}"))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static bool HasLightBackground(string? style)
     {
         if (string.IsNullOrWhiteSpace(style))
@@ -372,25 +419,80 @@ public sealed class MailContentRenderer
         {
             return true;
         }
-        var match = BackgroundHexColor.Match(style);
-        if (!match.Success)
+        var background = StyleValue(style, "background-color") ?? StyleValue(style, "background");
+        if (background is null)
         {
             return false;
         }
-        var hex = match.Groups["hex"].Value;
+        return TryReadColor(background, out var red, out var green, out var blue) &&
+            red * 299 + green * 587 + blue * 114 >= 190_000;
+    }
+
+    private static string? StyleValue(string? style, string property)
+    {
+        foreach (var declaration in (style ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = declaration.IndexOf(':');
+            if (separator > 0 &&
+                declaration[..separator].Trim().Equals(property, StringComparison.OrdinalIgnoreCase))
+            {
+                return declaration[(separator + 1)..].Trim();
+            }
+        }
+        return null;
+    }
+
+    private static bool IsDarkColor(string? value) =>
+        TryReadColor(value, out var red, out var green, out var blue) &&
+        red * 299 + green * 587 + blue * 114 <= 125_000;
+
+    private static bool TryReadColor(string? value, out int red, out int green, out int blue)
+    {
+        red = green = blue = 0;
+        value = value?.Trim();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+        if (value.Equals("black", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("windowtext", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        if (value.Equals("white", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("snow", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("ivory", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("whitesmoke", StringComparison.OrdinalIgnoreCase))
+        {
+            red = green = blue = 255;
+            return true;
+        }
+        if (value[0] != '#')
+        {
+            var functional = FunctionalColor.Match(value);
+            return functional.Success &&
+                int.TryParse(functional.Groups["red"].Value, out red) &&
+                int.TryParse(functional.Groups["green"].Value, out green) &&
+                int.TryParse(functional.Groups["blue"].Value, out blue) &&
+                red <= 255 && green <= 255 && blue <= 255;
+        }
+        var hex = value[1..];
         if (hex.Length is 3 or 4)
         {
             hex = string.Concat(hex.Take(3).SelectMany(character => new[] { character, character }));
         }
-        if (hex.Length < 6 || !int.TryParse(hex[..6], System.Globalization.NumberStyles.HexNumber, null, out var color))
+        if (hex.Length < 6 || !int.TryParse(
+                hex[..6],
+                System.Globalization.NumberStyles.HexNumber,
+                null,
+                out var color))
         {
             return false;
         }
-        var red = color >> 16 & 255;
-        var green = color >> 8 & 255;
-        var blue = color & 255;
-        // ponytail: root-color heuristic; add a full CSS color parser only if real mail needs more than hex/white.
-        return red * 299 + green * 587 + blue * 114 >= 190_000;
+        red = color >> 16 & 255;
+        green = color >> 8 & 255;
+        blue = color & 255;
+        return true;
     }
 
     private bool HasImageSource(string? content, bool isHtml, Func<string, bool> predicate)

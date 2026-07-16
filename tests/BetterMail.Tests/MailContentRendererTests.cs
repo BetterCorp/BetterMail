@@ -1,4 +1,5 @@
 using System.Text;
+using AngleSharp.Html.Parser;
 using BetterMail.App;
 using BetterMail.Core;
 
@@ -143,6 +144,7 @@ public sealed class MailContentRendererTests
         Assert.Contains("background: #202020", dark);
         Assert.DoesNotContain("body, body *", dark);
         Assert.Contains("body a { color: #75baff; }", dark);
+        Assert.Contains("::selection { color: #fff; background: #0f6cbd; }", dark);
         Assert.Contains("content=" + (char)34 + "light" + (char)34, light);
         Assert.Contains("background: #ffffff", light);
         Assert.DoesNotContain("background-color: transparent !important", light);
@@ -177,6 +179,23 @@ public sealed class MailContentRendererTests
         Assert.Contains("text-decoration: none", html);
         Assert.Contains("filter: invert(88%) hue-rotate(180deg)", html);
         Assert.DoesNotContain("background-color: transparent !important", html);
+    }
+
+    [Fact]
+    public void CorrectsDarkInlineTextOnlyOnTheDarkMailCanvas()
+    {
+        var renderer = new MailContentRenderer { ThemeMode = "Dark" };
+        const string content = """
+            <p style="color:#111">Visible on dark canvas</p>
+            <div style="background:#ffaaaa"><span style="color:#111">Dark text on light banner</span></div>
+            """;
+
+        var html = Decode(renderer.Render(content, isHtml: true));
+
+        var matches = new HtmlParser().ParseDocument(html).QuerySelectorAll(".mail-dark-text");
+        Assert.True(matches.Length == 1, html);
+        var adapted = matches[0];
+        Assert.Contains("Visible on dark canvas", adapted.TextContent);
     }
 
     [Fact]
