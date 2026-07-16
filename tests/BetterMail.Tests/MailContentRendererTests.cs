@@ -199,6 +199,20 @@ public sealed class MailContentRendererTests
     }
 
     [Fact]
+    public void GivesLightEmailWrappersADarkForegroundBeforeDarkModeInversion()
+    {
+        var renderer = new MailContentRenderer { ThemeMode = "Dark" };
+
+        var html = Decode(renderer.Render(
+            "<html><body style='background:#fff'><p>No explicit foreground</p></body></html>",
+            isHtml: true));
+
+        Assert.Contains(
+            ".mail-light-content { color: #1b1b1b; filter: invert(88%) hue-rotate(180deg); }",
+            html);
+    }
+
+    [Fact]
     public void RemovesRemoteImagesHiddenInBackgroundStyles()
     {
         var renderer = new MailContentRenderer();

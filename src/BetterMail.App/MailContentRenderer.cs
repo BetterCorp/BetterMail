@@ -222,7 +222,7 @@ public sealed class MailContentRenderer
         "body a { color: #75baff; } " +
         ".mail-dark-text { color: #f5f5f5 !important; } " +
         "a.mail-dark-text { color: #75baff !important; } " +
-        ".mail-light-content { filter: invert(88%) hue-rotate(180deg); } " +
+        ".mail-light-content { color: #1b1b1b; filter: invert(88%) hue-rotate(180deg); } " +
         ".mail-light-content img { filter: invert(100%) hue-rotate(180deg); } " +
         "blockquote, .gmail_quote, .yahoo_quoted, .moz-cite-prefix, .gmail_signature, .moz-signature { color: #b8b8b8; } " +
         ".gmail_signature, .moz-signature { border-top-color: #555; } " +
