@@ -74,9 +74,16 @@ public sealed class MainWindowViewModel : ViewModelBase
     private string _moduleSearchText = "";
     private string _selectedThemeMode = "System";
     private string _selectedAccentName = "Blue";
-    private string _signature = "";
     private string? _defaultSenderMailboxId;
-    private readonly Dictionary<string, string> _senderSignatures = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, MailboxSignaturePreferences> _mailboxSignatures = new(StringComparer.Ordinal);
+    private string? _legacyFallbackSignatureId;
+    private SignatureItem? _selectedSignature;
+    private string _signatureEditorName = "";
+    private string _signatureEditorHtml = "";
+    private string? _signatureEditorError;
+    private bool _isSignatureTemplatePickerOpen;
+    private string? _pendingSignatureDeleteId;
+    private SettingsTabItem? _selectedSettingsTab;
     private int _senderPreferencesVersion;
     private PersonEntry? _editingContact;
     private PersonEntry? _pendingDeleteContact;
@@ -151,6 +158,13 @@ public sealed class MainWindowViewModel : ViewModelBase
         ComposeCommand = new AsyncCommand(() => RequestComposeAsync(new ComposeRequest()));
         OpenDraftCommand = new AsyncCommand<LocalDraft>(OpenLocalDraftAsync);
         SetDefaultSenderCommand = new AsyncCommand<SenderSettingsItem>(SetDefaultSenderAsync);
+        NewSignatureCommand = new AsyncCommand(OpenSignatureTemplatesAsync);
+        CreateSignatureFromTemplateCommand = new AsyncCommand<SignatureTemplate>(CreateSignatureFromTemplateAsync);
+        SaveSignatureCommand = new AsyncCommand(SaveSignatureAsync, () => SelectedSignature?.CanEdit == true);
+        ResetSignatureCommand = new AsyncCommand(ResetSignatureAsync, () => SelectedSignature?.CanEdit == true);
+        DuplicateSignatureCommand = new AsyncCommand(DuplicateSignatureAsync, () => SelectedSignature is not null);
+        DeleteSignatureCommand = new AsyncCommand(DeleteSignatureAsync, () => SelectedSignature?.CanEdit == true);
+        CloseSignatureTemplatesCommand = new AsyncCommand(CloseSignatureTemplatesAsync);
         ReplyCommand = new AsyncCommand(ReplyAsync, CanReplyToSelectedMessage);
         ReplyAllCommand = new AsyncCommand(ReplyAllAsync, CanReplyToSelectedMessage);
         ForwardCommand = new AsyncCommand(ForwardAsync, CanReplyToSelectedMessage);
@@ -179,6 +193,22 @@ public sealed class MainWindowViewModel : ViewModelBase
         SearchFolderFilters.Add(new SearchFolderFilter("All mail folders", null, null));
         _selectedSearchAccountFilter = SearchAccountFilters[0];
         _selectedSearchFolderFilter = SearchFolderFilters[0];
+        SettingsTabs.Add(new("Appearance"));
+        SettingsTabs.Add(new("Mail & notifications"));
+        SettingsTabs.Add(new("Signatures"));
+        SettingsTabs.Add(new("Accounts"));
+        SettingsTabs.Add(new("About"));
+        _selectedSettingsTab = SettingsTabs[0];
+        var defaultSignature = new SignatureItem(
+            SignatureCatalog.Default.Id,
+            SignatureCatalog.Default.Name,
+            SignatureCatalog.Default.Html,
+            isReadOnly: true);
+        SignatureChoices.Add(new SignatureItem("", "None", "", isReadOnly: true));
+        Signatures.Add(defaultSignature);
+        SignatureChoices.Add(defaultSignature);
+        _selectedSignature = defaultSignature;
+        LoadSelectedSignatureEditor();
     }
 
     public event Action<ComposeRequest>? ComposeRequested;
@@ -203,6 +233,11 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ObservableCollection<SearchFolderFilter> SearchFolderFilters { get; } = [];
     internal IFilesProvider? FilesProvider => _workspaceProvider;
     public ObservableCollection<SenderSettingsItem> SenderSettings { get; } = [];
+    public ObservableCollection<SignatureAccountSettingsItem> SignatureAccountSettings { get; } = [];
+    public ObservableCollection<SignatureItem> Signatures { get; } = [];
+    public ObservableCollection<SignatureItem> SignatureChoices { get; } = [];
+    public ObservableCollection<SettingsTabItem> SettingsTabs { get; } = [];
+    public IReadOnlyList<SignatureTemplate> SignatureTemplates { get; } = SignatureCatalog.Templates;
     public ObservableCollection<ContactInfo> Contacts { get; } = [];
     public ObservableCollection<PersonEntry> People { get; } = [];
     public IReadOnlyList<string> ThemeModes { get; } = ["System", "Light", "Dark"];
@@ -250,6 +285,13 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ICommand ComposeCommand { get; }
     public ICommand OpenDraftCommand { get; }
     public ICommand SetDefaultSenderCommand { get; }
+    public ICommand NewSignatureCommand { get; }
+    public ICommand CreateSignatureFromTemplateCommand { get; }
+    public ICommand SaveSignatureCommand { get; }
+    public ICommand ResetSignatureCommand { get; }
+    public ICommand DuplicateSignatureCommand { get; }
+    public ICommand DeleteSignatureCommand { get; }
+    public ICommand CloseSignatureTemplatesCommand { get; }
     public ICommand ReplyCommand { get; }
     public ICommand ReplyAllCommand { get; }
     public ICommand ForwardCommand { get; }
@@ -903,16 +945,77 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    public string Signature
+    public SettingsTabItem? SelectedSettingsTab
     {
-        get => _signature;
+        get => _selectedSettingsTab;
         set
         {
-            if (SetProperty(ref _signature, value))
+            if (SetProperty(ref _selectedSettingsTab, value))
             {
-                RebuildSenderSettings();
+                RaisePropertyChanged(nameof(ShowAppearanceSettings));
+                RaisePropertyChanged(nameof(ShowMailSettings));
+                RaisePropertyChanged(nameof(ShowSignatureSettings));
+                RaisePropertyChanged(nameof(ShowAccountSettings));
+                RaisePropertyChanged(nameof(ShowAboutSettings));
             }
         }
+    }
+
+    public bool ShowAppearanceSettings => SelectedSettingsTab?.Name == "Appearance";
+    public bool ShowMailSettings => SelectedSettingsTab?.Name == "Mail & notifications";
+    public bool ShowSignatureSettings => SelectedSettingsTab?.Name == "Signatures";
+    public bool ShowAccountSettings => SelectedSettingsTab?.Name == "Accounts";
+    public bool ShowAboutSettings => SelectedSettingsTab?.Name == "About";
+
+    public SignatureItem? SelectedSignature
+    {
+        get => _selectedSignature;
+        set
+        {
+            if (SetProperty(ref _selectedSignature, value))
+            {
+                LoadSelectedSignatureEditor();
+                RaisePropertyChanged(nameof(CanEditSelectedSignature));
+                ((AsyncCommand)SaveSignatureCommand).Refresh();
+                ((AsyncCommand)ResetSignatureCommand).Refresh();
+                ((AsyncCommand)DuplicateSignatureCommand).Refresh();
+                ((AsyncCommand)DeleteSignatureCommand).Refresh();
+            }
+        }
+    }
+
+    public bool CanEditSelectedSignature => SelectedSignature?.CanEdit == true;
+
+    public string SignatureEditorName
+    {
+        get => _signatureEditorName;
+        set => SetProperty(ref _signatureEditorName, value);
+    }
+
+    public string SignatureEditorHtml
+    {
+        get => _signatureEditorHtml;
+        set => SetProperty(ref _signatureEditorHtml, value);
+    }
+
+    public string? SignatureEditorError
+    {
+        get => _signatureEditorError;
+        private set
+        {
+            if (SetProperty(ref _signatureEditorError, value))
+            {
+                RaisePropertyChanged(nameof(HasSignatureEditorError));
+            }
+        }
+    }
+
+    public bool HasSignatureEditorError => !string.IsNullOrWhiteSpace(SignatureEditorError);
+
+    public bool IsSignatureTemplatePickerOpen
+    {
+        get => _isSignatureTemplatePickerOpen;
+        private set => SetProperty(ref _isSignatureTemplatePickerOpen, value);
     }
 
     public string? DefaultSenderMailboxId => _defaultSenderMailboxId;
@@ -1133,9 +1236,11 @@ public sealed class MainWindowViewModel : ViewModelBase
             RaiseDraftState();
             foreach (var mailbox in Mailboxes.Where(candidate => candidate.AccountId == account.AccountId).ToArray())
             {
+                _mailboxSignatures.Remove(mailbox.Id);
                 Mailboxes.Remove(mailbox);
             }
             RebuildSenderSettings();
+            RaiseSenderPreferencesChanged();
 
             _pendingRemovalAccount = null;
             SelectedMessage = null;
@@ -3162,24 +3267,88 @@ public sealed class MainWindowViewModel : ViewModelBase
     public void ConfigureSenderPreferences(
         string legacySignature,
         string? defaultSenderMailboxId,
-        IReadOnlyDictionary<string, string>? senderSignatures)
+        IReadOnlyDictionary<string, string>? senderSignatures,
+        IReadOnlyList<SignaturePreference>? signatures = null,
+        IReadOnlyDictionary<string, MailboxSignaturePreferences>? mailboxSignatures = null)
     {
-        _signature = legacySignature;
         _defaultSenderMailboxId = defaultSenderMailboxId;
-        _senderSignatures.Clear();
-        foreach (var preference in senderSignatures ?? new Dictionary<string, string>())
+        _legacyFallbackSignatureId = null;
+        _mailboxSignatures.Clear();
+        while (Signatures.Count > 1)
         {
-            _senderSignatures[preference.Key] = preference.Value;
+            SignatureChoices.Remove(Signatures[^1]);
+            Signatures.RemoveAt(Signatures.Count - 1);
+        }
+
+        if (signatures is not null || mailboxSignatures is not null)
+        {
+            foreach (var preference in signatures ?? [])
+            {
+                if (string.IsNullOrWhiteSpace(preference.Id) || preference.Id == SignatureCatalog.DefaultId ||
+                    Signatures.Any(candidate => candidate.Id == preference.Id))
+                {
+                    continue;
+                }
+                AddCustomSignature(new SignatureItem(
+                    preference.Id,
+                    UniqueSignatureName(preference.Name),
+                    _renderer.SanitizeComposeHtml(preference.Html)));
+            }
+            foreach (var preference in mailboxSignatures ?? new Dictionary<string, MailboxSignaturePreferences>())
+            {
+                _mailboxSignatures[preference.Key] = NormalizeSignaturePreferences(preference.Value);
+            }
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(legacySignature))
+            {
+                var imported = new SignatureItem(
+                    Guid.NewGuid().ToString("N"),
+                    UniqueSignatureName("Imported default"),
+                    _renderer.PrepareComposeHtml(legacySignature, isHtml: false));
+                AddCustomSignature(imported);
+                _legacyFallbackSignatureId = imported.Id;
+            }
+            foreach (var preference in senderSignatures ?? new Dictionary<string, string>())
+            {
+                if (string.IsNullOrWhiteSpace(preference.Value))
+                {
+                    continue;
+                }
+                var imported = new SignatureItem(
+                    Guid.NewGuid().ToString("N"),
+                    UniqueSignatureName("Imported signature"),
+                    _renderer.PrepareComposeHtml(preference.Value, isHtml: false));
+                AddCustomSignature(imported);
+                _mailboxSignatures[preference.Key] = AllSignatureActions(imported.Id);
+            }
         }
         RebuildSenderSettings();
-        RaisePropertyChanged(nameof(Signature));
+        SelectedSignature = Signatures[0];
+        RaiseSenderPreferencesChanged();
     }
 
-    public Dictionary<string, string> GetSenderSignatures() =>
-        new(_senderSignatures, StringComparer.Ordinal);
+    public List<SignaturePreference> GetSignaturePreferences() =>
+        Signatures.Where(static signature => !signature.IsReadOnly)
+            .Select(static signature => signature.ToPreference()).ToList();
 
-    public string SignatureForSender(ComposeSender sender) =>
-        _senderSignatures.TryGetValue(sender.Mailbox.Id, out var signature) ? signature : Signature;
+    public Dictionary<string, MailboxSignaturePreferences> GetMailboxSignaturePreferences() =>
+        new(_mailboxSignatures, StringComparer.Ordinal);
+
+    public Dictionary<string, string> GetSenderSignatures() => SenderSettings
+        .Where(static sender => !string.IsNullOrWhiteSpace(sender.NewMailSignature.Html))
+        .ToDictionary(static sender => sender.MailboxId, static sender => sender.NewMailSignature.Html, StringComparer.Ordinal);
+
+    public SignatureContent? SignatureForSender(ComposeSender sender, ComposeIntent intent)
+    {
+        var preferences = _mailboxSignatures.TryGetValue(sender.Mailbox.Id, out var saved)
+            ? saved
+            : new MailboxSignaturePreferences();
+        var id = preferences.For(intent);
+        var signature = Signatures.FirstOrDefault(candidate => candidate.Id == id);
+        return signature is null ? null : new SignatureContent(signature.Id, signature.Html);
+    }
 
     private Task SetDefaultSenderAsync(SenderSettingsItem item)
     {
@@ -3194,22 +3363,191 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void RebuildSenderSettings()
     {
-        var senders =
+        var senders = (
             from mailbox in Mailboxes
             join account in Accounts on mailbox.AccountId equals account.AccountId
             where !mailbox.IsShared || mailbox.CanSendAs || mailbox.CanSendOnBehalf
-            select new ComposeSender(account, mailbox);
+            select new ComposeSender(account, mailbox)).ToArray();
+        var addedDefaults = false;
+        foreach (var sender in senders)
+        {
+            if (_mailboxSignatures.ContainsKey(sender.Mailbox.Id))
+            {
+                continue;
+            }
+            _mailboxSignatures[sender.Mailbox.Id] = AllSignatureActions(
+                _legacyFallbackSignatureId ?? SignatureCatalog.DefaultId);
+            addedDefaults = true;
+        }
         Replace(SenderSettings, senders.Select(sender => new SenderSettingsItem(
             sender,
-            SignatureForSender(sender),
             sender.Mailbox.Id == _defaultSenderMailboxId,
+            SignatureChoices,
+            _mailboxSignatures[sender.Mailbox.Id],
             OnSenderSignatureChanged)));
+        Replace(SignatureAccountSettings, Accounts.Select(account => new SignatureAccountSettingsItem(
+            account,
+            SenderSettings.Where(sender => sender.Account.AccountId == account.AccountId).ToArray())));
+        if (addedDefaults)
+        {
+            RaiseSenderPreferencesChanged();
+        }
     }
 
     private void OnSenderSignatureChanged(SenderSettingsItem item)
     {
-        _senderSignatures[item.MailboxId] = item.Signature;
+        _mailboxSignatures[item.MailboxId] = item.ToPreferences();
         RaiseSenderPreferencesChanged();
+    }
+
+    private static MailboxSignaturePreferences AllSignatureActions(string? signatureId) =>
+        new(signatureId, signatureId, signatureId, signatureId);
+
+    private MailboxSignaturePreferences NormalizeSignaturePreferences(MailboxSignaturePreferences preferences)
+    {
+        string? Known(string? id) => string.IsNullOrWhiteSpace(id)
+            ? null
+            : Signatures.Any(signature => signature.Id == id) ? id : SignatureCatalog.DefaultId;
+        return new(
+            Known(preferences.NewMailSignatureId),
+            Known(preferences.ReplySignatureId),
+            Known(preferences.ReplyAllSignatureId),
+            Known(preferences.ForwardSignatureId));
+    }
+
+    private Task OpenSignatureTemplatesAsync()
+    {
+        IsSignatureTemplatePickerOpen = true;
+        SignatureEditorError = null;
+        return Task.CompletedTask;
+    }
+
+    private Task CloseSignatureTemplatesAsync()
+    {
+        IsSignatureTemplatePickerOpen = false;
+        return Task.CompletedTask;
+    }
+
+    private Task CreateSignatureFromTemplateAsync(SignatureTemplate template)
+    {
+        var signature = new SignatureItem(
+            Guid.NewGuid().ToString("N"),
+            UniqueSignatureName(template.Id == "blank" ? "New signature" : template.Name),
+            _renderer.SanitizeComposeHtml(template.Html));
+        AddCustomSignature(signature);
+        IsSignatureTemplatePickerOpen = false;
+        SelectedSignature = signature;
+        RaiseSenderPreferencesChanged();
+        return Task.CompletedTask;
+    }
+
+    private Task SaveSignatureAsync()
+    {
+        var signature = SelectedSignature;
+        var name = SignatureEditorName.Trim();
+        if (signature?.CanEdit != true)
+        {
+            return Task.CompletedTask;
+        }
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            SignatureEditorError = "Give the signature a name.";
+            return Task.CompletedTask;
+        }
+        if (Signatures.Any(candidate => candidate != signature &&
+            candidate.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+        {
+            SignatureEditorError = "Signature names must be unique.";
+            return Task.CompletedTask;
+        }
+        signature.Name = name;
+        signature.Html = _renderer.SanitizeComposeHtml(SignatureEditorHtml);
+        SignatureEditorHtml = signature.Html;
+        SignatureEditorError = null;
+        RaiseSenderPreferencesChanged();
+        return Task.CompletedTask;
+    }
+
+    private Task ResetSignatureAsync()
+    {
+        LoadSelectedSignatureEditor();
+        return Task.CompletedTask;
+    }
+
+    private Task DuplicateSignatureAsync()
+    {
+        if (SelectedSignature is not { } source)
+        {
+            return Task.CompletedTask;
+        }
+        var copy = new SignatureItem(
+            Guid.NewGuid().ToString("N"),
+            UniqueSignatureName($"{source.Name} copy"),
+            source.Html);
+        AddCustomSignature(copy);
+        SelectedSignature = copy;
+        RaiseSenderPreferencesChanged();
+        return Task.CompletedTask;
+    }
+
+    private Task DeleteSignatureAsync()
+    {
+        if (SelectedSignature is not { CanEdit: true } signature)
+        {
+            return Task.CompletedTask;
+        }
+        var usageCount = _mailboxSignatures.Values.Count(preferences =>
+            preferences.NewMailSignatureId == signature.Id ||
+            preferences.ReplySignatureId == signature.Id ||
+            preferences.ReplyAllSignatureId == signature.Id ||
+            preferences.ForwardSignatureId == signature.Id);
+        if (usageCount > 0 && _pendingSignatureDeleteId != signature.Id)
+        {
+            _pendingSignatureDeleteId = signature.Id;
+            SignatureEditorError = $"This signature is used by {usageCount} mailbox{(usageCount == 1 ? "" : "es")}. Click Delete again to remove it and set those choices to None.";
+            return Task.CompletedTask;
+        }
+        foreach (var mailboxId in _mailboxSignatures.Keys.ToArray())
+        {
+            var current = _mailboxSignatures[mailboxId];
+            string? Clear(string? id) => id == signature.Id ? null : id;
+            _mailboxSignatures[mailboxId] = new(
+                Clear(current.NewMailSignatureId),
+                Clear(current.ReplySignatureId),
+                Clear(current.ReplyAllSignatureId),
+                Clear(current.ForwardSignatureId));
+        }
+        Signatures.Remove(signature);
+        SignatureChoices.Remove(signature);
+        RebuildSenderSettings();
+        SelectedSignature = Signatures[0];
+        RaiseSenderPreferencesChanged();
+        return Task.CompletedTask;
+    }
+
+    private void AddCustomSignature(SignatureItem signature)
+    {
+        Signatures.Add(signature);
+        SignatureChoices.Add(signature);
+    }
+
+    private string UniqueSignatureName(string proposed)
+    {
+        var root = string.IsNullOrWhiteSpace(proposed) ? "Signature" : proposed.Trim();
+        var name = root;
+        for (var number = 2; Signatures.Any(candidate => candidate.Name.Equals(name, StringComparison.OrdinalIgnoreCase)); number++)
+        {
+            name = $"{root} {number}";
+        }
+        return name;
+    }
+
+    private void LoadSelectedSignatureEditor()
+    {
+        _pendingSignatureDeleteId = null;
+        SignatureEditorName = SelectedSignature?.Name ?? "";
+        SignatureEditorHtml = SelectedSignature?.Html ?? "";
+        SignatureEditorError = null;
     }
 
     private void RaiseSenderPreferencesChanged()
@@ -3328,7 +3666,8 @@ public sealed class MainWindowViewModel : ViewModelBase
             message.From.Address,
             PrefixSubject(message.Subject, "Re:"),
             AccountId: accountId,
-            MailboxId: mailboxId));
+            MailboxId: mailboxId,
+            Intent: ComposeIntent.Reply));
     }
 
     private Task ReplyAllAsync()
@@ -3355,7 +3694,8 @@ public sealed class MainWindowViewModel : ViewModelBase
             PrefixSubject(message.Subject, "Re:"),
             Cc: string.Join("; ", recipients.Skip(1)),
             AccountId: accountId,
-            MailboxId: mailboxId));
+            MailboxId: mailboxId,
+            Intent: ComposeIntent.ReplyAll));
     }
 
     private Task ForwardAsync()
@@ -3368,7 +3708,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         var subject = PrefixSubject(message.Subject, "Fwd:");
         var body = $"\n\n--- Forwarded message ---\nFrom: {message.From}\nDate: {message.ReceivedAt:g}\nSubject: {message.Subject}\n\n{message.Preview}";
-        return RequestComposeAsync(new ComposeRequest(Subject: subject, Body: body));
+        return RequestComposeAsync(new ComposeRequest(
+            Subject: subject,
+            Body: body,
+            Intent: ComposeIntent.Forward));
     }
 
     private Task SelectAdjacentMessageAsync(int offset)
@@ -3586,6 +3929,16 @@ public sealed record AccountSettingsItem(MailAccount Account, IReadOnlyList<Mail
     public bool HasSharedMailboxes => SharedMailboxes.Count > 0;
 }
 
+public sealed record SettingsTabItem(string Name);
+
+public sealed record SignatureAccountSettingsItem(
+    MailAccount Account,
+    IReadOnlyList<SenderSettingsItem> Mailboxes)
+{
+    public string DisplayName => Account.DisplayName;
+    public string EmailAddress => Account.EmailAddress;
+}
+
 public sealed record MailboxStatisticsItem(
     string DisplayName,
     string Address,
@@ -3605,24 +3958,66 @@ public sealed record MailboxStatisticsItem(
 
 public sealed class SenderSettingsItem(
     ComposeSender sender,
-    string signature,
     bool isDefault,
+    ObservableCollection<SignatureItem> signatureChoices,
+    MailboxSignaturePreferences preferences,
     Action<SenderSettingsItem> signatureChanged) : ViewModelBase
 {
-    private string _signature = signature;
+    private SignatureItem _newMailSignature = Choice(signatureChoices, preferences.NewMailSignatureId);
+    private SignatureItem _replySignature = Choice(signatureChoices, preferences.ReplySignatureId);
+    private SignatureItem _replyAllSignature = Choice(signatureChoices, preferences.ReplyAllSignatureId);
+    private SignatureItem _forwardSignature = Choice(signatureChoices, preferences.ForwardSignatureId);
     private bool _isDefault = isDefault;
 
     public MailAccount Account => sender.Account;
     public Mailbox Mailbox => sender.Mailbox;
     public string MailboxId => Mailbox.Id;
     public string DisplayName => sender.DisplayName;
+    public string MailboxType => Mailbox.IsShared ? "Shared mailbox" : "Primary mailbox";
+    public ObservableCollection<SignatureItem> SignatureChoices => signatureChoices;
 
-    public string Signature
+    public SignatureItem NewMailSignature
     {
-        get => _signature;
+        get => _newMailSignature;
         set
         {
-            if (SetProperty(ref _signature, value))
+            if (SetProperty(ref _newMailSignature, value))
+            {
+                signatureChanged(this);
+            }
+        }
+    }
+
+    public SignatureItem ReplySignature
+    {
+        get => _replySignature;
+        set
+        {
+            if (SetProperty(ref _replySignature, value))
+            {
+                signatureChanged(this);
+            }
+        }
+    }
+
+    public SignatureItem ReplyAllSignature
+    {
+        get => _replyAllSignature;
+        set
+        {
+            if (SetProperty(ref _replyAllSignature, value))
+            {
+                signatureChanged(this);
+            }
+        }
+    }
+
+    public SignatureItem ForwardSignature
+    {
+        get => _forwardSignature;
+        set
+        {
+            if (SetProperty(ref _forwardSignature, value))
             {
                 signatureChanged(this);
             }
@@ -3642,6 +4037,18 @@ public sealed class SenderSettingsItem(
     }
 
     public string DefaultText => IsDefault ? "Default sender" : "Make default";
+
+    public MailboxSignaturePreferences ToPreferences() => new(
+        IdOrNone(NewMailSignature),
+        IdOrNone(ReplySignature),
+        IdOrNone(ReplyAllSignature),
+        IdOrNone(ForwardSignature));
+
+    private static string? IdOrNone(SignatureItem signature) =>
+        string.IsNullOrWhiteSpace(signature.Id) ? null : signature.Id;
+
+    private static SignatureItem Choice(ObservableCollection<SignatureItem> choices, string? id) =>
+        choices.FirstOrDefault(candidate => candidate.Id == id) ?? choices[0];
 }
 
 public sealed record PersonEntry(

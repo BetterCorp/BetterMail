@@ -134,7 +134,9 @@ public sealed record CloudDraft(
 public sealed record DraftAttachment(
     string Name,
     string ContentType,
-    byte[] ContentBytes)
+    byte[] ContentBytes,
+    bool IsInline = false,
+    string? ContentId = null)
 {
     public const long MaximumSizeBytes = 150L * 1024 * 1024;
     public long Size => ContentBytes.LongLength;

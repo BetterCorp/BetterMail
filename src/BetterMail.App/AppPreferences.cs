@@ -10,7 +10,9 @@ public sealed record AppPreferences(
     string MailSyncRange = "All mail",
     string Signature = "",
     string? DefaultSenderMailboxId = null,
-    Dictionary<string, string>? SenderSignatures = null);
+    Dictionary<string, string>? SenderSignatures = null,
+    List<SignaturePreference>? Signatures = null,
+    Dictionary<string, MailboxSignaturePreferences>? MailboxSignatures = null);
 
 public static class AppPreferencesStore
 {

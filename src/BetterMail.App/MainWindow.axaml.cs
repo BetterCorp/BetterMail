@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
@@ -168,7 +167,6 @@ public sealed partial class MainWindow : Window
             Grid.SetColumn(ModuleRefresh, 2);
         }
 
-        SettingsContent.Margin = new Thickness(phone ? 16 : 28);
         UpdateMailPanes();
     }
 
@@ -670,30 +668,6 @@ public sealed partial class MainWindow : Window
         await stream.WriteAsync(attachment.ContentBytes);
     }
 
-    private void OpenWorkspaceLinkClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        if (sender is not Button { CommandParameter: Uri uri })
-        {
-            return;
-        }
-
-        try
-        {
-            _ = Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
-        }
-        catch
-        {
-            // The module remains usable when Windows has no handler for the link.
-        }
-    }
-
-    private async void CheckForUpdatesClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        if (CheckForUpdatesAsync is not null)
-        {
-            await CheckForUpdatesAsync();
-        }
-    }
 }
 
 internal enum ResponsiveLayoutMode

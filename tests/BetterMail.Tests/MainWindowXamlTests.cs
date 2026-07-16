@@ -9,25 +9,28 @@ public sealed class MainWindowXamlTests
     {
         var root = FindRepositoryRoot();
         var xaml = File.ReadAllText(Path.Combine(root, "src", "BetterMail.App", "MainWindow.axaml"));
-        var about = Between(xaml, "x:Name=" + (char)34 + "AboutSection", "Text=" + (char)34 + "Appearance");
+        var settings = File.ReadAllText(Path.Combine(root, "src", "BetterMail.App", "SettingsView.axaml"));
         var appInfoSource = File.ReadAllText(Path.Combine(root, "src", "BetterMail.App", "AppInfo.cs"));
 
-        Assert.True(xaml.IndexOf("AboutSection", StringComparison.Ordinal) <
-            xaml.IndexOf("Text=" + (char)34 + "Appearance", StringComparison.Ordinal));
-        Assert.Contains("/Assets/BetterMail.png", about);
-        Assert.Contains("/Assets/BetterMailSettingsBanner.png", xaml);
-        Assert.Contains("Text=" + (char)34 + "Notifications" + (char)34, xaml);
-        Assert.Equal(1, Count(xaml, "Content=" + (char)34 + "Desktop notifications for new Inbox mail" + (char)34));
-        Assert.Contains("CheckForUpdatesClicked", about);
-        Assert.Contains("BetterMailSelectionBrush", about);
-        Assert.Contains("BetterMailAccentBrush", about);
-        Assert.Contains("{Binding Version", about);
-        Assert.Contains("AGPL-3.0-only", about);
-        Assert.Contains("BetterCorp", about);
-        Assert.Contains("RepositoryUri", about);
-        Assert.Contains("ReleasesUri", about);
-        Assert.Contains("LicenseUri", about);
-        Assert.Equal(3, Count(about, "Click=" + (char)34 + "OpenWorkspaceLinkClicked" + (char)34));
+        Assert.Contains("<app:SettingsView", xaml);
+        Assert.Contains("/Assets/BetterMail.png", settings);
+        Assert.Contains("/Assets/BetterMailSettingsBanner.png", settings);
+        Assert.Contains("Background=" + (char)34 + "#040F2F", settings);
+        Assert.Contains("Stretch=" + (char)34 + "Uniform", settings);
+        Assert.DoesNotContain("UniformToFill", settings);
+        Assert.Contains("Text=" + (char)34 + "Notifications" + (char)34, settings);
+        Assert.Equal(1, Count(settings, "Content=" + (char)34 + "Desktop notifications for new Inbox mail" + (char)34));
+        Assert.Contains("CheckForUpdatesClicked", settings);
+        Assert.Contains("{Binding Version", settings);
+        Assert.Contains("AGPL-3.0-only", settings);
+        Assert.Contains("BetterCorp", settings);
+        Assert.Contains("RepositoryUri", settings);
+        Assert.Contains("ReleasesUri", settings);
+        Assert.Contains("LicenseUri", settings);
+        Assert.Equal(3, Count(settings, "Click=" + (char)34 + "OpenWorkspaceLinkClicked" + (char)34));
+        Assert.Contains("ItemsSource=" + (char)34 + "{Binding SettingsTabs}" + (char)34, settings);
+        Assert.Contains("ItemsSource=" + (char)34 + "{Binding SignatureTemplates}" + (char)34, settings);
+        Assert.Contains("<app:RichHtmlEditor", settings);
         Assert.Contains("typeof(AppInfo).Assembly.GetName().Version", appInfoSource);
         Assert.Equal(
             typeof(BetterMail.App.AppInfo).Assembly.GetName().Version?.ToString(3) ?? "Unknown",
@@ -41,6 +44,7 @@ public sealed class MainWindowXamlTests
         foreach (var file in new[]
                  {
                      "MainWindow.axaml.cs",
+                     "SettingsView.axaml.cs",
                      "ConversationThreadView.axaml.cs",
                      "CalendarWorkspaceView.axaml.cs",
                      "DriveWorkspaceView.axaml.cs",
@@ -81,7 +85,8 @@ public sealed class MainWindowXamlTests
         var threadHeaders = Between(conversationXaml, "<ItemsControl x:Name=" + (char)34 + "ThreadMessages", "</ItemsControl>");
         var folderPane = Between(xaml, "<!-- Structured folder pane -->", "<!-- Compact message list -->");
         var commandBar = Between(xaml, "<!-- Mail command bar", "<!-- Structured folder pane -->");
-        var accounts = Between(xaml, "SettingsAccounts", "IsConfirmingAccountRemoval");
+        var settingsXaml = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "BetterMail.App", "SettingsView.axaml"));
+        var accounts = Between(settingsXaml, "SettingsAccounts", "IsConfirmingAccountRemoval");
         var composeXaml = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "BetterMail.App", "ComposeWindow.axaml"));
         var calendarXaml = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "BetterMail.App", "CalendarWorkspaceView.axaml"));
         var appSource = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "BetterMail.App", "App.axaml.cs"));
@@ -168,9 +173,9 @@ public sealed class MainWindowXamlTests
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding Categories}" + (char)34, xaml);
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding SearchAccountFilters}" + (char)34, xaml);
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding SearchFolderFilters}" + (char)34, xaml);
-        Assert.Contains("SelectedItem=" + (char)34 + "{Binding MailSyncRange}" + (char)34, xaml);
-        Assert.Contains("x:Name=" + (char)34 + "MailStatisticsSection" + (char)34, xaml);
-        Assert.Contains("ItemsSource=" + (char)34 + "{Binding MailStatistics}" + (char)34, xaml);
+        Assert.Contains("SelectedItem=" + (char)34 + "{Binding MailSyncRange}" + (char)34, settingsXaml);
+        Assert.Contains("x:Name=" + (char)34 + "MailStatisticsSection" + (char)34, settingsXaml);
+        Assert.Contains("ItemsSource=" + (char)34 + "{Binding MailStatistics}" + (char)34, settingsXaml);
         Assert.Contains("OpenGlobalSearchGroupCommand", xaml);
         Assert.Contains("StringFormat='View {0}'", xaml);
         Assert.Contains("Text=" + (char)34 + "No mail here" + (char)34, xaml);
@@ -204,7 +209,7 @@ public sealed class MainWindowXamlTests
                      "Add shared mailbox for {0}", "Remove {0}"
                  })
         {
-            Assert.Contains(accessibleName, xaml);
+            Assert.Contains(accessibleName, xaml + settingsXaml);
         }
         Assert.Contains("Load blocked pictures for the selected message", conversationXaml);
     }

@@ -144,20 +144,43 @@ public sealed class MainWindowViewModelTests
         var sharedSettings = Assert.Single(viewModel.SenderSettings, sender => sender.MailboxId == shared.Id);
         var primarySettings = Assert.Single(viewModel.SenderSettings, sender => sender.MailboxId == primary.Id);
         Assert.True(sharedSettings.IsDefault);
-        Assert.Equal("Shared signature", sharedSettings.Signature);
-        Assert.Equal("Legacy signature", primarySettings.Signature);
+        Assert.Contains("Shared signature", sharedSettings.NewMailSignature.Html);
+        Assert.Contains("Legacy signature", primarySettings.NewMailSignature.Html);
 
-        primarySettings.Signature = "Primary signature";
+        primarySettings.NewMailSignature = sharedSettings.NewMailSignature;
         viewModel.SetDefaultSenderCommand.Execute(primarySettings);
         ComposeRequest? requested = null;
         viewModel.ComposeRequested += request => requested = request;
         viewModel.ComposeCommand.Execute(null);
 
         Assert.Equal(primary.Id, viewModel.DefaultSenderMailboxId);
-        Assert.Equal("Primary signature", viewModel.GetSenderSignatures()[primary.Id]);
+        Assert.Contains("Shared signature", viewModel.GetSenderSignatures()[primary.Id]);
         Assert.Equal(primary.Id, requested?.MailboxId);
         Assert.Equal(account.AccountId, requested?.AccountId);
         Assert.Empty(requested?.Body ?? "");
+    }
+
+    [Fact]
+    public void NewPrimaryAndSharedMailboxesUseTheReadOnlyBetterMailDefault()
+    {
+        var account = new MailAccount("microsoft365", "account", "tenant", "person@example.com", "Person", ProviderCapabilities.Mail);
+        var primary = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+        var shared = new Mailbox(account.AccountId, "shared@example.com", "Shared", IsShared: true, CanSendAs: true);
+        var viewModel = new MainWindowViewModel(null, "data", _ => { }, _ => { }, null);
+        viewModel.Accounts.Add(account);
+        viewModel.Mailboxes.Add(primary);
+        viewModel.Mailboxes.Add(shared);
+        viewModel.ConfigureSenderPreferences("", null, null, [], new Dictionary<string, MailboxSignaturePreferences>());
+
+        Assert.True(viewModel.Signatures[0].IsReadOnly);
+        Assert.Equal(SignatureCatalog.DefaultId, viewModel.Signatures[0].Id);
+        foreach (var sender in viewModel.SenderSettings)
+        {
+            Assert.Equal(SignatureCatalog.DefaultId, sender.NewMailSignature.Id);
+            Assert.Equal(SignatureCatalog.DefaultId, sender.ReplySignature.Id);
+            Assert.Equal(SignatureCatalog.DefaultId, sender.ReplyAllSignature.Id);
+            Assert.Equal(SignatureCatalog.DefaultId, sender.ForwardSignature.Id);
+        }
     }
 
     [Fact]

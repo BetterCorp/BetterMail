@@ -1,0 +1,47 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="BetterMail.App.RichHtmlEditor"
+             x:Name="Root">
+  <Border BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1" CornerRadius="3">
+    <Grid RowDefinitions="Auto,*,Auto">
+      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                    BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1"
+                    IsVisible="{Binding !IsReadOnly, ElementName=Root}">
+        <StackPanel Orientation="Horizontal" Spacing="2" Margin="5,4">
+          <Button Classes="command" Content="Undo" CommandParameter="undo" Click="FormatClicked" />
+          <Button Classes="command" Content="Redo" CommandParameter="redo" Click="FormatClicked" />
+          <Border Width="1" Height="22" Background="{DynamicResource BetterMailDividerBrush}" Margin="3,2" />
+          <Button Classes="command" Content="B" FontWeight="Bold" Width="34" CommandParameter="bold" Click="FormatClicked" ToolTip.Tip="Bold" />
+          <Button Classes="command" Content="I" FontStyle="Italic" Width="34" CommandParameter="italic" Click="FormatClicked" ToolTip.Tip="Italic" />
+          <Button Classes="command" Content="U" Width="34" CommandParameter="underline" Click="FormatClicked" ToolTip.Tip="Underline" />
+          <Button Classes="command" Content="S" Width="34" CommandParameter="strikeThrough" Click="FormatClicked" ToolTip.Tip="Strikethrough" />
+          <Button Classes="command" Content="Font" CommandParameter="fontName" Click="FormatClicked" />
+          <Button Classes="command" Content="Size" CommandParameter="fontSize" Click="FormatClicked" />
+          <Button Classes="command" Content="Text colour" CommandParameter="foreColor" Click="FormatClicked" />
+          <Button Classes="command" Content="Highlight" CommandParameter="hiliteColor" Click="FormatClicked" />
+          <Border Width="1" Height="22" Background="{DynamicResource BetterMailDividerBrush}" Margin="3,2" />
+          <Button Classes="command" Content="Bullets" CommandParameter="insertUnorderedList" Click="FormatClicked" />
+          <Button Classes="command" Content="Numbering" CommandParameter="insertOrderedList" Click="FormatClicked" />
+          <Button Classes="command" Content="Outdent" CommandParameter="outdent" Click="FormatClicked" />
+          <Button Classes="command" Content="Indent" CommandParameter="indent" Click="FormatClicked" />
+          <Button Classes="command" Content="Left" CommandParameter="justifyLeft" Click="FormatClicked" />
+          <Button Classes="command" Content="Centre" CommandParameter="justifyCenter" Click="FormatClicked" />
+          <Button Classes="command" Content="Right" CommandParameter="justifyRight" Click="FormatClicked" />
+          <Border Width="1" Height="22" Background="{DynamicResource BetterMailDividerBrush}" Margin="3,2" />
+          <Button Classes="command" Content="Quote" CommandParameter="formatBlock" Tag="blockquote" Click="FormatClicked" />
+          <Button Classes="command" Content="Link" CommandParameter="createLink" Click="FormatClicked" />
+          <Button Classes="command" Content="Image" Click="InsertImageClicked" />
+          <Button Classes="command" Content="Table" CommandParameter="insertTable" Click="FormatClicked" />
+          <Button Classes="command" Content="Line" CommandParameter="insertHorizontalRule" Click="FormatClicked" />
+          <Button Classes="command" Content="Clear format" CommandParameter="removeFormat" Click="FormatClicked" />
+        </StackPanel>
+      </ScrollViewer>
+      <NativeWebView x:Name="Editor" Grid.Row="1"
+                     NavigationCompleted="EditorNavigationCompleted"
+                     WebMessageReceived="EditorWebMessageReceived"
+                     AutomationProperties.Name="Rich text editor" />
+      <TextBlock x:Name="EditorError" Grid.Row="2" Foreground="#D9493D" Margin="8,4"
+                 TextWrapping="Wrap" IsVisible="False" />
+    </Grid>
+  </Border>
+</UserControl>

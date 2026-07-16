@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Net;
 using System.Net.Mail;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
@@ -10,13 +9,14 @@ namespace BetterMail.App;
 public sealed class ComposeWindowViewModel : ViewModelBase
 {
     private readonly Func<ComposeSender, string, DraftMessage, Task> _send;
-    private readonly Func<ComposeSender, string> _signatureForSender;
+    private readonly Func<ComposeSender, ComposeIntent, SignatureContent?> _signatureForSender;
     private readonly Func<LocalDraft, Task>? _saveDraft;
     private readonly Func<string, Task>? _deleteDraft;
     private readonly TimeSpan _autosaveDelay;
     private readonly MailContentRenderer _renderer = new();
     private readonly SemaphoreSlim _draftGate = new(1, 1);
     private readonly string _draftId;
+    private readonly ComposeIntent _intent;
     private CancellationTokenSource? _autosaveCancellation;
     private ComposeSender? _selectedSender;
     private string _subject;
@@ -35,7 +35,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         Func<LocalDraft, Task>? saveDraft = null,
         Func<string, Task>? deleteDraft = null,
         TimeSpan? autosaveDelay = null,
-        Func<ComposeSender, string>? signatureForSender = null,
+        Func<ComposeSender, ComposeIntent, SignatureContent?>? signatureForSender = null,
         Func<string, CancellationToken, Task<IReadOnlyList<RecipientSuggestion>>>? searchRecipients = null)
     {
         Senders = new ObservableCollection<ComposeSender>(
@@ -55,7 +55,8 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         _body = _renderer.PrepareComposeHtml(request.Body, request.IsHtml);
         _draftId = request.DraftId ?? Guid.NewGuid().ToString("N");
         _send = send;
-        _signatureForSender = signatureForSender ?? (_ => "");
+        _signatureForSender = signatureForSender ?? ((_, _) => null);
+        _intent = request.Intent;
         _saveDraft = saveDraft;
         _deleteDraft = deleteDraft;
         _autosaveDelay = autosaveDelay ?? TimeSpan.FromMilliseconds(600);
@@ -127,7 +128,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         set
         {
             if (_managedSignatureBlock is not null &&
-                !value.EndsWith(_managedSignatureBlock, StringComparison.Ordinal))
+                !value.Contains(_managedSignatureBlock, StringComparison.Ordinal))
             {
                 _manageSignature = false;
                 _managedSignatureBlock = null;
@@ -215,15 +216,15 @@ public sealed class ComposeWindowViewModel : ViewModelBase
 
             _autosaveCancellation?.Cancel();
             await SaveDraftNowAsync();
-            var safeBody = _renderer.SanitizeComposeHtml(Body);
+            var outgoing = _renderer.PrepareOutgoingHtml(Body, Attachments.ToArray());
             await _send(SelectedSender, _draftId, new DraftMessage(
                 Subject.Trim(),
                 recipients,
-                safeBody,
+                outgoing.Html,
                 IsHtml: true,
                 cc,
                 bcc,
-                Attachments.ToArray()));
+                outgoing.Attachments));
             _sent = true;
             Sent?.Invoke(this, EventArgs.Empty);
         }
@@ -258,26 +259,31 @@ public sealed class ComposeWindowViewModel : ViewModelBase
 
         if (_managedSignatureBlock is not null)
         {
-            if (!_body.EndsWith(_managedSignatureBlock, StringComparison.Ordinal))
+            var existing = _body.IndexOf(_managedSignatureBlock, StringComparison.Ordinal);
+            if (existing < 0)
             {
                 _manageSignature = false;
                 _managedSignatureBlock = null;
                 return;
             }
-            _body = _body[..^_managedSignatureBlock.Length];
+            _body = _body.Remove(existing, _managedSignatureBlock.Length);
         }
 
-        var signature = WebUtility.HtmlEncode(_signatureForSender(sender).Trim())
-            .Replace("\r\n", "<br>", StringComparison.Ordinal)
-            .Replace("\n", "<br>", StringComparison.Ordinal);
-        _managedSignatureBlock = string.IsNullOrWhiteSpace(signature)
-            ? null
-            : string.IsNullOrWhiteSpace(_body)
-                ? signature
-                : $"<br><br>-- <br>{signature}";
+        var signature = _signatureForSender(sender, _intent);
+        if (signature is null || string.IsNullOrWhiteSpace(signature.Html))
+        {
+            _managedSignatureBlock = null;
+            RaisePropertyChanged(nameof(Body));
+            return;
+        }
+        var block = $"<!--bettermail-signature-start--><div data-bettermail-signature=\"{signature.Id}\">{signature.Html}</div><!--bettermail-signature-end-->";
+        var beforeQuotedContent = _intent is ComposeIntent.Reply or ComposeIntent.ReplyAll or ComposeIntent.Forward;
+        _managedSignatureBlock = string.IsNullOrWhiteSpace(_body)
+            ? block
+            : beforeQuotedContent ? $"{block}<br><br>" : $"<br><br>{block}";
         if (_managedSignatureBlock is not null)
         {
-            _body += _managedSignatureBlock;
+            _body = beforeQuotedContent ? _managedSignatureBlock + _body : _body + _managedSignatureBlock;
         }
         RaisePropertyChanged(nameof(Body));
     }

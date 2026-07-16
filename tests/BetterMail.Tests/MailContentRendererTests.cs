@@ -7,6 +7,22 @@ namespace BetterMail.Tests;
 public sealed class MailContentRendererTests
 {
     [Fact]
+    public void ConvertsEmbeddedComposeImagesToSafeInlineAttachments()
+    {
+        var renderer = new MailContentRenderer();
+        var outgoing = renderer.PrepareOutgoingHtml(
+            "<p>Hello</p><img alt='Logo' src='data:image/png;base64,AQID'>",
+            []);
+
+        var image = Assert.Single(outgoing.Attachments);
+        Assert.True(image.IsInline);
+        Assert.Equal("image/png", image.ContentType);
+        Assert.NotNull(image.ContentId);
+        Assert.Contains($"cid:{image.ContentId}", outgoing.Html);
+        Assert.DoesNotContain("data:image", outgoing.Html);
+    }
+
+    [Fact]
     public void DetectsHtmlWhenCachedContentTypeIsWrong()
     {
         var renderer = new MailContentRenderer();
@@ -105,12 +121,54 @@ public sealed class MailContentRendererTests
 
         Assert.Contains("content=" + (char)34 + "dark" + (char)34, dark);
         Assert.Contains("background: #202020", dark);
-        Assert.Contains("body, body * { color: #f5f5f5 !important; background-color: transparent !important; }", dark);
-        Assert.Contains("body a, body a * { color: #75baff !important; }", dark);
+        Assert.DoesNotContain("body, body *", dark);
+        Assert.Contains("body a { color: #75baff; }", dark);
         Assert.Contains("content=" + (char)34 + "light" + (char)34, light);
         Assert.Contains("background: #ffffff", light);
         Assert.DoesNotContain("background-color: transparent !important", light);
         Assert.DoesNotContain("prefers-color-scheme: dark", light);
+    }
+
+    [Fact]
+    public void PreservesInlineEmailCardsButtonsAndBodyPresentationInDarkMode()
+    {
+        var renderer = new MailContentRenderer { ThemeMode = "Dark" };
+        const string content = """
+            <html><body style="font-family:Calibri,'Segoe UI',Arial,sans-serif;color:#333;margin:0;padding:0;background:#f4f6f8">
+              <div style="max-width:600px;margin:0 auto;padding:24px">
+                <div style="background:#fff;border-radius:10px;overflow:hidden">
+                  <div style="background:#19b5fe;padding:22px 28px;color:#fff">Account Statement</div>
+                  <a href="https://example.com" style="display:inline-block;background:#19b5fe;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold">View invoices</a>
+                </div>
+              </div>
+            </body></html>
+            """;
+
+        var html = Decode(renderer.Render(content, isHtml: true));
+
+        Assert.Contains("mail-original-body", html);
+        Assert.Contains("mail-light-content", html);
+        Assert.Contains("#f4f6f8", html);
+        Assert.Contains("rgba(25, 181, 254, 1)", html);
+        Assert.Contains("border-radius: 10px", html);
+        Assert.Contains("border-radius: 6px", html);
+        Assert.Contains("overflow: hidden", html);
+        Assert.Contains("display: inline-block", html);
+        Assert.Contains("text-decoration: none", html);
+        Assert.Contains("filter: invert(88%) hue-rotate(180deg)", html);
+        Assert.DoesNotContain("background-color: transparent !important", html);
+    }
+
+    [Fact]
+    public void RemovesRemoteImagesHiddenInBackgroundStyles()
+    {
+        var renderer = new MailContentRenderer();
+        var html = Decode(renderer.Render(
+            "<div style=\"background:url('https://tracker.example/pixel') #fff;padding:20px\">Safe</div>",
+            isHtml: true));
+
+        Assert.DoesNotContain("tracker.example", html);
+        Assert.Contains("padding: 20px", html);
     }
 
     private static string Decode(Uri uri) => Encoding.UTF8.GetString(

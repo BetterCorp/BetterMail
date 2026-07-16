@@ -150,7 +150,9 @@ public sealed class ComposeWindowViewModelTests
         var account = new MailAccount("microsoft365", "account", "tenant", "person@example.com", "Person", ProviderCapabilities.Mail);
         var primary = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
         var shared = new Mailbox(account.AccountId, "shared@example.com", "Shared", IsShared: true, CanSendAs: true);
-        string Signature(ComposeSender sender) => sender.Mailbox.Id == shared.Id ? "Shared signature" : "Primary signature";
+        SignatureContent Signature(ComposeSender sender, ComposeIntent intent) => new(
+            sender.Mailbox.Id,
+            sender.Mailbox.Id == shared.Id ? $"Shared {intent} signature" : $"Primary {intent} signature");
         var viewModel = new ComposeWindowViewModel(
             [account],
             [primary, shared],
@@ -158,10 +160,10 @@ public sealed class ComposeWindowViewModelTests
             (_, _, _) => Task.CompletedTask,
             signatureForSender: Signature);
 
-        Assert.EndsWith("Shared signature", viewModel.Body);
+        Assert.Contains("Shared NewMail signature", viewModel.Body);
         viewModel.SelectedSender = Assert.Single(viewModel.Senders, sender => sender.Mailbox.Id == primary.Id);
-        Assert.EndsWith("Primary signature", viewModel.Body);
-        Assert.DoesNotContain("Shared signature", viewModel.Body);
+        Assert.Contains("Primary NewMail signature", viewModel.Body);
+        Assert.DoesNotContain("Shared NewMail signature", viewModel.Body);
 
         var reopened = new ComposeWindowViewModel(
             [account],
@@ -175,7 +177,26 @@ public sealed class ComposeWindowViewModelTests
             signatureForSender: Signature);
         reopened.SelectedSender = Assert.Single(reopened.Senders, sender => sender.Mailbox.Id == shared.Id);
 
-        Assert.Equal(viewModel.Body, reopened.Body);
-        Assert.Equal(1, reopened.Body.Split("Primary signature").Length - 1);
+        Assert.Contains("Hello", reopened.Body);
+        Assert.Equal(1, reopened.Body.Split("Primary NewMail signature").Length - 1);
+    }
+
+    [Theory]
+    [InlineData(ComposeIntent.Reply)]
+    [InlineData(ComposeIntent.ReplyAll)]
+    [InlineData(ComposeIntent.Forward)]
+    public void PlacesActionSpecificSignatureBeforeQuotedContent(ComposeIntent intent)
+    {
+        var account = new MailAccount("microsoft365", "account", "tenant", "person@example.com", "Person", ProviderCapabilities.Mail);
+        var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+        var viewModel = new ComposeWindowViewModel(
+            [account],
+            [mailbox],
+            new ComposeRequest(Body: "Quoted content", IsHtml: true, Intent: intent),
+            (_, _, _) => Task.CompletedTask,
+            signatureForSender: (_, composeIntent) => new("signature", $"<strong>{composeIntent}</strong>"));
+
+        Assert.True(viewModel.Body.IndexOf(intent.ToString(), StringComparison.Ordinal) <
+                    viewModel.Body.IndexOf("Quoted content", StringComparison.Ordinal));
     }
 }

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using BetterMail.Core;
 using Ganss.Xss;
@@ -7,6 +8,12 @@ namespace BetterMail.App;
 
 public sealed class MailContentRenderer
 {
+    private static readonly Regex UnsafeStyleUrl = new(
+        @"(?:background|background-image)\s*:[^;]*url\s*\([^)]*\)\s*;?",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BackgroundHexColor = new(
+        @"background(?:-color)?\s*:\s*#(?<hex>[0-9a-f]{3,8})\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly HashSet<string> SafeInlineImageTypes = new(StringComparer.OrdinalIgnoreCase)
     {
         "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"
@@ -36,16 +43,20 @@ public sealed class MailContentRenderer
         _sanitizer.AllowedAttributes.IntersectWith(
         [
             "align", "alt", "bgcolor", "border", "cellpadding", "cellspacing", "color", "colspan", "dir",
-            "class", "height", "href", "lang", "rowspan", "src", "style", "title", "valign", "width"
+            "class", "data-bettermail-signature", "height", "href", "lang", "rowspan", "src", "style", "title", "valign", "width"
         ]);
-        _sanitizer.AllowedCssProperties.IntersectWith(
+        _sanitizer.AllowedCssProperties.Clear();
+        _sanitizer.AllowedCssProperties.UnionWith(
         [
-            "background-color", "border", "border-collapse", "border-color", "border-radius", "border-spacing",
-            "border-style", "border-width", "box-sizing", "clear", "color", "direction", "display", "float",
+            "background", "background-color", "border", "border-bottom", "border-bottom-left-radius",
+            "border-bottom-right-radius", "border-collapse", "border-color", "border-left", "border-radius",
+            "border-right", "border-spacing", "border-style", "border-top", "border-top-left-radius", "border-top-right-radius",
+            "border-width", "box-sizing", "clear", "color", "direction", "display", "float",
             "font", "font-family", "font-size", "font-style", "font-weight", "height", "line-height", "list-style",
             "margin", "margin-bottom", "margin-left", "margin-right", "margin-top", "max-width", "min-width",
-            "overflow-wrap", "padding", "padding-bottom", "padding-left", "padding-right", "padding-top",
-            "table-layout", "text-align", "text-decoration", "text-indent", "text-transform", "vertical-align",
+            "overflow", "overflow-wrap", "padding", "padding-bottom", "padding-left", "padding-right", "padding-top",
+            "table-layout", "text-align", "text-decoration", "text-decoration-color", "text-decoration-line",
+            "text-decoration-style", "text-indent", "text-transform", "vertical-align",
             "white-space", "width", "word-break", "word-spacing", "word-wrap"
         ]);
         _sanitizer.AllowedAtRules.Clear();
@@ -85,6 +96,47 @@ public sealed class MailContentRenderer
         lock (_sanitizer)
         {
             return SanitizeHtml(content ?? "", [], allowRemoteContent: true);
+        }
+    }
+
+    public (string Html, IReadOnlyList<DraftAttachment> Attachments) PrepareOutgoingHtml(
+        string? content,
+        IReadOnlyList<DraftAttachment> attachments)
+    {
+        lock (_sanitizer)
+        {
+            var document = _sanitizer.SanitizeDom(SanitizeHtml(content ?? "", [], allowRemoteContent: true));
+            var outgoing = attachments.ToList();
+            var imageNumber = 0;
+            foreach (var image in document.QuerySelectorAll("img[src]"))
+            {
+                var source = image.GetAttribute("src")?.Trim();
+                if (!TryReadDataImage(source, out var contentType, out var bytes))
+                {
+                    if (source?.StartsWith("data:", StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        ReplaceImageWithPlaceholder(document, image, "Signature picture unavailable");
+                    }
+                    continue;
+                }
+                var contentId = $"signature-{Guid.NewGuid():N}@bettermail";
+                var extension = contentType switch
+                {
+                    "image/jpeg" => "jpg",
+                    "image/gif" => "gif",
+                    "image/webp" => "webp",
+                    "image/bmp" => "bmp",
+                    _ => "png"
+                };
+                outgoing.Add(new DraftAttachment(
+                    $"signature-image-{++imageNumber}.{extension}",
+                    contentType,
+                    bytes,
+                    IsInline: true,
+                    ContentId: contentId));
+                image.SetAttribute("src", $"cid:{contentId}");
+            }
+            return (document.Body?.InnerHtml ?? document.DocumentElement?.InnerHtml ?? "", outgoing);
         }
     }
 
@@ -147,9 +199,10 @@ public sealed class MailContentRenderer
     }
 
     private const string DarkContentOverrides =
-        "body, body * { color: #f5f5f5 !important; background-color: transparent !important; } " +
-        "body a, body a * { color: #75baff !important; } " +
-        "blockquote, .gmail_quote, .yahoo_quoted, .moz-cite-prefix, .gmail_signature, .moz-signature { color: #b8b8b8 !important; } " +
+        "body a { color: #75baff; } " +
+        ".mail-light-content { filter: invert(88%) hue-rotate(180deg); } " +
+        ".mail-light-content img { filter: invert(100%) hue-rotate(180deg); } " +
+        "blockquote, .gmail_quote, .yahoo_quoted, .moz-cite-prefix, .gmail_signature, .moz-signature { color: #b8b8b8; } " +
         ".gmail_signature, .moz-signature { border-top-color: #555; } " +
         ".mail-image-placeholder { border-color: #666; background: #2d2d2d !important; color: #ccc !important; } " +
         "::-webkit-scrollbar-thumb { background: #666; }";
@@ -189,7 +242,7 @@ public sealed class MailContentRenderer
             }
 
             if (!Uri.TryCreate(href, UriKind.Absolute, out var uri) ||
-                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != "mailto"))
             {
                 link.RemoveAttribute("href");
                 continue;
@@ -238,7 +291,88 @@ public sealed class MailContentRenderer
             ReplaceImageWithPlaceholder(document, image, "Picture unavailable");
         }
 
+        foreach (var element in document.QuerySelectorAll("[style]"))
+        {
+            var style = element.GetAttribute("style") ?? "";
+            var safeStyle = UnsafeStyleUrl.Replace(style, "");
+            if (safeStyle != style)
+            {
+                element.SetAttribute("style", safeStyle);
+            }
+        }
+
+        PreserveBodyPresentation(document);
+
         return document.Body?.InnerHtml ?? document.DocumentElement?.InnerHtml ?? "";
+    }
+
+    private static void PreserveBodyPresentation(IDocument document)
+    {
+        var body = document.Body;
+        var style = body?.GetAttribute("style")?.Trim();
+        var background = body?.GetAttribute("bgcolor")?.Trim();
+        var bodyClass = body?.GetAttribute("class")?.Trim();
+        if (body is null || string.IsNullOrWhiteSpace(style) && string.IsNullOrWhiteSpace(background) &&
+            string.IsNullOrWhiteSpace(bodyClass))
+        {
+            return;
+        }
+
+        var wrapper = document.CreateElement("div");
+        wrapper.ClassName = string.IsNullOrWhiteSpace(bodyClass)
+            ? "mail-original-body"
+            : $"mail-original-body {bodyClass}";
+        if (!string.IsNullOrWhiteSpace(background) &&
+            (string.IsNullOrWhiteSpace(style) ||
+             !style.Contains("background", StringComparison.OrdinalIgnoreCase)))
+        {
+            style = $"{style?.TrimEnd(';')};background-color:{background}";
+        }
+        if (!string.IsNullOrWhiteSpace(style))
+        {
+            wrapper.SetAttribute("style", style);
+        }
+        if (HasLightBackground(style))
+        {
+            wrapper.ClassList.Add("mail-light-content");
+        }
+        foreach (var child in body.ChildNodes.ToArray())
+        {
+            wrapper.AppendChild(child);
+        }
+        body.AppendChild(wrapper);
+    }
+
+    private static bool HasLightBackground(string? style)
+    {
+        if (string.IsNullOrWhiteSpace(style))
+        {
+            return false;
+        }
+        if (style.Contains("background:white", StringComparison.OrdinalIgnoreCase) ||
+            style.Contains("background-color:white", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        var match = BackgroundHexColor.Match(style);
+        if (!match.Success)
+        {
+            return false;
+        }
+        var hex = match.Groups["hex"].Value;
+        if (hex.Length is 3 or 4)
+        {
+            hex = string.Concat(hex.Take(3).SelectMany(character => new[] { character, character }));
+        }
+        if (hex.Length < 6 || !int.TryParse(hex[..6], System.Globalization.NumberStyles.HexNumber, null, out var color))
+        {
+            return false;
+        }
+        var red = color >> 16 & 255;
+        var green = color >> 8 & 255;
+        var blue = color & 255;
+        // ponytail: root-color heuristic; add a full CSS color parser only if real mail needs more than hex/white.
+        return red * 299 + green * 587 + blue * 114 >= 190_000;
     }
 
     private bool HasImageSource(string? content, bool isHtml, Func<string, bool> predicate)
@@ -263,6 +397,31 @@ public sealed class MailContentRenderer
         source.Length <= 14_000_000 &&
         SafeInlineImageTypes.Any(type =>
             source.StartsWith($"data:{type};base64,", StringComparison.OrdinalIgnoreCase));
+
+    private static bool TryReadDataImage(string? source, out string contentType, out byte[] bytes)
+    {
+        contentType = "";
+        bytes = [];
+        if (!IsSafeDataImage(source))
+        {
+            return false;
+        }
+        var comma = source!.IndexOf(',');
+        if (comma < 0)
+        {
+            return false;
+        }
+        contentType = source[5..source.IndexOf(';')].ToLowerInvariant();
+        try
+        {
+            bytes = Convert.FromBase64String(source[(comma + 1)..]);
+            return bytes.Length <= 2 * 1024 * 1024;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
 
     private static void ReplaceImageWithPlaceholder(IDocument document, IElement image, string prefix)
     {

@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="using:BetterMail.App"
         xmlns:core="using:BetterMail.Core"
         x:Class="BetterMail.App.ComposeWindow"
         Title="New message" Icon="/Assets/BetterMail.ico"
@@ -89,30 +90,10 @@
       </ItemsControl>
     </Grid>
 
-    <Border Grid.Row="4" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1" CornerRadius="2">
-      <Grid RowDefinitions="Auto,*">
-        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
-                      BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1">
-          <StackPanel Orientation="Horizontal" Spacing="2" Margin="5,4">
-            <Button Classes="command" Content="Undo" CommandParameter="undo" Click="FormatClicked" />
-            <Button Classes="command" Content="Redo" CommandParameter="redo" Click="FormatClicked" />
-            <Border Width="1" Height="22" Background="{DynamicResource BetterMailDividerBrush}" Margin="3,2" />
-            <Button Classes="command" Content="B" FontWeight="Bold" Width="34" CommandParameter="bold" Click="FormatClicked" ToolTip.Tip="Bold" />
-            <Button Classes="command" Content="I" FontStyle="Italic" Width="34" CommandParameter="italic" Click="FormatClicked" ToolTip.Tip="Italic" />
-            <Button Classes="command" Content="U" Width="34" CommandParameter="underline" Click="FormatClicked" ToolTip.Tip="Underline" />
-            <Button Classes="command" Content="Bullets" CommandParameter="insertUnorderedList" Click="FormatClicked" />
-            <Button Classes="command" Content="Numbering" CommandParameter="insertOrderedList" Click="FormatClicked" />
-            <Button Classes="command" Content="Quote" CommandParameter="formatBlock" Tag="blockquote" Click="FormatClicked" />
-            <Button Classes="command" Content="Link" CommandParameter="createLink" Click="FormatClicked" />
-            <Button Classes="command" Content="Clear format" CommandParameter="removeFormat" Click="FormatClicked" />
-          </StackPanel>
-        </ScrollViewer>
-        <NativeWebView x:Name="Composer" Grid.Row="1"
-                       NavigationCompleted="ComposerNavigationCompleted"
-                       WebMessageReceived="ComposerWebMessageReceived"
-                       AutomationProperties.Name="Rich text message body" />
-      </Grid>
-    </Border>
+    <app:RichHtmlEditor x:Name="Composer" Grid.Row="4"
+                        Html="{Binding Body, Mode=TwoWay}"
+                        Placeholder="Write something useful…"
+                        AutomationProperties.Name="Rich text message body" />
 
     <Grid Grid.Row="5" ColumnDefinitions="*,Auto,Auto" Margin="0,14,0,0">
       <StackPanel VerticalAlignment="Center">

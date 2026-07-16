@@ -80,10 +80,6 @@ public sealed partial class App : Application
         viewModel.IsCompact = preferences.IsCompact;
         viewModel.DesktopNotificationsEnabled = preferences.DesktopNotificationsEnabled;
         viewModel.MailSyncRange = preferences.MailSyncRange;
-        viewModel.ConfigureSenderPreferences(
-            preferences.Signature,
-            preferences.DefaultSenderMailboxId,
-            preferences.SenderSignatures);
         viewModel.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName is nameof(MainWindowViewModel.SelectedThemeMode) or
@@ -91,7 +87,6 @@ public sealed partial class App : Application
                 nameof(MainWindowViewModel.IsCompact) or
                 nameof(MainWindowViewModel.DesktopNotificationsEnabled) or
                 nameof(MainWindowViewModel.MailSyncRange) or
-                nameof(MainWindowViewModel.Signature) or
                 nameof(MainWindowViewModel.SenderPreferencesVersion))
             {
                 AppPreferencesStore.Save(dataDirectory, new AppPreferences(
@@ -100,11 +95,17 @@ public sealed partial class App : Application
                     IsCompact: viewModel.IsCompact,
                     DesktopNotificationsEnabled: viewModel.DesktopNotificationsEnabled,
                     MailSyncRange: viewModel.MailSyncRange,
-                    Signature: viewModel.Signature,
                     DefaultSenderMailboxId: viewModel.DefaultSenderMailboxId,
-                    SenderSignatures: viewModel.GetSenderSignatures()));
+                    Signatures: viewModel.GetSignaturePreferences(),
+                    MailboxSignatures: viewModel.GetMailboxSignaturePreferences()));
             }
         };
+        viewModel.ConfigureSenderPreferences(
+            preferences.Signature,
+            preferences.DefaultSenderMailboxId,
+            preferences.SenderSignatures,
+            preferences.Signatures,
+            preferences.MailboxSignatures);
         mainWindow = new MainWindow { DataContext = viewModel };
         desktop.MainWindow = mainWindow;
         mainWindow.Show();

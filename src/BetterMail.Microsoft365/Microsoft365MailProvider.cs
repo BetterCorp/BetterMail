@@ -412,7 +412,9 @@ public sealed class Microsoft365MailProvider(
                         ["@odata.type"] = "#microsoft.graph.fileAttachment",
                         ["name"] = attachment.Name,
                         ["contentType"] = attachment.ContentType,
-                        ["contentBytes"] = Convert.ToBase64String(attachment.ContentBytes)
+                        ["contentBytes"] = Convert.ToBase64String(attachment.ContentBytes),
+                        ["isInline"] = attachment.IsInline,
+                        ["contentId"] = attachment.ContentId
                     },
                     cancellationToken).ConfigureAwait(false);
                 continue;
@@ -471,7 +473,9 @@ public sealed class Microsoft365MailProvider(
                     supported.Add(new DraftAttachment(
                         OptionalString(attachment, "name") ?? "Attachment",
                         OptionalString(attachment, "contentType") ?? "application/octet-stream",
-                        contentBytes.GetBytesFromBase64()));
+                        contentBytes.GetBytesFromBase64(),
+                        attachment.TryGetProperty("isInline", out var isInline) && isInline.ValueKind == JsonValueKind.True,
+                        OptionalString(attachment, "contentId")));
                 }
                 catch (FormatException)
                 {
@@ -531,6 +535,12 @@ public sealed class Microsoft365MailProvider(
             {
                 throw new InvalidOperationException(
                     $"'{attachment.Name}' is larger than the 150 MB Microsoft Graph attachment limit.");
+            }
+            if (attachment.IsInline &&
+                (string.IsNullOrWhiteSpace(attachment.ContentId) || RequiresUploadSession(attachment.Size)))
+            {
+                throw new InvalidOperationException(
+                    $"'{attachment.Name}' is not a valid inline image attachment.");
             }
         }
     }
