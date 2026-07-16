@@ -18,6 +18,16 @@ public sealed class MainWindowViewModel : ViewModelBase
         ["Rose"] = "#C84B71",
         ["Orange"] = "#D66A1F"
     };
+    private static readonly MailQuickActionOption[] AvailableMailQuickActions =
+    [
+        new("read", "Read / unread", "✉"),
+        new("flag", "Flag / clear flag", "⚑"),
+        new("archive", "Archive", "▣"),
+        new("delete", "Delete", "×"),
+        new("move", "Move to folder", "↪", IsMove: true),
+        new("junk", "Junk / not junk", "!")
+    ];
+    private static readonly string[] DefaultMailQuickActionIds = ["read", "flag", "archive", "delete"];
 
     private readonly EncryptedMailStore? _store;
     private readonly string _dataDirectory;
@@ -85,9 +95,12 @@ public sealed class MainWindowViewModel : ViewModelBase
     private string _signatureEditorHtml = "";
     private string? _signatureEditorError;
     private bool _isSignatureTemplatePickerOpen;
-    private string? _pendingSignatureDeleteId;
+    private SignatureItem? _pendingSignatureDelete;
+    private bool _isCreatingSignature;
     private SettingsTabItem? _selectedSettingsTab;
     private int _senderPreferencesVersion;
+    private int _mailQuickActionsVersion;
+    private bool _configuringMailQuickActions;
     private PersonEntry? _editingContact;
     private PersonEntry? _pendingDeleteContact;
     private MailAccount? _selectedContactAccount;
@@ -136,9 +149,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         ReauthenticateAccountCommand = new AsyncCommand<MailAccount>(ReauthenticateAccountAsync);
         SyncCommand = new AsyncCommand(SyncAsync, () => Accounts.Count > 0 && _provider is not null && !IsSyncing);
         ToggleReadCommand = new AsyncCommand(ToggleReadAsync, CanRunSelectedMailAction);
-        ArchiveCommand = new AsyncCommand(() => MoveSelectedMessageAsync("archive", "Archiving...", "Archived", markAsRead: true), CanRunSelectedMailAction);
+        ArchiveCommand = new AsyncCommand(() => MoveSelectedMessageAsync("archive", "Archiving...", "Archived"), CanRunSelectedMailAction);
         DeleteCommand = new AsyncCommand(() => MoveSelectedMessageAsync("deleteditems", "Moving to Deleted Items...", "Moved to Deleted Items"), CanRunSelectedMailAction);
         JunkCommand = new AsyncCommand(() => MoveSelectedMessageAsync("junkemail", "Moving to Junk Email...", "Moved to Junk Email"), CanRunSelectedMailAction);
+        NotJunkCommand = new AsyncCommand(() => MoveSelectedMessageAsync("inbox", "Moving to Inbox...", "Marked as not junk"), CanRunSelectedMailAction);
         ToggleFlagCommand = new AsyncCommand(ToggleFlagAsync, CanRunSelectedMailAction);
         MoveToFolderCommand = new AsyncCommand<MailFolderItem>(MoveSelectionToFolderAsync, CanMoveSelectionToFolder);
         ShowUnifiedInboxCommand = new AsyncCommand(ShowUnifiedInboxAsync);
@@ -165,10 +179,14 @@ public sealed class MainWindowViewModel : ViewModelBase
         CreateSignatureFromTemplateCommand = new AsyncCommand(
             CreateSignatureFromTemplateAsync,
             () => SelectedSignatureTemplate is not null);
-        SaveSignatureCommand = new AsyncCommand(SaveSignatureAsync, () => SelectedSignature?.CanEdit == true);
-        ResetSignatureCommand = new AsyncCommand(ResetSignatureAsync, () => SelectedSignature?.CanEdit == true);
-        DuplicateSignatureCommand = new AsyncCommand(DuplicateSignatureAsync, () => SelectedSignature is not null);
-        DeleteSignatureCommand = new AsyncCommand(DeleteSignatureAsync, () => SelectedSignature?.CanEdit == true);
+        SaveSignatureCommand = new AsyncCommand(SaveSignatureAsync, () => HasUnsavedSignatureChanges);
+        ResetSignatureCommand = new AsyncCommand(ResetSignatureAsync, () => HasUnsavedSignatureChanges);
+        DuplicateSignatureCommand = new AsyncCommand(DuplicateSignatureAsync, () => CanManageSavedSignature);
+        DeleteSignatureCommand = new AsyncCommand(RequestDeleteSignatureAsync, () => CanDeleteSelectedSignature);
+        ConfirmDeleteSignatureCommand = new AsyncCommand(
+            ConfirmDeleteSignatureAsync,
+            () => _pendingSignatureDelete is not null);
+        CancelDeleteSignatureCommand = new AsyncCommand(CancelDeleteSignatureAsync);
         CloseSignatureTemplatesCommand = new AsyncCommand(CloseSignatureTemplatesAsync);
         ReplyCommand = new AsyncCommand(ReplyAsync, CanReplyToSelectedMessage);
         ReplyAllCommand = new AsyncCommand(ReplyAllAsync, CanReplyToSelectedMessage);
@@ -204,6 +222,14 @@ public sealed class MainWindowViewModel : ViewModelBase
         SettingsTabs.Add(new("Accounts"));
         SettingsTabs.Add(new("About"));
         _selectedSettingsTab = SettingsTabs[0];
+        foreach (var id in DefaultMailQuickActionIds)
+        {
+            MailQuickActionSlots.Add(new(
+                MailQuickActionSlots.Count + 1,
+                AvailableMailQuickActions.First(action => action.Id == id),
+                MailQuickActionChanged));
+        }
+        RebuildMailQuickActions();
         var defaultSignature = new SignatureItem(
             SignatureCatalog.Default.Id,
             SignatureCatalog.Default.Name,
@@ -228,6 +254,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         Mailboxes.Where(mailbox => mailbox.AccountId == account.AccountId && mailbox.IsShared).ToArray()));
     public ObservableCollection<MailMessage> Messages { get; } = [];
     public ObservableCollection<MailMessage> SelectedMessages { get; } = [];
+    public ObservableCollection<MailQuickActionOption> MailQuickActions { get; } = [];
+    public ObservableCollection<MailQuickActionSlot> MailQuickActionSlots { get; } = [];
     public ObservableCollection<MailFolderItem> Folders { get; } = [];
     public ObservableCollection<MailboxFolderGroup> FolderGroups { get; } = [];
     public ObservableCollection<MailAttachment> Attachments { get; } = [];
@@ -249,6 +277,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public IReadOnlyList<string> AccentNames { get; } = Accents.Keys.ToArray();
     public IReadOnlyList<string> MailSyncRanges { get; } = ["1 month", "3 months", "6 months", "1 year", "All mail"];
     public IReadOnlyList<string> SearchScopes { get; } = ["Everything", "Mail", "OneDrive", "People", "Calendar", "To Do", "Notes"];
+    public IReadOnlyList<MailQuickActionOption> MailQuickActionOptions => AvailableMailQuickActions;
     public bool IsLoadingMailStatistics
     {
         get => _isLoadingMailStatistics;
@@ -268,6 +297,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ICommand ArchiveCommand { get; }
     public ICommand DeleteCommand { get; }
     public ICommand JunkCommand { get; }
+    public ICommand NotJunkCommand { get; }
     public ICommand ToggleFlagCommand { get; }
     public ICommand MoveToFolderCommand { get; }
     public ICommand ShowUnifiedInboxCommand { get; }
@@ -296,6 +326,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ICommand ResetSignatureCommand { get; }
     public ICommand DuplicateSignatureCommand { get; }
     public ICommand DeleteSignatureCommand { get; }
+    public ICommand ConfirmDeleteSignatureCommand { get; }
+    public ICommand CancelDeleteSignatureCommand { get; }
     public ICommand CloseSignatureTemplatesCommand { get; }
     public ICommand ReplyCommand { get; }
     public ICommand ReplyAllCommand { get; }
@@ -522,6 +554,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             {
                 RaisePropertyChanged(nameof(IsMessageListView));
                 RaisePropertyChanged(nameof(CurrentFolderName));
+                RaisePropertyChanged(nameof(IsUnifiedInbox));
                 RaisePropertyChanged(nameof(CurrentItemCountText));
                 RaisePropertyChanged(nameof(ShowEmptyState));
                 RaisePropertyChanged(nameof(ShowDraftEmptyState));
@@ -529,6 +562,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
     public bool IsMessageListView => !IsDraftsView;
+    public bool IsUnifiedInbox => _selectedFolder is null && !IsDraftsView && !IsSearchResultsView;
     public bool ShowEmptyState => IsMessageListView && Messages.Count == 0 && !IsBusy;
     public bool ShowDraftEmptyState => IsDraftsView && Drafts.Count == 0;
     public string MessageCountText => $"{Messages.Count:N0} messages";
@@ -774,6 +808,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             if (SetProperty(ref _isSearchResultsView, value))
             {
                 RaisePropertyChanged(nameof(CurrentFolderName));
+                RaisePropertyChanged(nameof(IsUnifiedInbox));
                 RaisePropertyChanged(nameof(CurrentItemCountText));
                 RaisePropertyChanged(nameof(SearchResultSummary));
             }
@@ -986,19 +1021,45 @@ public sealed class MainWindowViewModel : ViewModelBase
         get => _selectedSignature;
         set
         {
+            if (_isCreatingSignature && _selectedSignature is { } draft && value != draft)
+            {
+                _isCreatingSignature = false;
+                Signatures.Remove(draft);
+            }
             if (SetProperty(ref _selectedSignature, value))
             {
                 LoadSelectedSignatureEditor();
                 RaisePropertyChanged(nameof(CanEditSelectedSignature));
-                ((AsyncCommand)SaveSignatureCommand).Refresh();
-                ((AsyncCommand)ResetSignatureCommand).Refresh();
-                ((AsyncCommand)DuplicateSignatureCommand).Refresh();
-                ((AsyncCommand)DeleteSignatureCommand).Refresh();
+                RefreshSignatureEditorState();
             }
         }
     }
 
     public bool CanEditSelectedSignature => SelectedSignature?.CanEdit == true;
+    public bool HasUnsavedSignatureChanges =>
+        CanEditSelectedSignature &&
+        (_isCreatingSignature ||
+         !string.Equals(SignatureEditorName, SelectedSignature?.Name, StringComparison.Ordinal) ||
+         !string.Equals(SignatureEditorHtml, SelectedSignature?.Html, StringComparison.Ordinal));
+    public bool CanManageSavedSignature =>
+        SelectedSignature is not null && !HasUnsavedSignatureChanges && !IsConfirmingSignatureDelete;
+    public bool CanDeleteSelectedSignature =>
+        CanEditSelectedSignature && CanManageSavedSignature;
+    public bool IsConfirmingSignatureDelete => _pendingSignatureDelete is not null;
+    public string SignatureDeleteText
+    {
+        get
+        {
+            if (_pendingSignatureDelete is not { } signature)
+            {
+                return "";
+            }
+            var usageCount = SignatureUsageCount(signature);
+            return usageCount == 0
+                ? $"Delete “{signature.Name}”? This cannot be undone."
+                : $"Delete “{signature.Name}”? It is used by {usageCount} mailbox{(usageCount == 1 ? "" : "es")}; those choices will be set to None.";
+        }
+    }
 
     public SignatureTemplate? SelectedSignatureTemplate
     {
@@ -1029,13 +1090,25 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string SignatureEditorName
     {
         get => _signatureEditorName;
-        set => SetProperty(ref _signatureEditorName, value);
+        set
+        {
+            if (SetProperty(ref _signatureEditorName, value))
+            {
+                SignatureEditorChanged();
+            }
+        }
     }
 
     public string SignatureEditorHtml
     {
         get => _signatureEditorHtml;
-        set => SetProperty(ref _signatureEditorHtml, value);
+        set
+        {
+            if (SetProperty(ref _signatureEditorHtml, value))
+            {
+                SignatureEditorChanged();
+            }
+        }
     }
 
     public string? SignatureEditorError
@@ -1060,6 +1133,40 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public string? DefaultSenderMailboxId => _defaultSenderMailboxId;
     public int SenderPreferencesVersion => _senderPreferencesVersion;
+    public int MailQuickActionsVersion => _mailQuickActionsVersion;
+
+    public void ConfigureMailQuickActions(IReadOnlyList<string>? actionIds)
+    {
+        _configuringMailQuickActions = true;
+        for (var index = 0; index < MailQuickActionSlots.Count; index++)
+        {
+            var id = actionIds is not null && index < actionIds.Count
+                ? actionIds[index]
+                : DefaultMailQuickActionIds[index];
+            MailQuickActionSlots[index].SelectedOption =
+                AvailableMailQuickActions.FirstOrDefault(action => action.Id == id) ??
+                AvailableMailQuickActions.First(action => action.Id == DefaultMailQuickActionIds[index]);
+        }
+        _configuringMailQuickActions = false;
+        RebuildMailQuickActions();
+    }
+
+    public List<string> GetMailQuickActionPreferences() =>
+        MailQuickActionSlots.Select(static slot => slot.SelectedOption.Id).ToList();
+
+    private void MailQuickActionChanged()
+    {
+        if (_configuringMailQuickActions)
+        {
+            return;
+        }
+        RebuildMailQuickActions();
+        _mailQuickActionsVersion++;
+        RaisePropertyChanged(nameof(MailQuickActionsVersion));
+    }
+
+    private void RebuildMailQuickActions() =>
+        Replace(MailQuickActions, MailQuickActionSlots.Select(static slot => slot.SelectedOption));
 
     public async Task InitializeAsync()
     {
@@ -1888,9 +1995,17 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 
     private static bool IsDeletedOrJunkFolder(MailFolderItem? folder) =>
-        folder?.WellKnownName is "deleteditems" or "junkemail" ||
+        folder?.WellKnownName is "deleteditems" ||
         string.Equals(folder?.DisplayName, "Deleted Items", StringComparison.OrdinalIgnoreCase) ||
+        IsJunkFolder(folder);
+
+    private static bool IsJunkFolder(MailFolderItem? folder) =>
+        string.Equals(folder?.WellKnownName, "junkemail", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(folder?.DisplayName, "Junk Email", StringComparison.OrdinalIgnoreCase);
+
+    internal bool IsMessageInJunk(MailMessage message) =>
+        IsJunkFolder(Folders.FirstOrDefault(folder =>
+            folder.MailboxId == message.MailboxId && folder.ProviderId == message.FolderId));
 
     private bool IsArchiveFolder(MailFolderItem? folder)
     {
@@ -2232,6 +2347,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         IsSearchResultsView = false;
         _selectedFolder = null;
         RaisePropertyChanged(nameof(CurrentFolderName));
+        RaisePropertyChanged(nameof(IsUnifiedInbox));
         await LoadMessagesAsync();
     }
 
@@ -2243,6 +2359,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         IsSearchResultsView = false;
         _selectedFolder = folder;
         RaisePropertyChanged(nameof(CurrentFolderName));
+        RaisePropertyChanged(nameof(IsUnifiedInbox));
         await LoadMessagesAsync();
     }
 
@@ -2883,10 +3000,9 @@ public sealed class MainWindowViewModel : ViewModelBase
     private async Task MoveSelectedMessageAsync(
         string destinationFolderId,
         string actionStatus,
-        string successStatus,
-        bool markAsRead = false)
+        string successStatus)
     {
-        await MoveMessagesAsync(ActionMessages(), destinationFolderId, actionStatus, successStatus, markAsRead);
+        await MoveMessagesAsync(ActionMessages(), destinationFolderId, actionStatus, successStatus);
     }
 
     internal bool CanMoveSelectionToFolder(MailFolderItem? folder)
@@ -2908,8 +3024,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         IReadOnlyList<MailMessage> messages,
         string destinationFolderId,
         string actionStatus,
-        string successStatus,
-        bool markAsRead = false)
+        string successStatus)
     {
         if (messages.Count == 0 || _provider is null || _store is null || _isMailActionRunning)
         {
@@ -2929,7 +3044,7 @@ public sealed class MainWindowViewModel : ViewModelBase
                     continue;
                 }
                 var moved = message;
-                if (markAsRead && !message.IsRead)
+                if (!message.IsRead)
                 {
                     await _provider.MarkReadAsync(account, mailbox, message.ProviderId, isRead: true);
                     moved = message with { IsRead = true };
@@ -3020,6 +3135,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         ((AsyncCommand)ArchiveCommand).Refresh();
         ((AsyncCommand)DeleteCommand).Refresh();
         ((AsyncCommand)JunkCommand).Refresh();
+        ((AsyncCommand)NotJunkCommand).Refresh();
         ((AsyncCommand)ToggleFlagCommand).Refresh();
         ((AsyncCommand<MailFolderItem>)MoveToFolderCommand).Refresh();
         ((AsyncCommand)ViewHeadersCommand).Refresh();
@@ -3391,7 +3507,9 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 
     public List<SignaturePreference> GetSignaturePreferences() =>
-        Signatures.Where(static signature => !signature.IsReadOnly)
+        Signatures.Where(signature =>
+                !signature.IsReadOnly &&
+                (!_isCreatingSignature || signature != SelectedSignature))
             .Select(static signature => signature.ToPreference()).ToList();
 
     public Dictionary<string, MailboxSignaturePreferences> GetMailboxSignaturePreferences() =>
@@ -3501,10 +3619,8 @@ public sealed class MainWindowViewModel : ViewModelBase
             Guid.NewGuid().ToString("N"),
             UniqueSignatureName(template.Id == "blank" ? "New signature" : template.Name),
             _renderer.SanitizeComposeHtml(template.Html));
-        AddCustomSignature(signature);
         IsSignatureTemplatePickerOpen = false;
-        SelectedSignature = signature;
-        RaiseSenderPreferencesChanged();
+        BeginNewSignature(signature);
         return Task.CompletedTask;
     }
 
@@ -3529,14 +3645,27 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
         signature.Name = name;
         signature.Html = _renderer.SanitizeComposeHtml(SignatureEditorHtml);
+        if (_isCreatingSignature)
+        {
+            _isCreatingSignature = false;
+            SignatureChoices.Add(signature);
+        }
         SignatureEditorHtml = signature.Html;
         SignatureEditorError = null;
+        RefreshSignatureEditorState();
         RaiseSenderPreferencesChanged();
         return Task.CompletedTask;
     }
 
     private Task ResetSignatureAsync()
     {
+        if (_isCreatingSignature && SelectedSignature is { } draft)
+        {
+            _isCreatingSignature = false;
+            Signatures.Remove(draft);
+            SelectedSignature = Signatures.FirstOrDefault();
+            return Task.CompletedTask;
+        }
         LoadSelectedSignatureEditor();
         return Task.CompletedTask;
     }
@@ -3551,29 +3680,37 @@ public sealed class MainWindowViewModel : ViewModelBase
             Guid.NewGuid().ToString("N"),
             UniqueSignatureName($"{source.Name} copy"),
             source.Html);
-        AddCustomSignature(copy);
-        SelectedSignature = copy;
-        RaiseSenderPreferencesChanged();
+        BeginNewSignature(copy);
         return Task.CompletedTask;
     }
 
-    private Task DeleteSignatureAsync()
+    private Task RequestDeleteSignatureAsync()
     {
         if (SelectedSignature is not { CanEdit: true } signature)
         {
             return Task.CompletedTask;
         }
-        var usageCount = _mailboxSignatures.Values.Count(preferences =>
-            preferences.NewMailSignatureId == signature.Id ||
-            preferences.ReplySignatureId == signature.Id ||
-            preferences.ReplyAllSignatureId == signature.Id ||
-            preferences.ForwardSignatureId == signature.Id);
-        if (usageCount > 0 && _pendingSignatureDeleteId != signature.Id)
+        _pendingSignatureDelete = signature;
+        RaisePropertyChanged(nameof(IsConfirmingSignatureDelete));
+        RaisePropertyChanged(nameof(SignatureDeleteText));
+        RefreshSignatureEditorState();
+        return Task.CompletedTask;
+    }
+
+    private Task CancelDeleteSignatureAsync()
+    {
+        ClearSignatureDeleteConfirmation();
+        RefreshSignatureEditorState();
+        return Task.CompletedTask;
+    }
+
+    private Task ConfirmDeleteSignatureAsync()
+    {
+        if (_pendingSignatureDelete is not { } signature)
         {
-            _pendingSignatureDeleteId = signature.Id;
-            SignatureEditorError = $"This signature is used by {usageCount} mailbox{(usageCount == 1 ? "" : "es")}. Click Delete again to remove it and set those choices to None.";
             return Task.CompletedTask;
         }
+        ClearSignatureDeleteConfirmation();
         foreach (var mailboxId in _mailboxSignatures.Keys.ToArray())
         {
             var current = _mailboxSignatures[mailboxId];
@@ -3587,9 +3724,27 @@ public sealed class MainWindowViewModel : ViewModelBase
         Signatures.Remove(signature);
         SignatureChoices.Remove(signature);
         RebuildSenderSettings();
-        SelectedSignature = Signatures[0];
+        if (SelectedSignature == signature)
+        {
+            SelectedSignature = Signatures.FirstOrDefault();
+        }
         RaiseSenderPreferencesChanged();
         return Task.CompletedTask;
+    }
+
+    private int SignatureUsageCount(SignatureItem signature) =>
+        _mailboxSignatures.Values.Count(preferences =>
+            preferences.NewMailSignatureId == signature.Id ||
+            preferences.ReplySignatureId == signature.Id ||
+            preferences.ReplyAllSignatureId == signature.Id ||
+            preferences.ForwardSignatureId == signature.Id);
+
+    private void BeginNewSignature(SignatureItem signature)
+    {
+        Signatures.Add(signature);
+        SelectedSignature = signature;
+        _isCreatingSignature = true;
+        RefreshSignatureEditorState();
     }
 
     private void AddCustomSignature(SignatureItem signature)
@@ -3611,10 +3766,39 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void LoadSelectedSignatureEditor()
     {
-        _pendingSignatureDeleteId = null;
+        ClearSignatureDeleteConfirmation();
         SignatureEditorName = SelectedSignature?.Name ?? "";
         SignatureEditorHtml = SelectedSignature?.Html ?? "";
         SignatureEditorError = null;
+    }
+
+    private void SignatureEditorChanged()
+    {
+        ClearSignatureDeleteConfirmation();
+        RefreshSignatureEditorState();
+    }
+
+    private void ClearSignatureDeleteConfirmation()
+    {
+        if (_pendingSignatureDelete is null)
+        {
+            return;
+        }
+        _pendingSignatureDelete = null;
+        RaisePropertyChanged(nameof(IsConfirmingSignatureDelete));
+        RaisePropertyChanged(nameof(SignatureDeleteText));
+    }
+
+    private void RefreshSignatureEditorState()
+    {
+        RaisePropertyChanged(nameof(HasUnsavedSignatureChanges));
+        RaisePropertyChanged(nameof(CanManageSavedSignature));
+        RaisePropertyChanged(nameof(CanDeleteSelectedSignature));
+        ((AsyncCommand)SaveSignatureCommand).Refresh();
+        ((AsyncCommand)ResetSignatureCommand).Refresh();
+        ((AsyncCommand)DuplicateSignatureCommand).Refresh();
+        ((AsyncCommand)DeleteSignatureCommand).Refresh();
+        ((AsyncCommand)ConfirmDeleteSignatureCommand).Refresh();
     }
 
     private void RaiseSenderPreferencesChanged()
@@ -3987,6 +4171,7 @@ public sealed record MailboxFolderGroup(Mailbox Mailbox, IReadOnlyList<MailFolde
 {
     public string DisplayName => Mailbox.DisplayName;
     public string Address => Mailbox.Address;
+    public string Color => AccountColors.For(Mailbox.Id);
 }
 
 public sealed record AccountSettingsItem(MailAccount Account, IReadOnlyList<Mailbox> SharedMailboxes)
@@ -3997,6 +4182,34 @@ public sealed record AccountSettingsItem(MailAccount Account, IReadOnlyList<Mail
 }
 
 public sealed record SettingsTabItem(string Name);
+
+public sealed record MailQuickActionOption(
+    string Id,
+    string Label,
+    string Icon,
+    bool IsMove = false);
+
+public sealed class MailQuickActionSlot(
+    int position,
+    MailQuickActionOption selectedOption,
+    Action changed) : ViewModelBase
+{
+    private MailQuickActionOption _selectedOption = selectedOption;
+
+    public string Label => $"Button {position}";
+
+    public MailQuickActionOption SelectedOption
+    {
+        get => _selectedOption;
+        set
+        {
+            if (SetProperty(ref _selectedOption, value))
+            {
+                changed();
+            }
+        }
+    }
+}
 
 public sealed record SignatureAccountSettingsItem(
     MailAccount Account,

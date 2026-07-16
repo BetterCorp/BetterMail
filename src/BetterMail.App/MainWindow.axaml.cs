@@ -475,18 +475,48 @@ public sealed partial class MainWindow : Window
     private void MessageReadClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
         Execute(_viewModel?.ToggleReadCommand);
 
-    private void QuickReadClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
-        SelectAndExecute(sender, _viewModel?.ToggleReadCommand);
-    private void QuickFlagClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
-        SelectAndExecute(sender, _viewModel?.ToggleFlagCommand);
-    private void QuickArchiveClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
-        SelectAndExecute(sender, _viewModel?.ArchiveCommand);
-    private void QuickDeleteClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
-        SelectAndExecute(sender, _viewModel?.DeleteCommand);
-
-    private void SelectAndExecute(object? sender, ICommand? command)
+    private void QuickActionClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
     {
-        if (_viewModel is null || sender is not Control { DataContext: MailMessage message })
+        if (_viewModel is null ||
+            sender is not Button
+            {
+                DataContext: MailQuickActionOption action,
+                CommandParameter: MailMessage message
+            })
+        {
+            return;
+        }
+        var command = action.Id switch
+        {
+            "read" => _viewModel.ToggleReadCommand,
+            "flag" => _viewModel.ToggleFlagCommand,
+            "archive" => _viewModel.ArchiveCommand,
+            "delete" => _viewModel.DeleteCommand,
+            "junk" => _viewModel.IsMessageInJunk(message)
+                ? _viewModel.NotJunkCommand
+                : _viewModel.JunkCommand,
+            _ => null
+        };
+        SelectAndExecute(message, command);
+    }
+
+    private void QuickMovePressed(object? sender, PointerPressedEventArgs args)
+    {
+        if (sender is Button { CommandParameter: MailMessage message })
+        {
+            SelectMessage(message);
+        }
+    }
+
+    private void SelectAndExecute(MailMessage message, ICommand? command)
+    {
+        SelectMessage(message);
+        Execute(command);
+    }
+
+    private void SelectMessage(MailMessage message)
+    {
+        if (_viewModel is null)
         {
             return;
         }
@@ -501,7 +531,6 @@ public sealed partial class MainWindow : Window
             selectedItems.Add(message);
         }
         _viewModel.SetSelectedMessages(selectedItems.OfType<MailMessage>());
-        Execute(command);
     }
 
     private static void Execute(ICommand? command)

@@ -15,9 +15,6 @@ public enum CalendarViewMode
 
 public sealed class CalendarWorkspaceViewModel : ViewModelBase
 {
-    private static readonly string[] Palette =
-        ["#0F6CBD", "#8764B8", "#038387", "#C239B3", "#CA5010", "#498205", "#D13438", "#8E562E"];
-
     private readonly ICalendarProvider _provider;
     private IReadOnlyList<MailAccount> _accounts;
     private readonly Func<DateTimeOffset> _now;
@@ -679,7 +676,7 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
         {
             return color;
         }
-        return Palette[index % Palette.Length];
+        return AccountColors.At(index);
     }
 
     private sealed record AccountLoadResult(CalendarAccountGroup Group, string? Error);

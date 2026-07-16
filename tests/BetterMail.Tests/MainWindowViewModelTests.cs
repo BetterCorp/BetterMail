@@ -197,6 +197,44 @@ public sealed class MainWindowViewModelTests
         viewModel.CreateSignatureFromTemplateCommand.Execute(null);
         Assert.Equal("Professional", viewModel.SelectedSignature?.Name);
         Assert.Contains("Product Director", viewModel.SelectedSignature?.Html);
+        Assert.True(viewModel.HasUnsavedSignatureChanges);
+        Assert.False(viewModel.CanManageSavedSignature);
+        Assert.DoesNotContain(viewModel.SelectedSignature, viewModel.SignatureChoices);
+
+        viewModel.SaveSignatureCommand.Execute(null);
+        Assert.False(viewModel.HasUnsavedSignatureChanges);
+        Assert.True(viewModel.CanManageSavedSignature);
+        Assert.Contains(viewModel.SelectedSignature, viewModel.SignatureChoices);
+
+        viewModel.SignatureEditorHtml += "<p>Changed</p>";
+        Assert.True(viewModel.HasUnsavedSignatureChanges);
+        viewModel.ResetSignatureCommand.Execute(null);
+        Assert.False(viewModel.HasUnsavedSignatureChanges);
+
+        var saved = viewModel.SelectedSignature;
+        viewModel.DeleteSignatureCommand.Execute(null);
+        Assert.True(viewModel.IsConfirmingSignatureDelete);
+        Assert.Contains(saved?.Name ?? "", viewModel.SignatureDeleteText);
+        Assert.Contains(saved, viewModel.Signatures);
+        viewModel.CancelDeleteSignatureCommand.Execute(null);
+        Assert.False(viewModel.IsConfirmingSignatureDelete);
+        viewModel.DeleteSignatureCommand.Execute(null);
+        viewModel.ConfirmDeleteSignatureCommand.Execute(null);
+        Assert.DoesNotContain(saved, viewModel.Signatures);
+    }
+
+    [Fact]
+    public void ConfiguresFourPersistedMailQuickActionsAndStableAccountColours()
+    {
+        var viewModel = new MainWindowViewModel(null, "data", _ => { }, _ => { }, null);
+
+        viewModel.ConfigureMailQuickActions(["delete", "move", "junk", "archive"]);
+
+        Assert.Equal(["delete", "move", "junk", "archive"], viewModel.GetMailQuickActionPreferences());
+        Assert.Equal(4, viewModel.MailQuickActions.Count);
+        Assert.True(viewModel.MailQuickActions[1].IsMove);
+        Assert.Equal(AccountColors.For("mailbox-a"), AccountColors.For("mailbox-a"));
+        Assert.StartsWith("#", AccountColors.For("mailbox-a"));
     }
 
     [Fact]
@@ -681,7 +719,7 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public async Task FlagsAndArchivesTheSelectedMessage()
+    public async Task FlagsAndDeletesTheUnreadSelectedMessageAfterMarkingItRead()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var directory = Path.Combine(Path.GetTempPath(), $"bettermail-actions-{Guid.NewGuid():N}");
@@ -710,12 +748,12 @@ public sealed class MainWindowViewModelTests
             await WaitUntilAsync(() => provider.Flagged == true && viewModel.SelectedMessage?.IsFlagged == true, cancellationToken);
 
             provider.MoveRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            viewModel.ArchiveCommand.Execute(null);
-            await WaitUntilAsync(() => provider.MoveDestination == "archive", cancellationToken);
+            viewModel.DeleteCommand.Execute(null);
+            await WaitUntilAsync(() => provider.MoveDestination == "deleteditems", cancellationToken);
             Assert.True(viewModel.IsMailActionRunning);
-            Assert.Equal("Archiving...", viewModel.MailActionStatus);
+            Assert.Equal("Moving to Deleted Items...", viewModel.MailActionStatus);
             provider.MoveRelease.SetResult();
-            await WaitUntilAsync(() => provider.MarkedRead && provider.MoveDestination == "archive" && viewModel.Messages.Count == 0, cancellationToken);
+            await WaitUntilAsync(() => provider.MarkedRead && provider.MoveDestination == "deleteditems" && viewModel.Messages.Count == 0, cancellationToken);
 
             Assert.False(viewModel.IsBusy);
             Assert.False(viewModel.IsMailActionRunning);

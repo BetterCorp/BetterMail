@@ -307,9 +307,10 @@
                             HorizontalContentAlignment="Stretch"
                             AutomationProperties.Name="{Binding DisplayName}">
                     <Expander.Header>
-                      <Grid RowDefinitions="Auto,Auto" HorizontalAlignment="Stretch">
+                      <Grid RowDefinitions="Auto,Auto,Auto" HorizontalAlignment="Stretch">
                         <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                         <TextBlock Grid.Row="1" Text="{Binding Address}" FontSize="11" Opacity="0.62" TextTrimming="CharacterEllipsis" />
+                        <Border Grid.Row="2" Height="3" Margin="0,5,0,0" Background="{Binding Color}" />
                       </Grid>
                     </Expander.Header>
                     <TreeView ItemsSource="{Binding Folders}" Margin="0,2,0,4"
@@ -412,38 +413,33 @@
                 <Setter Property="BorderBrush" Value="{DynamicResource BetterMailAccentBrush}" />
                 <Setter Property="BorderThickness" Value="2" />
               </Style>
-              <Style Selector="StackPanel.quickActions">
+              <Style Selector="Border.quickActions">
                 <Setter Property="Opacity" Value="0" />
                 <Setter Property="IsHitTestVisible" Value="False" />
                 <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundAltHighBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource BetterMailDividerBrush}" />
+                <Setter Property="BorderThickness" Value="1,0,0,0" />
               </Style>
-              <Style Selector="Border.quickActionsFade">
-                <Setter Property="Opacity" Value="0" />
-              </Style>
-              <Style Selector="ListBoxItem:pointerover Border.quickActionsFade">
-                <Setter Property="Opacity" Value="1" />
-              </Style>
-              <Style Selector="ListBoxItem:selected Border.quickActionsFade">
-                <Setter Property="Opacity" Value="1" />
-              </Style>
-              <Style Selector="ListBoxItem:pointerover StackPanel.quickActions">
+              <Style Selector="ListBoxItem:pointerover Border.quickActions">
                 <Setter Property="Opacity" Value="1" />
                 <Setter Property="IsHitTestVisible" Value="True" />
               </Style>
-              <Style Selector="ListBoxItem:selected StackPanel.quickActions">
+              <Style Selector="ListBoxItem:selected Border.quickActions">
                 <Setter Property="Opacity" Value="1" />
                 <Setter Property="IsHitTestVisible" Value="True" />
               </Style>
-              <Style Selector="StackPanel.quickActions Button.command">
-                <Setter Property="Width" Value="34" />
-                <Setter Property="Height" Value="28" />
+              <Style Selector="Border.quickActions Button.command">
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="MinHeight" Value="0" />
                 <Setter Property="Padding" Value="0" />
                 <Setter Property="CornerRadius" Value="0" />
-                <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundAltHighBrush}" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="VerticalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
                 <Setter Property="FontSize" Value="15" />
-              </Style>
-              <Style Selector="ListBoxItem:pointerover TextBlock.messageDate">
-                <Setter Property="Opacity" Value="0" />
               </Style>
             </ListBox.Styles>
             <ListBox.ItemTemplate>
@@ -471,29 +467,18 @@
                     <Border Width="3" Background="#0F6CBD" IsVisible="{Binding IsUnread}" HorizontalAlignment="Left" />
                     <Grid Margin="{Binding $parent[Window].DataContext.MessageRowMargin}" ColumnDefinitions="4,*,Auto" RowDefinitions="18,18,18" RowSpacing="1">
 
-                    <Grid Grid.Column="1" Grid.ColumnSpan="2" ColumnDefinitions="*,Auto">
-                      <Grid>
+                    <Grid Grid.Column="1" Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto">
+                      <Border Width="6" Height="6" CornerRadius="3" Margin="0,0,6,0"
+                              Background="{Binding MailboxColor}"
+                              VerticalAlignment="Center"
+                              IsVisible="{Binding $parent[Window].DataContext.IsUnifiedInbox}" />
+                      <Grid Grid.Column="1">
                         <TextBlock Text="{Binding SenderDisplayName}" FontWeight="SemiBold" IsVisible="{Binding IsUnread}" TextTrimming="CharacterEllipsis" />
                         <TextBlock Text="{Binding SenderDisplayName}" IsVisible="{Binding IsRead}" TextTrimming="CharacterEllipsis" />
                       </Grid>
-                      <Grid Grid.Column="1" Margin="8,0,0,0">
-                        <TextBlock Classes="messageDate" Text="{Binding ReceivedAt, StringFormat='{}{0:MMM d, HH:mm}'}" FontSize="11" Opacity="0.62" />
-                        <Border Classes="quickActionsFade" Width="164" HorizontalAlignment="Right"
-                                Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
-                          <Border.OpacityMask>
-                            <LinearGradientBrush StartPoint="0%,50%" EndPoint="100%,50%">
-                              <GradientStop Color="Transparent" Offset="0" />
-                              <GradientStop Color="Black" Offset="0.18" />
-                            </LinearGradientBrush>
-                          </Border.OpacityMask>
-                        </Border>
-                        <StackPanel Classes="quickActions" Orientation="Horizontal" Spacing="1" HorizontalAlignment="Right">
-                          <Button Classes="command" Content="✉" Click="QuickReadClicked" ToolTip.Tip="Mark read or unread" AutomationProperties.Name="Mark message read or unread" />
-                          <Button Classes="command" Content="⚑" Click="QuickFlagClicked" ToolTip.Tip="Flag or clear flag" AutomationProperties.Name="Flag or clear message flag" />
-                          <Button Classes="command" Content="▣" Click="QuickArchiveClicked" ToolTip.Tip="Archive" AutomationProperties.Name="Archive message" />
-                          <Button Classes="command" Content="×" Click="QuickDeleteClicked" ToolTip.Tip="Delete" AutomationProperties.Name="Delete message" />
-                        </StackPanel>
-                      </Grid>
+                      <TextBlock Grid.Column="2" Margin="8,0,0,0"
+                                 Text="{Binding ReceivedAt, StringFormat='{}{0:MMM d, HH:mm}'}"
+                                 FontSize="11" Opacity="0.62" />
                     </Grid>
 
                     <Grid Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" ColumnDefinitions="*,Auto,Auto">
@@ -515,6 +500,57 @@
                       </ItemsControl>
                     </Grid>
                     </Grid>
+                    <Border Classes="quickActions"
+                            Width="160"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Stretch"
+                            ZIndex="2">
+                      <ItemsControl ItemsSource="{Binding $parent[Window].DataContext.MailQuickActions}">
+                        <ItemsControl.ItemsPanel>
+                          <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="app:MailQuickActionOption">
+                            <Grid Width="40" Height="{Binding $parent[Window].DataContext.MessageRowHeight}">
+                              <Button Classes="command"
+                                      Content="{Binding Icon}"
+                                      FontFamily="Segoe UI Symbol"
+                                      IsVisible="{Binding !IsMove}"
+                                      CommandParameter="{Binding $parent[ItemsControl].DataContext}"
+                                      Click="QuickActionClicked"
+                                      ToolTip.Tip="{Binding Label}"
+                                      AutomationProperties.Name="{Binding Label}" />
+                              <Button Classes="command"
+                                      Content="{Binding Icon}"
+                                      FontFamily="Segoe UI Symbol"
+                                      IsVisible="{Binding IsMove}"
+                                      CommandParameter="{Binding $parent[ItemsControl].DataContext}"
+                                      PointerPressed="QuickMovePressed"
+                                      ToolTip.Tip="{Binding Label}"
+                                      AutomationProperties.Name="{Binding Label}">
+                                <Button.Flyout>
+                                  <Flyout>
+                                    <ScrollViewer MaxHeight="420" MinWidth="230">
+                                      <ItemsControl ItemsSource="{Binding $parent[Window].DataContext.Folders}">
+                                        <ItemsControl.ItemTemplate>
+                                          <DataTemplate x:DataType="app:MailFolderItem">
+                                            <Button Classes="command"
+                                                    Content="{Binding DisplayName}"
+                                                    HorizontalContentAlignment="Left"
+                                                    Command="{Binding $parent[Window].DataContext.MoveToFolderCommand}"
+                                                    CommandParameter="{Binding}" />
+                                          </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                      </ItemsControl>
+                                    </ScrollViewer>
+                                  </Flyout>
+                                </Button.Flyout>
+                              </Button>
+                            </Grid>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </Border>
                   </Grid>
                 </Border>
               </DataTemplate>

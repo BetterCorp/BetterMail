@@ -78,10 +78,15 @@ public sealed class DesktopNotificationTests
             Assert.Equal("All mail", new AppPreferences().MailSyncRange);
             AppPreferencesStore.Save(
                 directory,
-                new AppPreferences(DesktopNotificationsEnabled: false));
+                new AppPreferences(
+                    DesktopNotificationsEnabled: false,
+                    MailQuickActions: ["delete", "move", "junk", "archive"]));
 
             Assert.False(AppPreferencesStore.Load(directory).DesktopNotificationsEnabled);
             Assert.Equal("All mail", AppPreferencesStore.Load(directory).MailSyncRange);
+            Assert.Equal(
+                ["delete", "move", "junk", "archive"],
+                AppPreferencesStore.Load(directory).MailQuickActions);
 
             File.WriteAllText(Path.Combine(directory, "settings.json"), "{}");
             Assert.True(AppPreferencesStore.Load(directory).DesktopNotificationsEnabled);

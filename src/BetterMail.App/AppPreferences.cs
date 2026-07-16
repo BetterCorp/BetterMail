@@ -12,7 +12,8 @@ public sealed record AppPreferences(
     string? DefaultSenderMailboxId = null,
     Dictionary<string, string>? SenderSignatures = null,
     List<SignaturePreference>? Signatures = null,
-    Dictionary<string, MailboxSignaturePreferences>? MailboxSignatures = null);
+    Dictionary<string, MailboxSignaturePreferences>? MailboxSignatures = null,
+    List<string>? MailQuickActions = null);
 
 public static class AppPreferencesStore
 {

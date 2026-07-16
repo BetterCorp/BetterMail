@@ -12,6 +12,7 @@ public sealed class MainWindowXamlTests
         var xaml = File.ReadAllText(Path.Combine(root, "src", "BetterMail.App", "MainWindow.axaml"));
         var settings = File.ReadAllText(Path.Combine(root, "src", "BetterMail.App", "SettingsView.axaml"));
         var appInfoSource = File.ReadAllText(Path.Combine(root, "src", "BetterMail.App", "AppInfo.cs"));
+        var richEditorSource = File.ReadAllText(Path.Combine(root, "src", "BetterMail.App", "RichHtmlEditor.axaml.cs"));
 
         Assert.Contains("<app:SettingsView", xaml);
         Assert.Contains("/Assets/BetterMail.png", settings);
@@ -35,6 +36,12 @@ public sealed class MainWindowXamlTests
         Assert.Contains("Source=" + (char)34 + "{Binding SelectedSignatureTemplatePreviewUri}" + (char)34, settings);
         Assert.Contains("Selected signature template preview", settings);
         Assert.Contains("<app:RichHtmlEditor", settings);
+        Assert.Contains("content:attr(data-placeholder)", richEditorSource);
+        Assert.DoesNotContain("content:{{JsonSerializer.Serialize(Placeholder)}}", richEditorSource);
+        Assert.Contains("ClipToBounds=" + (char)34 + "True" + (char)34, settings);
+        Assert.Contains("IsVisible=" + (char)34 + "{Binding HasUnsavedSignatureChanges}" + (char)34, settings);
+        Assert.Contains("Command=" + (char)34 + "{Binding ConfirmDeleteSignatureCommand}" + (char)34, settings);
+        Assert.Contains("Command=" + (char)34 + "{Binding CancelDeleteSignatureCommand}" + (char)34, settings);
         Assert.Contains("typeof(AppInfo).Assembly.GetName().Version", appInfoSource);
         Assert.Equal(
             typeof(BetterMail.App.AppInfo).Assembly.GetName().Version?.ToString(3) ?? "Unknown",
@@ -138,7 +145,15 @@ public sealed class MainWindowXamlTests
         Assert.Contains("SelectedItem=" + (char)34 + "{Binding SelectedMessage, Mode=TwoWay}" + (char)34, xaml);
         Assert.Contains("ShowDraftsCommand", folderPane);
         Assert.DoesNotContain("<Expander Header=" + (char)34 + "{Binding DraftCountText}", folderPane);
-        Assert.Contains("QuickArchiveClicked", xaml);
+        Assert.Contains("QuickActionClicked", xaml);
+        Assert.Contains("QuickMovePressed", xaml);
+        Assert.Contains("ItemsSource=" + (char)34 + "{Binding MailQuickActionSlots}" + (char)34, settingsXaml);
+        Assert.Contains("ItemsSource=" + (char)34 + "{Binding $parent[Window].DataContext.MailQuickActions}" + (char)34, xaml);
+        Assert.Contains("IsVisible=" + (char)34 + "{Binding $parent[Window].DataContext.IsUnifiedInbox}" + (char)34, xaml);
+        Assert.Contains("Border.quickActions Button.command", xaml);
+        Assert.Contains("VerticalContentAlignment" + (char)34 + " Value=" + (char)34 + "Center", xaml);
+        Assert.DoesNotContain("quickActionsFade", xaml);
+        Assert.DoesNotContain("<Border.OpacityMask>", xaml);
         Assert.Contains("DoubleTapped=" + (char)34 + "MessageRowDoubleTapped" + (char)34, xaml);
         Assert.Contains("DoubleTapped=" + (char)34 + "CalendarEventDoubleTapped" + (char)34, calendarXaml);
         Assert.Contains(BindingAttribute("IsVisible", "ShowWorkspaceSurface"), xaml);

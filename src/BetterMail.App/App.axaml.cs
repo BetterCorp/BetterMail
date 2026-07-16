@@ -80,6 +80,7 @@ public sealed partial class App : Application
         viewModel.IsCompact = preferences.IsCompact;
         viewModel.DesktopNotificationsEnabled = preferences.DesktopNotificationsEnabled;
         viewModel.MailSyncRange = preferences.MailSyncRange;
+        viewModel.ConfigureMailQuickActions(preferences.MailQuickActions);
         viewModel.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName is nameof(MainWindowViewModel.SelectedThemeMode) or
@@ -87,6 +88,7 @@ public sealed partial class App : Application
                 nameof(MainWindowViewModel.IsCompact) or
                 nameof(MainWindowViewModel.DesktopNotificationsEnabled) or
                 nameof(MainWindowViewModel.MailSyncRange) or
+                nameof(MainWindowViewModel.MailQuickActionsVersion) or
                 nameof(MainWindowViewModel.SenderPreferencesVersion))
             {
                 AppPreferencesStore.Save(dataDirectory, new AppPreferences(
@@ -97,7 +99,8 @@ public sealed partial class App : Application
                     MailSyncRange: viewModel.MailSyncRange,
                     DefaultSenderMailboxId: viewModel.DefaultSenderMailboxId,
                     Signatures: viewModel.GetSignaturePreferences(),
-                    MailboxSignatures: viewModel.GetMailboxSignaturePreferences()));
+                    MailboxSignatures: viewModel.GetMailboxSignaturePreferences(),
+                    MailQuickActions: viewModel.GetMailQuickActionPreferences()));
             }
         };
         viewModel.ConfigureSenderPreferences(

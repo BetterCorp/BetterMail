@@ -61,6 +61,24 @@ public enum MailImportance
     High
 }
 
+public static class AccountColors
+{
+    private static readonly string[] Palette =
+        ["#0F6CBD", "#8764B8", "#038387", "#C239B3", "#CA5010", "#498205", "#D13438", "#8E562E"];
+
+    public static string At(int index) => Palette[(index & int.MaxValue) % Palette.Length];
+
+    public static string For(string stableId)
+    {
+        var hash = 2166136261u;
+        foreach (var character in stableId)
+        {
+            hash = (hash ^ character) * 16777619u;
+        }
+        return Palette[hash % Palette.Length];
+    }
+}
+
 public sealed record MailMessage(
     string MailboxId,
     string ProviderId,
@@ -84,6 +102,7 @@ public sealed record MailMessage(
     IReadOnlyList<MailAddress>? Cc = null)
 {
     public bool IsUnread => !IsRead;
+    public string MailboxColor => AccountColors.For(MailboxId);
     public string SenderDisplayName => string.IsNullOrWhiteSpace(From.Name) ? From.Address : From.Name;
     public string DisplayPreview
     {

@@ -48,7 +48,7 @@
       </ScrollViewer>
     </Border>
 
-    <Grid x:Name="SettingsContent" Grid.Row="3" Margin="28">
+    <Grid x:Name="SettingsContent" Grid.Row="3" Margin="28" ClipToBounds="True">
       <ScrollViewer IsVisible="{Binding ShowAppearanceSettings}">
         <StackPanel MaxWidth="920" HorizontalAlignment="Stretch" Spacing="18">
           <TextBlock Text="Appearance" FontSize="22" FontWeight="SemiBold" />
@@ -85,6 +85,34 @@
                         AutomationProperties.Name="Mail sync history" />
               <TextBlock Text="Changing this starts a background sync. Existing local mail is kept."
                          Opacity="0.62" TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+          <Border Classes="settingsCard">
+            <StackPanel Spacing="9">
+              <TextBlock Text="Message quick actions" FontSize="18" FontWeight="SemiBold" />
+              <TextBlock Text="Choose the four actions shown at the right of a message when you hover or select it."
+                         Opacity="0.62" TextWrapping="Wrap" />
+              <ItemsControl ItemsSource="{Binding MailQuickActionSlots}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="app:MailQuickActionSlot">
+                    <Grid ColumnDefinitions="90,*" ColumnSpacing="10" Margin="0,3">
+                      <TextBlock Text="{Binding Label}" VerticalAlignment="Center" />
+                      <ComboBox Grid.Column="1"
+                                ItemsSource="{Binding $parent[UserControl].DataContext.MailQuickActionOptions}"
+                                SelectedItem="{Binding SelectedOption}">
+                        <ComboBox.ItemTemplate>
+                          <DataTemplate x:DataType="app:MailQuickActionOption">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                              <TextBlock Text="{Binding Icon}" FontFamily="Segoe UI Symbol" Width="20" TextAlignment="Center" />
+                              <TextBlock Text="{Binding Label}" />
+                            </StackPanel>
+                          </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                      </ComboBox>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
             </StackPanel>
           </Border>
           <Border Classes="settingsCard">
@@ -243,13 +271,31 @@
                            IsVisible="{Binding HasSignatureEditorError}" />
                 <WrapPanel Orientation="Horizontal">
                   <Button Classes="primary" Content="Save" Command="{Binding SaveSignatureCommand}"
-                          IsVisible="{Binding CanEditSelectedSignature}" Margin="0,0,6,6" />
+                          IsVisible="{Binding HasUnsavedSignatureChanges}" Margin="0,0,6,6" />
                   <Button Classes="command" Content="Discard changes" Command="{Binding ResetSignatureCommand}"
-                          IsVisible="{Binding CanEditSelectedSignature}" Margin="0,0,6,6" />
-                  <Button Classes="command" Content="Duplicate" Command="{Binding DuplicateSignatureCommand}" Margin="0,0,6,6" />
+                          IsVisible="{Binding HasUnsavedSignatureChanges}" Margin="0,0,6,6" />
+                  <Button Classes="command" Content="Duplicate" Command="{Binding DuplicateSignatureCommand}"
+                          IsVisible="{Binding CanManageSavedSignature}" Margin="0,0,6,6" />
                   <Button Content="Delete" Foreground="#D9493D" Command="{Binding DeleteSignatureCommand}"
-                          IsVisible="{Binding CanEditSelectedSignature}" Margin="0,0,6,6" />
+                          IsVisible="{Binding CanDeleteSelectedSignature}" Margin="0,0,6,6" />
                 </WrapPanel>
+                <Border Background="#18D9493D"
+                        BorderBrush="#D9493D"
+                        BorderThickness="1"
+                        CornerRadius="3"
+                        Padding="12"
+                        IsVisible="{Binding IsConfirmingSignatureDelete}">
+                  <StackPanel Spacing="9">
+                    <TextBlock Text="{Binding SignatureDeleteText}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Button Classes="command" Content="Cancel" Command="{Binding CancelDeleteSignatureCommand}" />
+                      <Button Content="Delete signature"
+                              Background="#D9493D"
+                              Foreground="White"
+                              Command="{Binding ConfirmDeleteSignatureCommand}" />
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
               </StackPanel>
             </Border>
           </Grid>

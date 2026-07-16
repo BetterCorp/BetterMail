@@ -86,11 +86,13 @@ public sealed partial class RichHtmlEditor : UserControl
             <style>
               html,body { height:100%; margin:0; background:Canvas; color:CanvasText; }
               body { box-sizing:border-box; padding:14px 16px 40px; font:15px/1.5 "Segoe UI",system-ui,sans-serif; overflow-wrap:anywhere; }
-              body:empty:before { content:{{JsonSerializer.Serialize(Placeholder)}}; color:GrayText; pointer-events:none; }
+              body:empty:before { content:attr(data-placeholder); color:GrayText; pointer-events:none; }
               blockquote { margin:12px 0; padding-left:12px; border-left:2px solid #999; color:GrayText; }
               img,table { max-width:100%; } img { height:auto; } a { color:#0f6cbd; }
               td,th { border:1px solid #aaa; padding:4px 6px; }
-            </style></head><body id="editor" contenteditable="{{(!IsReadOnly).ToString().ToLowerInvariant()}}"></body>
+            </style></head><body id="editor"
+              data-placeholder="{{System.Net.WebUtility.HtmlEncode(Placeholder)}}"
+              contenteditable="{{(!IsReadOnly).ToString().ToLowerInvariant()}}"></body>
             <script>
               editor.innerHTML={{JsonSerializer.Serialize(Html)}};
               editor.addEventListener('input',()=>invokeCSharpAction(editor.innerHTML));
