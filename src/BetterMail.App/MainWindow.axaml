@@ -501,7 +501,9 @@
                         <TextBlock Text="{Binding Subject}" FontWeight="SemiBold" IsVisible="{Binding IsUnread}" TextTrimming="CharacterEllipsis" />
                         <TextBlock Text="{Binding Subject}" IsVisible="{Binding IsRead}" TextTrimming="CharacterEllipsis" />
                       </Grid>
-                      <TextBlock Grid.Column="1" Text="⌕" IsVisible="{Binding HasAttachments}" Margin="7,0,0,0" Opacity="0.65" ToolTip.Tip="Has attachments" />
+                      <TextBlock Grid.Column="1" Text="&#x1F4CE;" FontFamily="Segoe UI Symbol"
+                                 IsVisible="{Binding HasAttachments}" Margin="7,0,0,0" Opacity="0.65"
+                                 ToolTip.Tip="Has attachments" />
                       <TextBlock Grid.Column="2" Text="⚑" IsVisible="{Binding IsFlagged}" Margin="7,0,0,0" Foreground="#C75000" ToolTip.Tip="Flagged" />
                     </Grid>
 
@@ -598,13 +600,13 @@
               <DataTemplate x:DataType="core:MailAttachment">
                 <Button Classes="command"
                         CommandParameter="{Binding}"
-                        Click="SaveAttachmentClicked"
-                        ToolTip.Tip="Save attachment"
-                        AutomationProperties.Name="{Binding Name, StringFormat='Save attachment {0}'}"
+                        Click="PreviewAttachmentClicked"
+                        ToolTip.Tip="Preview attachment"
+                        AutomationProperties.Name="{Binding Name, StringFormat='Preview attachment {0}'}"
                         Padding="8,5"
                         Margin="0,0,6,2">
                   <StackPanel Orientation="Horizontal" Spacing="5">
-                    <TextBlock Text="⌕" Opacity="0.65" />
+                    <TextBlock Text="&#x1F4CE;" FontFamily="Segoe UI Symbol" Opacity="0.65" />
                     <TextBlock Text="{Binding Name}" MaxWidth="220" TextTrimming="CharacterEllipsis" />
                   </StackPanel>
                 </Button>

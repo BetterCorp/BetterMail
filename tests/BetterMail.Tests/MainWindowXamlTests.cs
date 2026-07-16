@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using BetterMail.App;
 
 namespace BetterMail.Tests;
 
@@ -60,6 +61,17 @@ public sealed class MainWindowXamlTests
             Assert.True(rebuild < 0 || guard < rebuild, $"{file} rebuilds layout before checking its breakpoint.");
         }
     }
+
+    [Theory]
+    [InlineData("invoice.pdf", "application/octet-stream", "Pdf")]
+    [InlineData("photo.bin", "image/png; name=photo.png", "Image")]
+    [InlineData("notes.txt", "application/octet-stream", "Text")]
+    [InlineData("report.docx", "application/octet-stream", "Unsupported")]
+    public void AttachmentPreviewUsesSafeBuiltInRenderers(
+        string name,
+        string contentType,
+        string expected) =>
+        Assert.Equal(expected, FilePreviewWindow.PreviewKindFor(name, contentType).ToString());
 
     [Fact]
     public void PreviewWindowsRestoreFromLocalCacheAndSyncRestoresScrollAfterLayout()
@@ -212,6 +224,9 @@ public sealed class MainWindowXamlTests
             Assert.Contains(accessibleName, xaml + settingsXaml);
         }
         Assert.Contains("Load blocked pictures for the selected message", conversationXaml);
+        Assert.Contains("PreviewAttachmentClicked", xaml);
+        Assert.Contains("&#x1F4CE;", xaml);
+        Assert.DoesNotContain("Text=" + (char)34 + "⌕" + (char)34, xaml);
     }
 
     private static int ButtonCommandCount(string xaml, string command) =>

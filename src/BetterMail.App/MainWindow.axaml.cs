@@ -647,25 +647,18 @@ public sealed partial class MainWindow : Window
     private void OpenHeaders(MailHeadersDocument document) =>
         new MailHeadersWindow(document).Show(this);
 
-    private async void SaveAttachmentClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void PreviewAttachmentClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        if (sender is not Button { CommandParameter: MailAttachment attachment } || attachment.ContentBytes is null)
+        if (sender is not Button { CommandParameter: MailAttachment attachment })
         {
             return;
         }
 
-        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-        {
-            Title = "Save attachment",
-            SuggestedFileName = attachment.Name
-        });
-        if (file is null)
-        {
-            return;
-        }
-
-        await using var stream = await file.OpenWriteAsync();
-        await stream.WriteAsync(attachment.ContentBytes);
+        new FilePreviewWindow(
+            attachment.Name,
+            attachment.ContentType,
+            attachment.Size,
+            attachment.ContentBytes).Show(this);
     }
 
 }

@@ -1,0 +1,73 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="BetterMail.App.FilePreviewWindow"
+        Title="File preview" Icon="/Assets/BetterMail.ico"
+        Width="1000" Height="720" MinWidth="560" MinHeight="380"
+        WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="Auto,*">
+    <Border Padding="16,10"
+            BorderBrush="{DynamicResource BetterMailDividerBrush}"
+            BorderThickness="0,0,0,1">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+        <StackPanel Spacing="2">
+          <SelectableTextBlock x:Name="FileNameText"
+                               FontSize="16"
+                               FontWeight="SemiBold"
+                               TextTrimming="CharacterEllipsis" />
+          <TextBlock x:Name="FileDetailsText" FontSize="11" Opacity="0.62" />
+        </StackPanel>
+        <Button x:Name="SaveButton"
+                Grid.Column="1"
+                Classes="command"
+                Content="Save as"
+                Click="SaveClicked"
+                AutomationProperties.Name="Save previewed file" />
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="1" Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
+      <Image x:Name="ImagePreview"
+             IsVisible="False"
+             Margin="18"
+             Stretch="Uniform"
+             AutomationProperties.Name="Image attachment preview" />
+      <NativeWebView x:Name="PdfPreview"
+                     IsVisible="False"
+                     NavigationStarted="PdfNavigationStarted"
+                     AutomationProperties.Name="PDF attachment preview" />
+      <TextBox x:Name="TextPreview"
+               IsVisible="False"
+               IsReadOnly="True"
+               AcceptsReturn="True"
+               TextWrapping="NoWrap"
+               FontFamily="Consolas"
+               Padding="16"
+               ScrollViewer.HorizontalScrollBarVisibility="Auto"
+               ScrollViewer.VerticalScrollBarVisibility="Auto"
+               AutomationProperties.Name="Text attachment preview" />
+      <StackPanel x:Name="UnavailablePreview"
+                  IsVisible="False"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  MaxWidth="420"
+                  Spacing="7">
+        <TextBlock Text="Preview unavailable"
+                   FontSize="18"
+                   FontWeight="SemiBold"
+                   HorizontalAlignment="Center" />
+        <TextBlock x:Name="UnavailableText"
+                   Text="Save this file and open it with another application."
+                   TextAlignment="Center"
+                   TextWrapping="Wrap"
+                   Opacity="0.62" />
+      </StackPanel>
+      <StackPanel x:Name="LoadingPreview"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  Spacing="8">
+        <ProgressBar Width="180" IsIndeterminate="True" />
+        <TextBlock Text="Preparing preview…" HorizontalAlignment="Center" Opacity="0.62" />
+      </StackPanel>
+    </Grid>
+  </Grid>
+</Window>
