@@ -284,6 +284,9 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("RE: Planning", request.Subject);
         Assert.Equal(account.AccountId, request.AccountId);
         Assert.Equal(mailbox.Id, request.MailboxId);
+        Assert.True(request.IsHtml);
+        Assert.Contains("Body", request.Body);
+        Assert.Contains("sender@example.com", request.Body);
         var recipients = $"{request.To};{request.Cc};{request.Bcc}";
         Assert.DoesNotContain("me@example.com", recipients, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("shared@example.com", recipients, StringComparison.OrdinalIgnoreCase);

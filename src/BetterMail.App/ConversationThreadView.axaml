@@ -100,7 +100,7 @@
                         AutomationProperties.Name="{Binding Sender, StringFormat='Select message from {0}'}"
                         AutomationProperties.HelpText="Expands or collapses this message without changing the mail-list selection">
                   <Grid ColumnDefinitions="*,Auto"
-                        RowDefinitions="Auto,Auto"
+                        RowDefinitions="Auto,Auto,Auto"
                         ColumnSpacing="10">
                     <StackPanel Orientation="Horizontal" Spacing="7">
                       <TextBlock Text="{Binding Sender}"
@@ -121,6 +121,12 @@
                                Text="{Binding Recipients}"
                                FontSize="11"
                                Opacity="0.62"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Row="2"
+                               Grid.ColumnSpan="2"
+                               Text="{Binding Location}"
+                               FontSize="11"
+                               Foreground="{DynamicResource BetterMailAccentBrush}"
                                TextTrimming="CharacterEllipsis" />
                   </Grid>
                 </Button>

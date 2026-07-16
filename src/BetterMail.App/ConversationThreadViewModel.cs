@@ -19,6 +19,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
     private readonly MailContentRenderer _renderer;
     private readonly Action<ConversationActionRequest>? _action;
     private readonly Action<MailMessage>? _selectionChanged;
+    private readonly Func<MailMessage, string> _location;
     private ConversationThreadItem? _selectedThread;
     private ConversationMessageItem? _selectedMessage;
     private readonly Dictionary<string, ConversationMessageItem> _messageCache = new(StringComparer.Ordinal);
@@ -26,11 +27,13 @@ public sealed class ConversationThreadViewModel : ViewModelBase
     public ConversationThreadViewModel(
         MailContentRenderer? renderer = null,
         Action<ConversationActionRequest>? action = null,
-        Action<MailMessage>? selectionChanged = null)
+        Action<MailMessage>? selectionChanged = null,
+        Func<MailMessage, string>? location = null)
     {
         _renderer = renderer ?? new MailContentRenderer();
         _action = action;
         _selectionChanged = selectionChanged;
+        _location = location ?? (message => message.FolderId);
         ToggleMessageCommand = new AsyncCommand<ConversationMessageItem>(ToggleMessageAsync);
         AllowRemoteContentCommand = new AsyncCommand<ConversationMessageItem>(AllowRemoteContentAsync);
         SelectMessageCommand = new AsyncCommand<ConversationMessageItem>(SelectMessageAsync);
@@ -125,7 +128,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
         {
             _messageCache.Remove(_messageCache.Keys.First());
         }
-        var item = new ConversationMessageItem(identity, message, _renderer);
+        var item = new ConversationMessageItem(identity, message, _renderer, _location);
         _messageCache.Add(identity, item);
         return item;
     }
@@ -273,6 +276,7 @@ public sealed class ConversationThreadItem(
 public sealed class ConversationMessageItem : ViewModelBase
 {
     private readonly MailContentRenderer _renderer;
+    private readonly Func<MailMessage, string> _location;
     private MailMessage _message;
     private bool _isExpanded;
     private bool _isSelected;
@@ -283,11 +287,16 @@ public sealed class ConversationMessageItem : ViewModelBase
     private bool _renderRequested;
     private int _renderVersion;
 
-    public ConversationMessageItem(string identity, MailMessage message, MailContentRenderer renderer)
+    public ConversationMessageItem(
+        string identity,
+        MailMessage message,
+        MailContentRenderer renderer,
+        Func<MailMessage, string> location)
     {
         Identity = identity;
         _message = message;
         _renderer = renderer;
+        _location = location;
         _bodyUri = renderer.Render("Loading message…", false);
     }
 
@@ -297,6 +306,7 @@ public sealed class ConversationMessageItem : ViewModelBase
     public string SenderAddress => _message.From.Address;
     public string Recipients => $"To: {string.Join(", ", _message.To.Select(address => address.ToString()))}";
     public string ReceivedText => _message.ReceivedAt.ToLocalTime().ToString("ddd, MMM d, yyyy HH:mm");
+    public string Location => _location(_message);
     public string Preview => _message.Preview;
     public Uri BodyUri
     {
@@ -335,6 +345,7 @@ public sealed class ConversationMessageItem : ViewModelBase
         RaisePropertyChanged(nameof(SenderAddress));
         RaisePropertyChanged(nameof(Recipients));
         RaisePropertyChanged(nameof(ReceivedText));
+        RaisePropertyChanged(nameof(Location));
         RaisePropertyChanged(nameof(Preview));
         if (bodyChanged)
         {

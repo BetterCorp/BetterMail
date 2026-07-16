@@ -23,6 +23,26 @@ public sealed class MailContentRendererTests
     }
 
     [Fact]
+    public void BuildsSafeQuotedReplyContextFromTheFullCachedBody()
+    {
+        var renderer = new MailContentRenderer();
+        var message = new MailMessage(
+            "mailbox", "message", null, null, "inbox", "Budget <review>",
+            new("Sender & Co", "sender@example.com"), [new("Recipient", "to@example.com")],
+            new DateTimeOffset(2026, 7, 16, 10, 0, 0, TimeSpan.Zero), "Preview only",
+            "<p>Full original body</p><img src='https://tracker.example/pixel'>", true, true,
+            false, MailImportance.Normal, [], null);
+
+        var html = renderer.PrepareQuotedMessageHtml(message);
+
+        Assert.Contains("Full original body", html);
+        Assert.DoesNotContain("tracker.example", html);
+        Assert.Contains("Budget &lt;review&gt;", html);
+        Assert.Contains("sender@example.com", html);
+        Assert.Contains("Preview only", renderer.PrepareQuotedMessageHtml(message with { Body = null }));
+    }
+
+    [Fact]
     public void DetectsHtmlWhenCachedContentTypeIsWrong()
     {
         var renderer = new MailContentRenderer();

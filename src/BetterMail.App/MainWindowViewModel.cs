@@ -211,7 +211,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         CancelEditContactCommand = new AsyncCommand(CancelEditContactAsync);
         ConfirmDeleteContactCommand = new AsyncCommand(ConfirmDeleteContactAsync, () => _pendingDeleteContact?.SavedContact is not null && !_isContactActionRunning);
         CancelDeleteContactCommand = new AsyncCommand(CancelDeleteContactAsync);
-        ConversationThread = new ConversationThreadViewModel(_renderer, HandleConversationAction);
+        ConversationThread = new ConversationThreadViewModel(
+            _renderer,
+            HandleConversationAction,
+            location: MailLocation);
         SearchAccountFilters.Add(new SearchAccountFilter("All accounts", null));
         SearchFolderFilters.Add(new SearchFolderFilter("All mail folders", null, null));
         _selectedSearchAccountFilter = SearchAccountFilters[0];
@@ -2046,6 +2049,13 @@ public sealed class MainWindowViewModel : ViewModelBase
             folderId = folder.ParentProviderId ?? "";
         }
         return parts.Count == 0 ? "Unknown folder" : string.Join(" / ", parts);
+    }
+
+    private string MailLocation(MailMessage message)
+    {
+        var mailbox = Mailboxes.FirstOrDefault(candidate => candidate.Id == message.MailboxId);
+        var folder = MailFolderPath(message.MailboxId, message.FolderId);
+        return mailbox is null ? folder : $"{mailbox.Address} · {folder}";
     }
 
     private void RebuildSearchFilters()
@@ -3916,8 +3926,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         return RequestComposeAsync(new ComposeRequest(
             message.From.Address,
             PrefixSubject(message.Subject, "Re:"),
+            Body: _renderer.PrepareQuotedMessageHtml(message),
             AccountId: accountId,
             MailboxId: mailboxId,
+            IsHtml: true,
             Intent: ComposeIntent.Reply));
     }
 
@@ -3943,9 +3955,11 @@ public sealed class MainWindowViewModel : ViewModelBase
         return RequestComposeAsync(new ComposeRequest(
             recipients[0],
             PrefixSubject(message.Subject, "Re:"),
+            Body: _renderer.PrepareQuotedMessageHtml(message),
             Cc: string.Join("; ", recipients.Skip(1)),
             AccountId: accountId,
             MailboxId: mailboxId,
+            IsHtml: true,
             Intent: ComposeIntent.ReplyAll));
     }
 

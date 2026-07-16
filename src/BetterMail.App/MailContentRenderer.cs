@@ -91,6 +91,24 @@ public sealed class MailContentRenderer
         }
     }
 
+    public string PrepareQuotedMessageHtml(MailMessage message)
+    {
+        lock (_sanitizer)
+        {
+            var hasBody = !string.IsNullOrWhiteSpace(message.Body);
+            var original = hasBody && IsHtmlContent(message.Body, message.IsHtml)
+                ? SanitizeHtml(message.Body ?? "", [], allowRemoteContent: false)
+                : System.Net.WebUtility.HtmlEncode(message.Body ?? message.Preview)
+                    .Replace("\r\n", "<br>", StringComparison.Ordinal)
+                    .Replace("\n", "<br>", StringComparison.Ordinal);
+            Func<string?, string?> encode = System.Net.WebUtility.HtmlEncode;
+            var cc = message.Cc is { Count: > 0 }
+                ? $"<br><b>Cc:</b> {encode(string.Join(", ", message.Cc))}"
+                : "";
+            return $"<div class=\"bettermail-quoted-message\"><div><b>From:</b> {encode(message.From.ToString())}<br><b>Sent:</b> {encode(message.ReceivedAt.ToLocalTime().ToString("f"))}<br><b>To:</b> {encode(string.Join(", ", message.To))}{cc}<br><b>Subject:</b> {encode(message.Subject)}</div><blockquote style=\"margin:12px 0 0 0;padding-left:12px;border-left:2px solid #a6a6a6\">{original}</blockquote></div>";
+        }
+    }
+
     public string SanitizeComposeHtml(string? content)
     {
         lock (_sanitizer)

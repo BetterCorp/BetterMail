@@ -38,7 +38,10 @@ public sealed class ConversationThreadTests
     {
         ConversationActionRequest? action = null;
         var renderer = new MailContentRenderer();
-        var viewModel = new ConversationThreadViewModel(renderer, request => action = request);
+        var viewModel = new ConversationThreadViewModel(
+            renderer,
+            request => action = request,
+            location: message => $"Account / {message.FolderId}");
         var old = Message(
             "mailbox-a", "old", "thread", "<old@example>", 1,
             "<p>Old</p><div class='gmail_signature'>Regards</div><img src='https://images.example/old.png' alt='Old chart'>");
@@ -54,6 +57,7 @@ public sealed class ConversationThreadTests
         var middleItem = thread.Messages[1];
         Assert.Same(oldItem, viewModel.SelectedMessage);
         Assert.True(oldItem.IsExpanded);
+        Assert.Equal("Account / inbox", oldItem.Location);
         Assert.False(middleItem.IsExpanded);
         Assert.True(thread.Messages[2].IsExpanded);
         await WaitUntilAsync(() => oldItem.HasBlockedRemoteContent && middleItem.HasBlockedRemoteContent);
