@@ -27,10 +27,18 @@ public sealed partial class SettingsView : UserControl
         _isPhone = phone;
         SettingsContent.Margin = new Thickness(phone ? 14 : 28);
         SettingsBanner.Height = phone ? 118 : 176;
+        SignatureTemplateLayout.ColumnDefinitions.Clear();
+        SignatureTemplateLayout.RowDefinitions.Clear();
         SignatureEditorLayout.ColumnDefinitions.Clear();
         SignatureEditorLayout.RowDefinitions.Clear();
         if (phone)
         {
+            SignatureTemplateLayout.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+            SignatureTemplateLayout.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+            SignatureTemplateLayout.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+            Grid.SetColumn(SignatureTemplatePreviewPanel, 0);
+            Grid.SetRow(SignatureTemplatePreviewPanel, 1);
+            SignatureTemplatePreviewPanel.Margin = new Thickness(0, 8, 0, 0);
             SignatureEditorLayout.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
             SignatureEditorLayout.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
             SignatureEditorLayout.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
@@ -40,12 +48,28 @@ public sealed partial class SettingsView : UserControl
         }
         else
         {
+            SignatureTemplateLayout.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+            SignatureTemplateLayout.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(420)));
+            SignatureTemplateLayout.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+            Grid.SetColumn(SignatureTemplatePreviewPanel, 1);
+            Grid.SetRow(SignatureTemplatePreviewPanel, 0);
+            SignatureTemplatePreviewPanel.Margin = new Thickness(0);
             SignatureEditorLayout.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(240)));
             SignatureEditorLayout.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
             SignatureEditorLayout.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
             Grid.SetColumn(SignatureEditorPanel, 1);
             Grid.SetRow(SignatureEditorPanel, 0);
             SignatureEditorPanel.Margin = new Thickness(0);
+        }
+    }
+
+    private void SignaturePreviewNavigationStarted(
+        object? sender,
+        WebViewNavigationStartingEventArgs e)
+    {
+        if (e.Request?.Scheme is "http" or "https" or "mailto")
+        {
+            e.Cancel = true;
         }
     }
 

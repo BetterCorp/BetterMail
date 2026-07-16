@@ -134,36 +134,76 @@
               <Grid ColumnDefinitions="*,Auto">
                 <StackPanel>
                   <TextBlock Text="Choose a starting point" FontSize="18" FontWeight="SemiBold" />
-                  <TextBlock Text="Every template becomes a normal editable signature." Opacity="0.62" />
+                  <TextBlock Text="Select a template to see the real signature before using it. Every template stays editable."
+                             Opacity="0.62" TextWrapping="Wrap" />
                 </StackPanel>
                 <Button Grid.Column="1" Classes="command" Content="Cancel" Command="{Binding CloseSignatureTemplatesCommand}" />
               </Grid>
-              <ItemsControl ItemsSource="{Binding SignatureTemplates}">
-                <ItemsControl.ItemsPanel>
-                  <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="app:SignatureTemplate">
-                    <Button Width="228" Height="150" Margin="0,0,10,10" Padding="0"
-                            HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
-                            Command="{Binding $parent[UserControl].DataContext.CreateSignatureFromTemplateCommand}"
-                            CommandParameter="{Binding}" AutomationProperties.Name="{Binding Name, StringFormat='Create {0} signature'}">
-                      <Grid RowDefinitions="5,*,Auto" Background="{DynamicResource SystemControlBackgroundBaseLowBrush}">
+              <Grid x:Name="SignatureTemplateLayout" ColumnDefinitions="*,420" ColumnSpacing="14">
+                <ListBox x:Name="SignatureTemplateList"
+                         ItemsSource="{Binding SignatureTemplates}"
+                         SelectedItem="{Binding SelectedSignatureTemplate}"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         AutomationProperties.Name="Signature templates">
+                  <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                  </ListBox.ItemsPanel>
+                  <ListBox.Styles>
+                    <Style Selector="ListBoxItem">
+                      <Setter Property="Width" Value="210" />
+                      <Setter Property="Height" Value="92" />
+                      <Setter Property="Margin" Value="0,0,8,8" />
+                      <Setter Property="Padding" Value="3" />
+                      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    </Style>
+                  </ListBox.Styles>
+                  <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="app:SignatureTemplate">
+                      <Grid RowDefinitions="5,*" Background="{DynamicResource SystemControlBackgroundBaseLowBrush}">
                         <Border Background="{Binding Accent}" />
-                        <StackPanel Grid.Row="1" Margin="14,12" Spacing="5">
-                          <TextBlock Text="{Binding PreviewName}" FontWeight="SemiBold" FontSize="15" TextTrimming="CharacterEllipsis" />
-                          <TextBlock Text="{Binding PreviewDetail}" FontSize="11" Opacity="0.64" TextTrimming="CharacterEllipsis" />
-                          <Border Height="1" Background="{DynamicResource BetterMailDividerBrush}" Margin="0,7,30,0" />
-                        </StackPanel>
-                        <StackPanel Grid.Row="2" Margin="14,0,14,12">
+                        <StackPanel Grid.Row="1" Margin="12,9" Spacing="3">
                           <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                          <TextBlock Text="{Binding Description}" FontSize="11" Opacity="0.62" TextTrimming="CharacterEllipsis" />
+                          <TextBlock Text="{Binding Description}" FontSize="11" Opacity="0.62"
+                                     TextWrapping="Wrap" MaxLines="2" />
                         </StackPanel>
                       </Grid>
-                    </Button>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+
+                <Border x:Name="SignatureTemplatePreviewPanel"
+                        Grid.Column="1"
+                        BorderBrush="{DynamicResource BetterMailDividerBrush}"
+                        BorderThickness="1"
+                        Padding="12">
+                  <Grid RowDefinitions="Auto,240,Auto" RowSpacing="10">
+                    <StackPanel>
+                      <TextBlock Text="Live preview" FontWeight="SemiBold" FontSize="15" />
+                      <TextBlock Text="{Binding SelectedSignatureTemplate.Name}" FontSize="12" Opacity="0.62" />
+                    </StackPanel>
+                    <Border Grid.Row="1"
+                            BorderBrush="{DynamicResource BetterMailDividerBrush}"
+                            BorderThickness="1"
+                            Background="White">
+                      <NativeWebView Source="{Binding SelectedSignatureTemplatePreviewUri}"
+                                     NavigationStarted="SignaturePreviewNavigationStarted"
+                                     AutomationProperties.Name="Selected signature template preview" />
+                    </Border>
+                    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                      <TextBlock Text="{Binding SelectedSignatureTemplate.Description}"
+                                 VerticalAlignment="Center"
+                                 TextWrapping="Wrap"
+                                 Opacity="0.62" />
+                      <Button Grid.Column="1"
+                              Classes="primary"
+                              Content="{Binding SelectedSignatureTemplate.Name, StringFormat='Use {0}'}"
+                              Command="{Binding CreateSignatureFromTemplateCommand}"
+                              AutomationProperties.Name="Use selected signature template" />
+                    </Grid>
+                  </Grid>
+                </Border>
+              </Grid>
             </StackPanel>
           </Border>
 

@@ -184,6 +184,22 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void SignatureTemplateSelectionShowsTheRealHtmlBeforeCreating()
+    {
+        var viewModel = new MainWindowViewModel(null, "data", _ => { }, _ => { }, null);
+        var template = Assert.Single(
+            viewModel.SignatureTemplates,
+            static candidate => candidate.Id == "professional");
+
+        viewModel.SelectedSignatureTemplate = template;
+
+        Assert.Contains("Product Director", Decode(viewModel.SelectedSignatureTemplatePreviewUri));
+        viewModel.CreateSignatureFromTemplateCommand.Execute(null);
+        Assert.Equal("Professional", viewModel.SelectedSignature?.Name);
+        Assert.Contains("Product Director", viewModel.SelectedSignature?.Html);
+    }
+
+    [Fact]
     public async Task ReplyAllExcludesEveryLinkedAddressAndSafelyDeduplicatesRecipients()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -693,10 +709,16 @@ public sealed class MainWindowViewModelTests
             viewModel.ToggleFlagCommand.Execute(null);
             await WaitUntilAsync(() => provider.Flagged == true && viewModel.SelectedMessage?.IsFlagged == true, cancellationToken);
 
+            provider.MoveRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
             viewModel.ArchiveCommand.Execute(null);
+            await WaitUntilAsync(() => provider.MoveDestination == "archive", cancellationToken);
+            Assert.True(viewModel.IsMailActionRunning);
+            Assert.Equal("Archiving...", viewModel.MailActionStatus);
+            provider.MoveRelease.SetResult();
             await WaitUntilAsync(() => provider.MarkedRead && provider.MoveDestination == "archive" && viewModel.Messages.Count == 0, cancellationToken);
 
             Assert.False(viewModel.IsBusy);
+            Assert.False(viewModel.IsMailActionRunning);
             Assert.Null(viewModel.SelectedMessage);
             Assert.Empty(await store.GetMessagesAsync(cancellationToken: cancellationToken));
         }
@@ -1172,6 +1194,7 @@ public sealed class MainWindowViewModelTests
         public bool? Flagged { get; private set; }
         public string? MoveDestination { get; private set; }
         public int GetMessageCalls { get; private set; }
+        public TaskCompletionSource? MoveRelease { get; set; }
 
         public Task<IReadOnlyList<MailFolder>> GetFoldersAsync(
             MailAccount account,
@@ -1212,7 +1235,7 @@ public sealed class MainWindowViewModelTests
             return Task.FromResult(Message(mailbox.Id, "inbox", "(no subject)", ""));
         }
 
-        public Task MoveMessageAsync(
+        public async Task MoveMessageAsync(
             MailAccount account,
             Mailbox mailbox,
             string messageId,
@@ -1220,7 +1243,10 @@ public sealed class MainWindowViewModelTests
             CancellationToken cancellationToken = default)
         {
             MoveDestination = destinationFolderId;
-            return Task.CompletedTask;
+            if (MoveRelease is not null)
+            {
+                await MoveRelease.Task.WaitAsync(cancellationToken);
+            }
         }
 
         public Task SetFlaggedAsync(

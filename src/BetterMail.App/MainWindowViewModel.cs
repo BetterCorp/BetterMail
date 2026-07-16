@@ -49,6 +49,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _isSyncing;
     private int _syncRunning;
     private bool _isMailActionRunning;
+    private string _mailActionStatus = "";
     private bool _allowRemoteContent;
     private bool _autoSyncStarted;
     private int _syncFrame;
@@ -78,6 +79,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     private readonly Dictionary<string, MailboxSignaturePreferences> _mailboxSignatures = new(StringComparer.Ordinal);
     private string? _legacyFallbackSignatureId;
     private SignatureItem? _selectedSignature;
+    private SignatureTemplate? _selectedSignatureTemplate =
+        SignatureCatalog.Templates.FirstOrDefault(static template => template.Id == "minimal");
     private string _signatureEditorName = "";
     private string _signatureEditorHtml = "";
     private string? _signatureEditorError;
@@ -133,9 +136,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         ReauthenticateAccountCommand = new AsyncCommand<MailAccount>(ReauthenticateAccountAsync);
         SyncCommand = new AsyncCommand(SyncAsync, () => Accounts.Count > 0 && _provider is not null && !IsSyncing);
         ToggleReadCommand = new AsyncCommand(ToggleReadAsync, CanRunSelectedMailAction);
-        ArchiveCommand = new AsyncCommand(() => MoveSelectedMessageAsync("archive", "Archived", markAsRead: true), CanRunSelectedMailAction);
-        DeleteCommand = new AsyncCommand(() => MoveSelectedMessageAsync("deleteditems", "Moved to Deleted Items"), CanRunSelectedMailAction);
-        JunkCommand = new AsyncCommand(() => MoveSelectedMessageAsync("junkemail", "Moved to Junk Email"), CanRunSelectedMailAction);
+        ArchiveCommand = new AsyncCommand(() => MoveSelectedMessageAsync("archive", "Archiving...", "Archived", markAsRead: true), CanRunSelectedMailAction);
+        DeleteCommand = new AsyncCommand(() => MoveSelectedMessageAsync("deleteditems", "Moving to Deleted Items...", "Moved to Deleted Items"), CanRunSelectedMailAction);
+        JunkCommand = new AsyncCommand(() => MoveSelectedMessageAsync("junkemail", "Moving to Junk Email...", "Moved to Junk Email"), CanRunSelectedMailAction);
         ToggleFlagCommand = new AsyncCommand(ToggleFlagAsync, CanRunSelectedMailAction);
         MoveToFolderCommand = new AsyncCommand<MailFolderItem>(MoveSelectionToFolderAsync, CanMoveSelectionToFolder);
         ShowUnifiedInboxCommand = new AsyncCommand(ShowUnifiedInboxAsync);
@@ -159,7 +162,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         OpenDraftCommand = new AsyncCommand<LocalDraft>(OpenLocalDraftAsync);
         SetDefaultSenderCommand = new AsyncCommand<SenderSettingsItem>(SetDefaultSenderAsync);
         NewSignatureCommand = new AsyncCommand(OpenSignatureTemplatesAsync);
-        CreateSignatureFromTemplateCommand = new AsyncCommand<SignatureTemplate>(CreateSignatureFromTemplateAsync);
+        CreateSignatureFromTemplateCommand = new AsyncCommand(
+            CreateSignatureFromTemplateAsync,
+            () => SelectedSignatureTemplate is not null);
         SaveSignatureCommand = new AsyncCommand(SaveSignatureAsync, () => SelectedSignature?.CanEdit == true);
         ResetSignatureCommand = new AsyncCommand(ResetSignatureAsync, () => SelectedSignature?.CanEdit == true);
         DuplicateSignatureCommand = new AsyncCommand(DuplicateSignatureAsync, () => SelectedSignature is not null);
@@ -168,7 +173,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         ReplyCommand = new AsyncCommand(ReplyAsync, CanReplyToSelectedMessage);
         ReplyAllCommand = new AsyncCommand(ReplyAllAsync, CanReplyToSelectedMessage);
         ForwardCommand = new AsyncCommand(ForwardAsync, CanReplyToSelectedMessage);
-        ViewHeadersCommand = new AsyncCommand(ViewHeadersAsync, CanReplyToSelectedMessage);
+        ViewHeadersCommand = new AsyncCommand(ViewHeadersAsync, CanViewHeaders);
         SelectNextMessageCommand = new AsyncCommand(
             () => SelectAdjacentMessageAsync(1),
             () => SelectedMessage is not null && Messages.Count > 1);
@@ -834,6 +839,14 @@ public sealed class MainWindowViewModel : ViewModelBase
         private set => SetProperty(ref _status, value);
     }
 
+    public bool IsMailActionRunning => _isMailActionRunning;
+
+    public string MailActionStatus
+    {
+        get => _mailActionStatus;
+        private set => SetProperty(ref _mailActionStatus, value);
+    }
+
     public string? Error
     {
         get => _error;
@@ -928,6 +941,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             {
                 _renderer.ThemeMode = value;
                 ConversationThread.RefreshTheme();
+                RaisePropertyChanged(nameof(SelectedSignatureTemplatePreviewUri));
                 _applyTheme(value);
             }
         }
@@ -985,6 +999,32 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 
     public bool CanEditSelectedSignature => SelectedSignature?.CanEdit == true;
+
+    public SignatureTemplate? SelectedSignatureTemplate
+    {
+        get => _selectedSignatureTemplate;
+        set
+        {
+            if (SetProperty(ref _selectedSignatureTemplate, value))
+            {
+                RaisePropertyChanged(nameof(SelectedSignatureTemplatePreviewUri));
+                ((AsyncCommand)CreateSignatureFromTemplateCommand).Refresh();
+            }
+        }
+    }
+
+    public Uri SelectedSignatureTemplatePreviewUri
+    {
+        get
+        {
+            var content = string.IsNullOrWhiteSpace(SelectedSignatureTemplate?.Html)
+                ? "<p style=\"font:14px 'Segoe UI',Arial,sans-serif;color:#666\">Blank signature</p>"
+                : SelectedSignatureTemplate.Html;
+            return _renderer.Render(
+                $"<html><body style=\"margin:0;background:#fff;color:#1b1b1b\">{content}</body></html>",
+                isHtml: true);
+        }
+    }
 
     public string SignatureEditorName
     {
@@ -2798,11 +2838,9 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        _isMailActionRunning = true;
-        RefreshMailActionCommands();
         Error = null;
         var isRead = !messages[0].IsRead;
-        Status = isRead ? "Marking read..." : "Marking unread...";
+        BeginMailAction(isRead ? "Marking read..." : "Marking unread...");
         try
         {
             foreach (var message in messages)
@@ -2818,8 +2856,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
         finally
         {
-            _isMailActionRunning = false;
-            RefreshMailActionCommands();
+            EndMailAction();
         }
     }
 
@@ -2828,6 +2865,9 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private bool CanReplyToSelectedMessage() =>
         IsMailInteractionContext && ActionMessages().Count == 1;
+
+    private bool CanViewHeaders() =>
+        CanReplyToSelectedMessage() && !_isMailActionRunning;
 
     private bool IsMailInteractionContext => IsMailModule && !IsSettingsOpen && !IsGlobalSearchOpen;
 
@@ -2842,10 +2882,11 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private async Task MoveSelectedMessageAsync(
         string destinationFolderId,
+        string actionStatus,
         string successStatus,
         bool markAsRead = false)
     {
-        await MoveMessagesAsync(ActionMessages(), destinationFolderId, successStatus, markAsRead);
+        await MoveMessagesAsync(ActionMessages(), destinationFolderId, actionStatus, successStatus, markAsRead);
     }
 
     internal bool CanMoveSelectionToFolder(MailFolderItem? folder)
@@ -2857,11 +2898,16 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 
     internal Task MoveSelectionToFolderAsync(MailFolderItem folder) =>
-        MoveMessagesAsync(ActionMessages(), folder.ProviderId, $"Moved to {folder.DisplayName}");
+        MoveMessagesAsync(
+            ActionMessages(),
+            folder.ProviderId,
+            $"Moving to {folder.DisplayName}...",
+            $"Moved to {folder.DisplayName}");
 
     private async Task MoveMessagesAsync(
         IReadOnlyList<MailMessage> messages,
         string destinationFolderId,
+        string actionStatus,
         string successStatus,
         bool markAsRead = false)
     {
@@ -2870,11 +2916,9 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        _isMailActionRunning = true;
         _selectionWorkCancellation?.Cancel();
-        RefreshMailActionCommands();
         Error = null;
-        Status = $"{successStatus}...";
+        BeginMailAction(actionStatus);
         try
         {
             var firstIndex = messages.Select(Messages.IndexOf).Where(static index => index >= 0).DefaultIfEmpty(0).Min();
@@ -2913,8 +2957,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
         finally
         {
-            _isMailActionRunning = false;
-            RefreshMailActionCommands();
+            EndMailAction();
         }
     }
 
@@ -2926,12 +2969,11 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        _isMailActionRunning = true;
-        RefreshMailActionCommands();
         Error = null;
+        var isFlagged = !messages[0].IsFlagged;
+        BeginMailAction(isFlagged ? "Flagging message..." : "Clearing flag...");
         try
         {
-            var isFlagged = !messages[0].IsFlagged;
             foreach (var message in messages)
             {
                 if (!TryGetMessageContext(message, out var account, out var mailbox))
@@ -2953,9 +2995,23 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
         finally
         {
-            _isMailActionRunning = false;
-            RefreshMailActionCommands();
+            EndMailAction();
         }
+    }
+
+    private void BeginMailAction(string status)
+    {
+        MailActionStatus = status;
+        _isMailActionRunning = true;
+        RaisePropertyChanged(nameof(IsMailActionRunning));
+        RefreshMailActionCommands();
+    }
+
+    private void EndMailAction()
+    {
+        _isMailActionRunning = false;
+        RaisePropertyChanged(nameof(IsMailActionRunning));
+        RefreshMailActionCommands();
     }
 
     private void RefreshMailActionCommands()
@@ -2972,11 +3028,12 @@ public sealed class MainWindowViewModel : ViewModelBase
     private async Task ViewHeadersAsync()
     {
         var message = ConversationThread.SelectedMessage?.Message ?? SelectedMessage;
-        if (message is null || _provider is null ||
+        if (message is null || _provider is null || _isMailActionRunning ||
             !TryGetMessageContext(message, out var account, out var mailbox))
         {
             return;
         }
+        BeginMailAction("Loading message headers...");
         try
         {
             Status = "Loading message headers...";
@@ -2988,6 +3045,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             Error = $"Message headers could not be loaded: {exception.Message}";
             Status = "Header loading failed";
+        }
+        finally
+        {
+            EndMailAction();
         }
     }
 
@@ -3417,6 +3478,8 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private Task OpenSignatureTemplatesAsync()
     {
+        SelectedSignatureTemplate ??=
+            SignatureTemplates.FirstOrDefault(static template => template.Id == "minimal");
         IsSignatureTemplatePickerOpen = true;
         SignatureEditorError = null;
         return Task.CompletedTask;
@@ -3428,8 +3491,12 @@ public sealed class MainWindowViewModel : ViewModelBase
         return Task.CompletedTask;
     }
 
-    private Task CreateSignatureFromTemplateAsync(SignatureTemplate template)
+    private Task CreateSignatureFromTemplateAsync()
     {
+        if (SelectedSignatureTemplate is not { } template)
+        {
+            return Task.CompletedTask;
+        }
         var signature = new SignatureItem(
             Guid.NewGuid().ToString("N"),
             UniqueSignatureName(template.Id == "blank" ? "New signature" : template.Name),

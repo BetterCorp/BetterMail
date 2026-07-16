@@ -575,7 +575,7 @@
     <Grid x:Name="ReadingPane"
           Grid.Row="2"
           Grid.Column="3"
-          RowDefinitions="Auto,Auto,*"
+          RowDefinitions="Auto,Auto,Auto,*"
           Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
       <Button x:Name="PhoneBack"
               Classes="command"
@@ -589,7 +589,23 @@
               ToolTip.Tip="Back to messages"
               AutomationProperties.Name="Back to messages" />
 
-      <Border Grid.Row="1" Padding="20,8" Background="#0A0F6CBD" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1" IsVisible="{Binding HasSelectedAttachments}">
+      <Border Grid.Row="1"
+              Padding="20,7"
+              Background="#0A0F6CBD"
+              BorderBrush="{DynamicResource BetterMailDividerBrush}"
+              BorderThickness="0,0,0,1"
+              IsVisible="{Binding IsMailActionRunning}">
+        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+          <ProgressBar Width="72" Height="3" IsIndeterminate="True" VerticalAlignment="Center" />
+          <TextBlock Grid.Column="1"
+                     Text="{Binding MailActionStatus}"
+                     FontSize="12"
+                     FontWeight="SemiBold"
+                     VerticalAlignment="Center" />
+        </Grid>
+      </Border>
+
+      <Border Grid.Row="2" Padding="20,8" Background="#0A0F6CBD" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1" IsVisible="{Binding HasSelectedAttachments}">
         <StackPanel Spacing="6">
           <TextBlock Text="{Binding AttachmentSummary}" FontWeight="SemiBold" FontSize="12" />
           <ItemsControl ItemsSource="{Binding Attachments}">
@@ -616,10 +632,10 @@
         </StackPanel>
       </Border>
 
-      <app:ConversationThreadView Grid.Row="2"
+      <app:ConversationThreadView Grid.Row="3"
                                   DataContext="{Binding ConversationThread}"
                                   IsVisible="{Binding ShowMessageBody}" />
-      <StackPanel Grid.Row="2"
+      <StackPanel Grid.Row="3"
                   IsVisible="{Binding HasNoSelectedMessage}"
                   HorizontalAlignment="Center"
                   VerticalAlignment="Center"

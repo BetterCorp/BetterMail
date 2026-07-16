@@ -31,6 +31,9 @@ public sealed class MainWindowXamlTests
         Assert.Equal(3, Count(settings, "Click=" + (char)34 + "OpenWorkspaceLinkClicked" + (char)34));
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding SettingsTabs}" + (char)34, settings);
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding SignatureTemplates}" + (char)34, settings);
+        Assert.Contains("SelectedItem=" + (char)34 + "{Binding SelectedSignatureTemplate}" + (char)34, settings);
+        Assert.Contains("Source=" + (char)34 + "{Binding SelectedSignatureTemplatePreviewUri}" + (char)34, settings);
+        Assert.Contains("Selected signature template preview", settings);
         Assert.Contains("<app:RichHtmlEditor", settings);
         Assert.Contains("typeof(AppInfo).Assembly.GetName().Version", appInfoSource);
         Assert.Equal(
@@ -226,6 +229,8 @@ public sealed class MainWindowXamlTests
         Assert.Contains("Load blocked pictures for the selected message", conversationXaml);
         Assert.Contains("PreviewAttachmentClicked", xaml);
         Assert.Contains("&#x1F4CE;", xaml);
+        Assert.Contains("IsVisible=" + (char)34 + "{Binding IsMailActionRunning}" + (char)34, xaml);
+        Assert.Contains("Text=" + (char)34 + "{Binding MailActionStatus}" + (char)34, xaml);
         Assert.DoesNotContain("Text=" + (char)34 + "⌕" + (char)34, xaml);
     }
 
