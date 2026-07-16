@@ -146,11 +146,9 @@ internal sealed class WindowsDesktopNotificationService(Func<nint> ownerHandle)
 {
     private const uint NimAdd = 0;
     private const uint NimModify = 1;
-    private const uint NimDelete = 2;
     private const uint NifIcon = 0x2;
     private const uint NifTip = 0x4;
     private const uint NifInfo = 0x10;
-    private const uint NifRealtime = 0x40;
     private const uint NiifUser = 0x4;
     private const uint NiifRespectQuietTime = 0x80;
     private const uint ImageIcon = 1;
@@ -159,7 +157,6 @@ internal sealed class WindowsDesktopNotificationService(Func<nint> ownerHandle)
     private const uint IconId = 0xB377;
     private readonly object _gate = new();
     private bool _registered;
-    private int _version;
     private nint _applicationIcon;
 
     public ValueTask ShowAsync(DesktopNotification notification)
@@ -175,16 +172,15 @@ internal sealed class WindowsDesktopNotificationService(Func<nint> ownerHandle)
         }
         if (handle != 0)
         {
-            _ = Task.Run(() => ShowInBackgroundAsync(handle, notification));
+            _ = Task.Run(() => ShowInBackground(handle, notification));
         }
         return ValueTask.CompletedTask;
     }
 
-    private async Task ShowInBackgroundAsync(nint handle, DesktopNotification notification)
+    private void ShowInBackground(nint handle, DesktopNotification notification)
     {
         try
         {
-            var version = Interlocked.Increment(ref _version);
             lock (_gate)
             {
                 var data = CreateData(handle);
@@ -200,7 +196,7 @@ internal sealed class WindowsDesktopNotificationService(Func<nint> ownerHandle)
                     }
                     _registered = true;
                 }
-                data.uFlags = NifInfo | NifRealtime;
+                data.uFlags = NifInfo;
                 data.szInfoTitle = Truncate(
                     notification.IsSharedMailbox
                         ? $"New mail — {notification.MailboxDisplayName} (shared)"
@@ -213,17 +209,6 @@ internal sealed class WindowsDesktopNotificationService(Func<nint> ownerHandle)
                 data.hBalloonIcon = _applicationIcon;
                 data.dwInfoFlags = NiifUser | NiifRespectQuietTime;
                 ShellNotifyIconW(NimModify, ref data);
-            }
-
-            await Task.Delay(TimeSpan.FromSeconds(12));
-            lock (_gate)
-            {
-                if (_registered && version == _version)
-                {
-                    var data = CreateData(handle);
-                    ShellNotifyIconW(NimDelete, ref data);
-                    _registered = false;
-                }
             }
         }
         catch

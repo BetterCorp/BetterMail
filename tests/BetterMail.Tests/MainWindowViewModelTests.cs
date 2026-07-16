@@ -502,6 +502,7 @@ public sealed class MainWindowViewModelTests
             var original = Message(mailbox.Id, "inbox", "Original", "<b>Stable body</b>") with
             {
                 ProviderId = "message",
+                ConversationId = "thread",
                 IsRead = true
             };
             await store.SaveAccountAsync(account, cancellationToken);
@@ -510,7 +511,14 @@ public sealed class MainWindowViewModelTests
             await store.ApplySyncPageAsync("test", new MailSyncPage([original], null, false), cancellationToken);
 
             var updated = original with { Subject = "Updated", IsFlagged = true };
-            var provider = new BlockingSyncProvider(inbox, updated);
+            var sent = original with
+            {
+                ProviderId = "sent",
+                FolderId = "sentitems",
+                Subject = "Sent reply",
+                ReceivedAt = original.ReceivedAt.AddMinutes(1)
+            };
+            var provider = new BlockingSyncProvider(inbox, updated, sent);
             var viewModel = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
             await viewModel.InitializeAsync();
             var bodyRefreshes = 0;
@@ -546,6 +554,8 @@ public sealed class MainWindowViewModelTests
             Assert.Equal(1, provider.SyncCalls);
             Assert.Equal(1, provider.MaxConcurrent);
             Assert.True(viewModel.SelectedMessage?.IsFlagged);
+            Assert.Equal(2, viewModel.ConversationThread.SelectedThread?.Messages.Count);
+            Assert.Contains(viewModel.ConversationThread.SelectedThread!.Messages, item => item.Message.ProviderId == "sent");
             Assert.Equal(0, bodyRefreshes);
             Assert.Equal(0, transientSelectionClears);
 
@@ -1216,7 +1226,7 @@ public sealed class MainWindowViewModelTests
             Task.CompletedTask;
     }
 
-    private sealed class BlockingSyncProvider(MailFolder folder, MailMessage message) : IMailProvider
+    private sealed class BlockingSyncProvider(MailFolder folder, params MailMessage[] messages) : IMailProvider
     {
         private int _concurrent;
         public int SyncCalls { get; private set; }
@@ -1242,7 +1252,7 @@ public sealed class MainWindowViewModelTests
             try
             {
                 await Release.Task.WaitAsync(cancellationToken);
-                return new MailSyncPage([message], cursor, false);
+                return new MailSyncPage(messages, cursor, false);
             }
             finally
             {
@@ -1253,7 +1263,7 @@ public sealed class MainWindowViewModelTests
         public Task MarkReadAsync(MailAccount account, Mailbox mailbox, string messageId, bool isRead, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
         public Task<MailMessage> GetMessageAsync(MailAccount account, Mailbox mailbox, string messageId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(message);
+            Task.FromResult(messages[0]);
         public Task MoveMessageAsync(MailAccount account, Mailbox mailbox, string messageId, string destinationFolderId, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
         public Task SetFlaggedAsync(MailAccount account, Mailbox mailbox, string messageId, bool isFlagged, CancellationToken cancellationToken = default) =>

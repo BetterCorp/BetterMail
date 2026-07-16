@@ -1212,6 +1212,10 @@ public sealed class MainWindowViewModel : ViewModelBase
                 {
                     await LoadMessagesAsync();
                 }
+                if (SelectedMessage is { } selected)
+                {
+                    await LoadConversationAsync(selected, _selectionVersion, CancellationToken.None);
+                }
                 if (IsSettingsOpen)
                 {
                     await LoadMailStatisticsAsync();
@@ -3147,6 +3151,7 @@ public sealed class MainWindowViewModel : ViewModelBase
                 Error = $"Message sent, but its encrypted local draft could not be removed: {exception.Message}";
                 Status = "Message sent; draft cleanup needs attention";
             }
+            _ = SyncAsync();
         }
         finally
         {

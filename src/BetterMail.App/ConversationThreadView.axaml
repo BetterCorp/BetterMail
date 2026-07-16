@@ -103,25 +103,25 @@
                         RowDefinitions="Auto,Auto"
                         ColumnSpacing="10">
                     <StackPanel Orientation="Horizontal" Spacing="7">
-                      <SelectableTextBlock Text="{Binding Sender}"
-                                           FontWeight="SemiBold"
-                                           TextTrimming="CharacterEllipsis" />
-                      <SelectableTextBlock Text="{Binding SenderAddress}"
-                                           FontSize="11"
-                                           Opacity="0.58"
-                                           TextTrimming="CharacterEllipsis" />
+                      <TextBlock Text="{Binding Sender}"
+                                 FontWeight="SemiBold"
+                                 TextTrimming="CharacterEllipsis" />
+                      <TextBlock Text="{Binding SenderAddress}"
+                                 FontSize="11"
+                                 Opacity="0.58"
+                                 TextTrimming="CharacterEllipsis" />
                     </StackPanel>
-                    <SelectableTextBlock Grid.Column="1"
-                                         Text="{Binding ReceivedText}"
-                                         FontSize="11"
-                                         Opacity="0.62"
-                                         TextTrimming="CharacterEllipsis" />
-                    <SelectableTextBlock Grid.Row="1"
-                                         Grid.ColumnSpan="2"
-                                         Text="{Binding Recipients}"
-                                         FontSize="11"
-                                         Opacity="0.62"
-                                         TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding ReceivedText}"
+                               FontSize="11"
+                               Opacity="0.62"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Row="1"
+                               Grid.ColumnSpan="2"
+                               Text="{Binding Recipients}"
+                               FontSize="11"
+                               Opacity="0.62"
+                               TextTrimming="CharacterEllipsis" />
                   </Grid>
                 </Button>
               </Grid>

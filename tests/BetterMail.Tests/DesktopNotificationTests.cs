@@ -95,6 +95,18 @@ public sealed class DesktopNotificationTests
         }
     }
 
+    [Fact]
+    public void WindowsMailNotificationsAreQueuedInsteadOfDiscarded()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root, "src", "BetterMail.App", "DesktopNotifications.cs"));
+
+        Assert.DoesNotContain("NifRealtime", source);
+        Assert.DoesNotContain("NimDelete", source);
+        Assert.Contains("data.uFlags = NifInfo;", source);
+    }
+
     private static InboxNotificationContext Context(bool shared)
     {
         var account = new MailAccount(
@@ -146,5 +158,19 @@ public sealed class DesktopNotificationTests
             Notifications.Add(notification);
             return ValueTask.CompletedTask;
         }
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory is not null;
+             directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "BetterMail.slnx")))
+            {
+                return directory.FullName;
+            }
+        }
+        throw new DirectoryNotFoundException("BetterMail repository root was not found.");
     }
 }

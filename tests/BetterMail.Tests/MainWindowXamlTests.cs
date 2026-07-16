@@ -78,6 +78,7 @@ public sealed class MainWindowXamlTests
         var xaml = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "BetterMail.App", "MainWindow.axaml"));
         var conversationXaml = File.ReadAllText(Path.Combine(
             FindRepositoryRoot(), "src", "BetterMail.App", "ConversationThreadView.axaml"));
+        var threadHeaders = Between(conversationXaml, "<ItemsControl x:Name=" + (char)34 + "ThreadMessages", "</ItemsControl>");
         var folderPane = Between(xaml, "<!-- Structured folder pane -->", "<!-- Compact message list -->");
         var commandBar = Between(xaml, "<!-- Mail command bar", "<!-- Structured folder pane -->");
         var accounts = Between(xaml, "SettingsAccounts", "IsConfirmingAccountRemoval");
@@ -123,8 +124,9 @@ public sealed class MainWindowXamlTests
         Assert.Contains(BindingAttribute("IsVisible", "ShowWorkspaceSurface"), xaml);
         Assert.Contains(BindingAttribute("IsVisible", "ShowMailSurface"), xaml);
         Assert.Contains("ToggleMessageCommand", conversationXaml);
+        Assert.DoesNotContain("<SelectableTextBlock", threadHeaders);
         Assert.Contains("<SelectableTextBlock Text=" + (char)34 + "{Binding SelectedThread.Subject", conversationXaml);
-        Assert.Contains("<SelectableTextBlock Text=" + (char)34 + "{Binding SenderAddress}", conversationXaml);
+        Assert.Contains("<TextBlock Text=" + (char)34 + "{Binding SenderAddress}", threadHeaders);
         Assert.Contains("TreeViewItem:pointerover /template/ ContentPresenter", folderPane);
         Assert.Contains("<Setter Property=" + (char)34 + "BorderThickness" + (char)34 + " Value=" + (char)34 + "0" + (char)34 + " />", folderPane);
         Assert.Contains("<TreeView", folderPane);
