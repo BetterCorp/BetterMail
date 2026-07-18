@@ -8,7 +8,7 @@
     <PackageVersion Include="Avalonia.Desktop" Version="12.1.0" />
     <PackageVersion Include="Avalonia.Fonts.Inter" Version="12.1.0" />
     <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.0" />
-    <PackageVersion Include="HtmlSanitizer" Version="9.0.892" />
+    <PackageVersion Include="HtmlSanitizer" Version="9.1.949-beta" />
     <PackageVersion Include="Microsoft.Data.Sqlite.Core" Version="10.0.9" />
     <PackageVersion Include="Microsoft.Identity.Client" Version="4.86.0" />
     <PackageVersion Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.86.0" />
