@@ -97,11 +97,31 @@
 
     <Grid Grid.Row="5" ColumnDefinitions="*,Auto,Auto" Margin="0,14,0,0">
       <StackPanel VerticalAlignment="Center">
-        <TextBlock Text="{Binding Error}" Foreground="#D9493D" TextWrapping="Wrap" />
         <TextBlock Text="{Binding DraftStatus}" FontSize="11" Opacity="0.6" />
       </StackPanel>
-      <Button Grid.Column="1" Content="Cancel" Click="CancelClicked" Margin="8,0" />
-      <Button Grid.Column="2" Classes="primary" Content="Send" Click="SendClicked" />
+      <Button Grid.Column="1" Content="Cancel" Click="CancelClicked" Margin="8,0" IsEnabled="{Binding !IsSending}" />
+      <Button Grid.Column="2" Classes="primary" Click="SendClicked"
+              IsEnabled="{Binding !IsSending}" AutomationProperties.Name="Send message">
+        <Grid MinWidth="52">
+          <TextBlock Text="Send" HorizontalAlignment="Center" IsVisible="{Binding !IsSending}" />
+          <StackPanel Orientation="Horizontal" Spacing="7" HorizontalAlignment="Center" IsVisible="{Binding IsSending}">
+            <ProgressBar Width="24" Height="3" IsIndeterminate="True" VerticalAlignment="Center" />
+            <TextBlock Text="Sending..." />
+          </StackPanel>
+        </Grid>
+      </Button>
     </Grid>
+
+    <Border Grid.RowSpan="6" ZIndex="20" Background="#D9493D" CornerRadius="3" Padding="11,7"
+            Margin="16" HorizontalAlignment="Right" VerticalAlignment="Bottom" MaxWidth="520"
+            IsVisible="{Binding HasError}">
+      <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+        <TextBlock Text="{Binding Error}" Foreground="White" TextWrapping="Wrap" VerticalAlignment="Center" />
+        <Button Grid.Column="1" Classes="command" Content="Copy" Foreground="White"
+                Click="CopyErrorClicked" AutomationProperties.Name="Copy error" />
+        <Button Grid.Column="2" Classes="command" Content="&#x00D7;" Foreground="White"
+                Click="CloseErrorClicked" AutomationProperties.Name="Close error" />
+      </Grid>
+    </Border>
   </Grid>
 </Window>

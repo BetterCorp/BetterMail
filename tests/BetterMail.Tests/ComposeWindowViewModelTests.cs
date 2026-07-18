@@ -77,6 +77,36 @@ public sealed class ComposeWindowViewModelTests
     }
 
     [Fact]
+    public async Task ShowsProgressAndAnActionableErrorWhileSending()
+    {
+        var send = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var account = new MailAccount("microsoft365", "account", "tenant", "person@example.com", "Person", ProviderCapabilities.Mail);
+        var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+        var viewModel = new ComposeWindowViewModel(
+            [account], [mailbox], new ComposeRequest("to@example.com"), (_, _, _) => send.Task);
+
+        viewModel.SendCommand.Execute(null);
+        for (var attempt = 0; attempt < 50 && !viewModel.IsSending; attempt++)
+        {
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+
+        Assert.True(viewModel.IsSending);
+        Assert.False(viewModel.SendCommand.CanExecute(null));
+        send.SetException(new InvalidOperationException("Send failed"));
+        for (var attempt = 0; attempt < 50 && viewModel.IsSending; attempt++)
+        {
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+
+        Assert.False(viewModel.IsSending);
+        Assert.True(viewModel.HasError);
+        Assert.Equal("Send failed", viewModel.Error);
+        viewModel.DismissError();
+        Assert.False(viewModel.HasError);
+    }
+
+    [Fact]
     public async Task AutosavesAndHandsStableLocalIdToTheSendOwner()
     {
         LocalDraft? saved = null;

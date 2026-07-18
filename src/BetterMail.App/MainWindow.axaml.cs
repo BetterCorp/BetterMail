@@ -238,6 +238,11 @@ public sealed partial class MainWindow : Window
 
     private void MessageDragPointerPressed(object? sender, PointerPressedEventArgs args)
     {
+        if (args.Source is Visual source &&
+            (source is Button || source.GetVisualAncestors().Any(static ancestor => ancestor is Button)))
+        {
+            return;
+        }
         if (sender is not Border { DataContext: MailMessage message } ||
             !args.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
         {
@@ -475,14 +480,11 @@ public sealed partial class MainWindow : Window
     private void MessageReadClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
         Execute(_viewModel?.ToggleReadCommand);
 
-    private void QuickActionClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    private async void QuickActionClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
     {
-        if (_viewModel is null ||
-            sender is not Button
-            {
-                DataContext: MailQuickActionOption action,
-                CommandParameter: MailMessage message
-            })
+        if (_viewModel is null || sender is not Button button ||
+            button.DataContext is not MailQuickActionOption action ||
+            button.CommandParameter is not MailMessage message)
         {
             return;
         }
@@ -497,21 +499,30 @@ public sealed partial class MainWindow : Window
                 : _viewModel.JunkCommand,
             _ => null
         };
-        SelectAndExecute(message, command);
+        var content = button.Content;
+        button.IsEnabled = false;
+        button.Content = new ProgressBar { Width = 24, Height = 3, IsIndeterminate = true };
+        try
+        {
+            SelectMessage(message);
+            if (command is AsyncCommand asyncCommand)
+            {
+                await asyncCommand.ExecuteAsync();
+            }
+        }
+        finally
+        {
+            button.Content = content;
+            button.IsEnabled = true;
+        }
     }
 
-    private void QuickFlyoutPressed(object? sender, PointerPressedEventArgs args)
+    private void QuickActionPressed(object? sender, PointerPressedEventArgs args)
     {
         if (sender is Button { CommandParameter: MailMessage message })
         {
             SelectMessage(message);
         }
-    }
-
-    private void SelectAndExecute(MailMessage message, ICommand? command)
-    {
-        SelectMessage(message);
-        Execute(command);
     }
 
     private void SelectMessage(MailMessage message)

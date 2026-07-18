@@ -146,7 +146,9 @@ public sealed class MainWindowXamlTests
         Assert.Contains("ShowDraftsCommand", folderPane);
         Assert.DoesNotContain("<Expander Header=" + (char)34 + "{Binding DraftCountText}", folderPane);
         Assert.Contains("QuickActionClicked", xaml);
-        Assert.Contains("QuickFlyoutPressed", xaml);
+        Assert.Contains("PointerPressed=" + (char)34 + "QuickActionPressed" + (char)34, xaml);
+        Assert.Contains("IsVisible=" + (char)34 + "{Binding IsSending}" + (char)34, composeXaml);
+        Assert.Contains("Click=" + (char)34 + "CopyErrorClicked" + (char)34, composeXaml);
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding MailQuickActionSlots}" + (char)34, settingsXaml);
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding $parent[Window].DataContext.MailQuickActions}" + (char)34, xaml);
         Assert.Contains("IsVisible=" + (char)34 + "{Binding $parent[Window].DataContext.IsUnifiedInbox}" + (char)34, xaml);

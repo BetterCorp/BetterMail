@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
 using BetterMail.Core;
 
@@ -90,6 +91,23 @@ public sealed partial class ComposeWindow : Window
         if (DataContext is ComposeWindowViewModel viewModel && viewModel.SendCommand.CanExecute(null))
         {
             viewModel.SendCommand.Execute(null);
+        }
+    }
+
+    private async void CopyErrorClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is ComposeWindowViewModel { Error.Length: > 0 } viewModel &&
+            TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
+        {
+            await clipboard.SetValueAsync(DataFormat.Text, viewModel.Error);
+        }
+    }
+
+    private void CloseErrorClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is ComposeWindowViewModel viewModel)
+        {
+            viewModel.DismissError();
         }
     }
 

@@ -24,6 +24,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
     private string? _error;
     private string _draftStatus = "";
     private bool _sent;
+    private bool _isSending;
     private bool _manageSignature;
     private string? _managedSignatureBlock;
 
@@ -66,7 +67,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         {
             Attachments.Add(attachment);
         }
-        SendCommand = new AsyncCommand(SendAsync, () => SelectedSender is not null);
+        SendCommand = new AsyncCommand(SendAsync, () => SelectedSender is not null && !IsSending);
         RemoveAttachmentCommand = new AsyncCommand<DraftAttachment>(RemoveAttachmentAsync);
         if (HasContent())
         {
@@ -140,7 +141,27 @@ public sealed class ComposeWindowViewModel : ViewModelBase
     public string? Error
     {
         get => _error;
-        private set => SetProperty(ref _error, value);
+        private set
+        {
+            if (SetProperty(ref _error, value))
+            {
+                RaisePropertyChanged(nameof(HasError));
+            }
+        }
+    }
+
+    public bool HasError => !string.IsNullOrWhiteSpace(Error);
+
+    public bool IsSending
+    {
+        get => _isSending;
+        private set
+        {
+            if (SetProperty(ref _isSending, value))
+            {
+                ((AsyncCommand)SendCommand).Refresh();
+            }
+        }
     }
 
     public string DraftStatus
@@ -162,6 +183,8 @@ public sealed class ComposeWindowViewModel : ViewModelBase
     }
 
     public void ReportError(string error) => Error = error;
+
+    public void DismissError() => Error = null;
 
     public bool ValidateAttachmentSize(string name, long size)
     {
@@ -195,6 +218,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
 
     private async Task SendAsync()
     {
+        IsSending = true;
         Error = null;
         try
         {
@@ -231,6 +255,10 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             Error = exception.Message;
+        }
+        finally
+        {
+            IsSending = false;
         }
     }
 
