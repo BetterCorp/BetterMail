@@ -4,7 +4,14 @@ namespace BetterMail.Core;
 
 public sealed class SyncEngine(IMailProvider provider, IMailStore store)
 {
+    private const string FullHistoryVersion = "all-v2";
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _mailboxLocks = new();
+
+    public static string CursorId(string mailboxId, string folderId, int historyDays)
+    {
+        var historyKey = historyDays > 0 ? historyDays.ToString() : FullHistoryVersion;
+        return $"{mailboxId}:folder:{folderId}:history:{historyKey}";
+    }
 
     public Task<int> SyncFolderAsync(
         MailAccount account,
@@ -20,8 +27,7 @@ public sealed class SyncEngine(IMailProvider provider, IMailStore store)
         int historyDays,
         CancellationToken cancellationToken = default)
     {
-        var historyKey = historyDays > 0 ? historyDays.ToString() : "all";
-        var cursorId = $"{mailbox.Id}:folder:{folder.ProviderId}:history:{historyKey}";
+        var cursorId = CursorId(mailbox.Id, folder.ProviderId, historyDays);
         DateTimeOffset? receivedSince = historyDays > 0 ? DateTimeOffset.UtcNow.AddDays(-historyDays) : null;
         var mailboxLock = _mailboxLocks.GetOrAdd(cursorId, static _ => new SemaphoreSlim(1, 1));
         await mailboxLock.WaitAsync(cancellationToken).ConfigureAwait(false);

@@ -40,6 +40,23 @@ public sealed class SyncEngineTests
         Assert.InRange(provider.ReceivedSince!.Value, DateTimeOffset.UtcNow.AddDays(-91), DateTimeOffset.UtcNow.AddDays(-89));
     }
 
+    [Fact]
+    public async Task VersionsTheFullHistoryCursorToRepairPreviouslyTruncatedSyncs()
+    {
+        var provider = new FakeProvider(new MailSyncPage([], "delta-cursor", false));
+        var store = new FakeStore();
+        var account = Account();
+        var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+
+        await new SyncEngine(provider, store).SyncFolderAsync(
+            account,
+            mailbox,
+            new MailFolder(mailbox.Id, "inbox", "Inbox", 0, 1, "inbox"),
+            TestContext.Current.CancellationToken);
+
+        Assert.EndsWith(":history:all-v2", store.CursorId);
+    }
+
     private static MailAccount Account() => new(
         "fake", "account", "tenant", "person@example.com", "Person", ProviderCapabilities.Mail);
 

@@ -483,6 +483,68 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task MailSearchShowsLocalResultsBeforeIncompleteCacheFallbackFinishes()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-hybrid-search-{Guid.NewGuid():N}");
+        var store = new EncryptedMailStore(
+            Path.Combine(directory, "mail.db"),
+            Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+        try
+        {
+            await store.InitializeAsync(cancellationToken);
+            var account = new MailAccount(
+                "microsoft365", "account", "tenant", "person@example.com", "Person",
+                ProviderCapabilities.Mail | ProviderCapabilities.ServerSearch);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+            var folder = new MailFolder(mailbox.Id, "inbox", "Inbox", 0, 2, "inbox");
+            var local = Message(mailbox.Id, folder.ProviderId, "Needle local", "Local match") with
+            {
+                ProviderId = "local"
+            };
+            var remote = Message(mailbox.Id, folder.ProviderId, "Needle remote", "Remote match") with
+            {
+                ProviderId = "remote"
+            };
+            await store.ApplySyncPageAsync("seed", new MailSyncPage([local], null, false), cancellationToken);
+            var provider = new RecordingProvider
+            {
+                SearchResults = [remote],
+                SearchRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            };
+            var viewModel = new MainWindowViewModel(
+                store, directory, _ => { }, _ => { }, null, provider);
+            viewModel.Accounts.Add(account);
+            viewModel.Mailboxes.Add(mailbox);
+            viewModel.Folders.Add(new MailFolderItem(folder, mailbox.DisplayName));
+
+            viewModel.SearchText = "Needle";
+            viewModel.SearchCommand.Execute(null);
+            await WaitUntilAsync(
+                () => provider.SearchCalls == 1 &&
+                    viewModel.GlobalSearchResults.Any(result => result.Title == local.Subject),
+                cancellationToken);
+
+            Assert.True(viewModel.IsGlobalSearchRunning);
+            Assert.DoesNotContain(viewModel.GlobalSearchResults, result => result.Title == remote.Subject);
+            provider.SearchRelease.SetResult();
+            await WaitUntilAsync(() => !viewModel.IsGlobalSearchRunning, cancellationToken);
+
+            Assert.Contains(viewModel.GlobalSearchResults, result => result.Title == remote.Subject);
+            Assert.Contains(await store.SearchAsync("Needle", cancellationToken: cancellationToken),
+                message => message.ProviderId == remote.ProviderId);
+        }
+        finally
+        {
+            await store.DisposeAsync();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task KeyboardNavigationChangesSelectionWithoutFetchingOrReplacingRows()
     {
         var provider = new RecordingProvider();
@@ -1240,6 +1302,9 @@ public sealed class MainWindowViewModelTests
         public bool? Flagged { get; private set; }
         public string? MoveDestination { get; private set; }
         public int GetMessageCalls { get; private set; }
+        public int SearchCalls { get; private set; }
+        public IReadOnlyList<MailMessage> SearchResults { get; set; } = [];
+        public TaskCompletionSource? SearchRelease { get; set; }
         public TaskCompletionSource? MoveRelease { get; set; }
 
         public Task<IReadOnlyList<MailFolder>> GetFoldersAsync(
@@ -1279,6 +1344,21 @@ public sealed class MainWindowViewModelTests
         {
             GetMessageCalls++;
             return Task.FromResult(Message(mailbox.Id, "inbox", "(no subject)", ""));
+        }
+
+        public async Task<IReadOnlyList<MailMessage>> SearchMessagesAsync(
+            MailAccount account,
+            Mailbox mailbox,
+            string query,
+            int limit = 250,
+            CancellationToken cancellationToken = default)
+        {
+            SearchCalls++;
+            if (SearchRelease is not null)
+            {
+                await SearchRelease.Task.WaitAsync(cancellationToken);
+            }
+            return SearchResults.Take(limit).ToArray();
         }
 
         public async Task MoveMessageAsync(

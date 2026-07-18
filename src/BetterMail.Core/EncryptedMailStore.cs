@@ -37,6 +37,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             await EnsureColumnAsync(connection, "messages", "is_flagged", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "messages", "cc_recipients_json", "TEXT NOT NULL DEFAULT '[]'", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "mail_folders", "parent_provider_id", "TEXT", cancellationToken).ConfigureAwait(false);
+            await EnsureColumnAsync(connection, "sync_cursors", "is_complete", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "local_drafts", "is_html", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "local_drafts", "provider_draft_id", "TEXT", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "local_drafts", "synced_local_updated_at", "TEXT", cancellationToken).ConfigureAwait(false);
@@ -247,11 +248,15 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                 await using var cursorCommand = connection.CreateCommand();
                 cursorCommand.Transaction = transaction;
                 cursorCommand.CommandText = """
-                    INSERT INTO sync_cursors(mailbox_id, cursor) VALUES($cursorId, $cursor)
-                    ON CONFLICT(mailbox_id) DO UPDATE SET cursor = excluded.cursor;
+                    INSERT INTO sync_cursors(mailbox_id, cursor, is_complete)
+                    VALUES($cursorId, $cursor, $isComplete)
+                    ON CONFLICT(mailbox_id) DO UPDATE SET
+                        cursor = excluded.cursor,
+                        is_complete = excluded.is_complete;
                     """;
                 cursorCommand.Parameters.AddWithValue("$cursorId", cursorId);
                 cursorCommand.Parameters.AddWithValue("$cursor", page.NextCursor);
+                cursorCommand.Parameters.AddWithValue("$isComplete", page.HasMore ? 0 : 1);
                 await cursorCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
 
@@ -266,6 +271,18 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             command.CommandText = "SELECT cursor FROM sync_cursors WHERE mailbox_id = $cursorId;";
             command.Parameters.AddWithValue("$cursorId", cursorId);
             return (string?)await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+
+    public Task<MailSyncState> GetSyncStateAsync(string cursorId, CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT cursor, is_complete FROM sync_cursors WHERE mailbox_id = $cursorId;";
+            command.Parameters.AddWithValue("$cursorId", cursorId);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+                ? new MailSyncState(reader.GetString(0), reader.GetInt32(1) == 1)
+                : new MailSyncState(null, false);
         }, cancellationToken);
 
     public Task<IReadOnlyList<MailMessage>> GetMessagesAsync(string? mailboxId = null, string? folderId = null, int limit = 5000, CancellationToken cancellationToken = default)
@@ -872,7 +889,8 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
 
         CREATE TABLE IF NOT EXISTS sync_cursors(
             mailbox_id TEXT PRIMARY KEY,
-            cursor TEXT NOT NULL
+            cursor TEXT NOT NULL,
+            is_complete INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS local_drafts(

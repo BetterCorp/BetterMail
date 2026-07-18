@@ -132,6 +132,8 @@ public sealed record MailSyncPage(
     string? NextCursor,
     bool HasMore);
 
+public sealed record MailSyncState(string? Cursor, bool IsComplete);
+
 public sealed record DraftMessage(
     string Subject,
     IReadOnlyList<MailAddress> To,

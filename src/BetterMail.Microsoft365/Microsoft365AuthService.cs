@@ -46,6 +46,7 @@ public sealed class Microsoft365AuthService : IAccountProvider
         ProviderCapabilities.SharedMailboxes |
         ProviderCapabilities.SendAs |
         ProviderCapabilities.SendOnBehalf |
+        ProviderCapabilities.ServerSearch |
         ProviderCapabilities.Calendar |
         ProviderCapabilities.Contacts |
         ProviderCapabilities.Tasks |

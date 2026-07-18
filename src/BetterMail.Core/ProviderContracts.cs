@@ -46,6 +46,14 @@ public interface IMailProvider
         string messageId,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<MailMessage>> SearchMessagesAsync(
+        MailAccount account,
+        Mailbox mailbox,
+        string query,
+        int limit = 250,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<MailMessage>>([]);
+
     Task<IReadOnlyList<MailHeader>> GetMessageHeadersAsync(
         MailAccount account,
         Mailbox mailbox,
@@ -388,6 +396,8 @@ public interface IMailStore : IAsyncDisposable
     Task<IReadOnlyList<MailFolder>> GetFoldersAsync(string? mailboxId = null, CancellationToken cancellationToken = default);
     Task ApplySyncPageAsync(string cursorId, MailSyncPage page, CancellationToken cancellationToken = default);
     Task<string?> GetSyncCursorAsync(string cursorId, CancellationToken cancellationToken = default);
+    async Task<MailSyncState> GetSyncStateAsync(string cursorId, CancellationToken cancellationToken = default) =>
+        new(await GetSyncCursorAsync(cursorId, cancellationToken).ConfigureAwait(false), false);
     Task<IReadOnlyList<MailMessage>> GetMessagesAsync(string? mailboxId = null, string? folderId = null, int limit = 5000, CancellationToken cancellationToken = default);
     async Task<MailStoreCounts> GetMessageCountsAsync(string? mailboxId = null, CancellationToken cancellationToken = default)
     {

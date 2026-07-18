@@ -1773,7 +1773,15 @@ public sealed class MainWindowViewModel : ViewModelBase
             }
 
             var searches = new List<Task>();
-            AddSearch("Mail", () => SearchCachedMailGloballyAsync(query, source.Token));
+            if (SelectedSearchScope is "Everything" or "Mail")
+            {
+                var localMailSearch = AddGlobalResultsAsync(
+                    "Mail",
+                    SearchCachedMailGloballyAsync(query, source.Token),
+                    source);
+                searches.Add(localMailSearch);
+                searches.Add(EnrichMailSearchFromProviderAsync(query, localMailSearch, source));
+            }
             AddSearch("People", () => SearchPeopleGloballyAsync(query, source.Token));
             AddSearch("Calendar", () => SearchCalendarGloballyAsync(query, source.Token));
             AddSearch("To Do", () => SearchTasksGloballyAsync(query, source.Token));
@@ -1865,6 +1873,139 @@ public sealed class MainWindowViewModel : ViewModelBase
             .Select(message => new GlobalSearchResult(
                 "Mail", message.Subject, MailSearchSubtitle(message), "Mail", message))
             .ToArray();
+    }
+
+    private async Task EnrichMailSearchFromProviderAsync(
+        string query,
+        Task localResultsAdded,
+        CancellationTokenSource source)
+    {
+        await localResultsAdded;
+        if (_provider is null || _store is null || source.IsCancellationRequested ||
+            !ReferenceEquals(_globalSearchCancellation, source))
+        {
+            return;
+        }
+
+        var remoteMessages = new List<MailMessage>();
+        foreach (var mailbox in Mailboxes.Where(MailboxMatchesSearchFilters))
+        {
+            source.Token.ThrowIfCancellationRequested();
+            if (await IsMailboxSearchCoverageCompleteAsync(mailbox, source.Token))
+            {
+                continue;
+            }
+
+            var account = Accounts.FirstOrDefault(candidate => candidate.AccountId == mailbox.AccountId);
+            if (account is null)
+            {
+                continue;
+            }
+
+            try
+            {
+                var found = await _provider.SearchMessagesAsync(account, mailbox, query, 250, source.Token);
+                if (found.Count == 0)
+                {
+                    continue;
+                }
+                await _store.ApplySyncPageAsync(
+                    $"search-import:{mailbox.Id}",
+                    new MailSyncPage(found, null, false),
+                    source.Token);
+                remoteMessages.AddRange(found.Where(IsSearchableMail));
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // Local results stay usable when the optional provider search is unavailable.
+            }
+        }
+
+        if (remoteMessages.Count == 0 || source.IsCancellationRequested ||
+            !ReferenceEquals(_globalSearchCancellation, source))
+        {
+            return;
+        }
+
+        var merged = _latestMailSearchResults
+            .Concat(remoteMessages)
+            .GroupBy(MessageKey, StringComparer.Ordinal)
+            .Select(static group => group.First())
+            .OrderByDescending(static message => message.ReceivedAt)
+            .ToArray();
+        _latestMailSearchResults.Clear();
+        _latestMailSearchResults.AddRange(merged);
+        ReplaceGlobalMailSearchResults(merged.Take(100));
+    }
+
+    private bool MailboxMatchesSearchFilters(Mailbox mailbox) =>
+        (SelectedSearchAccountFilter?.AccountId is null ||
+            SelectedSearchAccountFilter.AccountId == mailbox.AccountId) &&
+        (!IsMailSearchScope || SelectedSearchFolderFilter?.MailboxId is null ||
+            SelectedSearchFolderFilter.MailboxId == mailbox.Id);
+
+    private async Task<bool> IsMailboxSearchCoverageCompleteAsync(
+        Mailbox mailbox,
+        CancellationToken cancellationToken)
+    {
+        var mailboxFolders = Folders.Where(folder => folder.MailboxId == mailbox.Id).ToArray();
+        if (mailboxFolders.Length == 0)
+        {
+            return false;
+        }
+
+        var relevantFolders = mailboxFolders.Where(folder =>
+            folder.TotalCount > 0 &&
+            IsFolderIncludedInSearch(folder, mailbox.Id) &&
+            (!IsMailSearchScope || SelectedSearchFolderFilter?.FolderId is null ||
+                SelectedSearchFolderFilter.FolderId == folder.ProviderId));
+        foreach (var folder in relevantFolders)
+        {
+            var state = await _store!.GetSyncStateAsync(
+                SyncEngine.CursorId(mailbox.Id, folder.ProviderId, 0),
+                cancellationToken);
+            if (!state.IsComplete)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void ReplaceGlobalMailSearchResults(IEnumerable<MailMessage> messages)
+    {
+        var insertionIndex = GlobalSearchResults
+            .Select((result, index) => (result, index))
+            .FirstOrDefault(static item => item.result.Category == "Mail")
+            .index;
+        for (var index = GlobalSearchResults.Count - 1; index >= 0; index--)
+        {
+            if (GlobalSearchResults[index].Category == "Mail")
+            {
+                GlobalSearchResults.RemoveAt(index);
+            }
+        }
+
+        var startsCategory = true;
+        string? previousAccountGroup = null;
+        foreach (var result in messages
+            .Select(message => new GlobalSearchResult(
+                "Mail", message.Subject, MailSearchSubtitle(message), "Mail", message))
+            .Select(result => result with { AccountGroup = SearchGroupFor(result.Value) })
+            .OrderBy(static result => result.AccountGroup, StringComparer.OrdinalIgnoreCase))
+        {
+            var startsAccountGroup = !string.Equals(
+                previousAccountGroup,
+                result.AccountGroup,
+                StringComparison.OrdinalIgnoreCase);
+            GlobalSearchResults.Insert(insertionIndex++, result with
+            {
+                StartsCategory = startsCategory,
+                StartsAccountGroup = startsAccountGroup
+            });
+            startsCategory = false;
+            previousAccountGroup = result.AccountGroup;
+        }
     }
 
     private async Task<IReadOnlyList<GlobalSearchResult>> SearchPeopleGloballyAsync(
@@ -2000,10 +2141,13 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
         var folder = Folders.FirstOrDefault(candidate =>
             candidate.MailboxId == message.MailboxId && candidate.ProviderId == message.FolderId);
-        return !IsDeletedOrJunkFolder(folder) &&
-            (IncludeArchivedMailInSearch ||
-                (!IsArchiveFolder(folder) && !IsArchiveMailbox(message.MailboxId)));
+        return IsFolderIncludedInSearch(folder, message.MailboxId);
     }
+
+    private bool IsFolderIncludedInSearch(MailFolderItem? folder, string mailboxId) =>
+        !IsDeletedOrJunkFolder(folder) &&
+        (IncludeArchivedMailInSearch ||
+            (!IsArchiveFolder(folder) && !IsArchiveMailbox(mailboxId)));
 
     private static bool IsDeletedOrJunkFolder(MailFolderItem? folder) =>
         folder?.WellKnownName is "deleteditems" ||

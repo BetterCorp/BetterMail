@@ -114,6 +114,33 @@ public sealed class Microsoft365MailProvider(
         return new MailSyncPage(messages, nextCursor, hasMore);
     }
 
+    public async Task<IReadOnlyList<MailMessage>> SearchMessagesAsync(
+        MailAccount account,
+        Mailbox mailbox,
+        string query,
+        int limit = 250,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(query) || limit <= 0)
+        {
+            return [];
+        }
+
+        var messages = new List<MailMessage>(Math.Min(limit, 250));
+        string? endpoint = SearchEndpoint(account, mailbox, query, Math.Min(limit, 1000));
+        while (!string.IsNullOrWhiteSpace(endpoint) && messages.Count < limit)
+        {
+            using var document = await GetJsonAsync(account, endpoint, cancellationToken).ConfigureAwait(false);
+            messages.AddRange(document.RootElement.GetProperty("value").EnumerateArray()
+                .Select(message => MapMessage(mailbox, message)));
+            endpoint = document.RootElement.TryGetProperty("@odata.nextLink", out var nextLink)
+                ? nextLink.GetString()
+                : null;
+        }
+
+        return messages.Take(limit).ToArray();
+    }
+
     internal static string SyncEndpoint(
         MailAccount account,
         Mailbox mailbox,
@@ -121,13 +148,19 @@ public sealed class Microsoft365MailProvider(
         DateTimeOffset? receivedSince)
     {
         var endpoint = $"{MailboxPath(account, mailbox)}/mailFolders/{Uri.EscapeDataString(folderId)}/messages/delta" +
-            $"?$select={MessageSelect}&$top=50";
+            $"?$select={MessageSelect}";
         if (receivedSince is null)
         {
             return endpoint;
         }
         var cutoff = receivedSince.Value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture);
         return $"{endpoint}&$filter=receivedDateTime+ge+{cutoff}&$orderby=receivedDateTime+desc";
+    }
+
+    internal static string SearchEndpoint(MailAccount account, Mailbox mailbox, string query, int limit)
+    {
+        var escapedQuery = Uri.EscapeDataString($"\"{query.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"");
+        return $"{MailboxPath(account, mailbox)}/messages?$search={escapedQuery}&$select={MessageSelect}&$top={limit}";
     }
 
     internal static bool NeedsHydration(JsonElement message) =>
@@ -709,6 +742,10 @@ public sealed class Microsoft365MailProvider(
             await authentication.GetAccessTokenAsync(account.AccountId, cancellationToken).ConfigureAwait(false));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.Add("Prefer", "outlook.body-content-type=html");
+        if (endpoint.Contains("/messages/delta", StringComparison.OrdinalIgnoreCase))
+        {
+            request.Headers.Add("Prefer", "odata.maxpagesize=50");
+        }
         return request;
     }
 
@@ -768,8 +805,6 @@ public sealed class Microsoft365MailProvider(
                          DateTimeOffset.TryParse(received.GetString(), out var parsedReceived)
             ? parsedReceived
             : DateTimeOffset.UtcNow;
-        var cacheBody = receivedAt >= DateTimeOffset.UtcNow.AddDays(-90);
-
         return new MailMessage(
             mailbox.Id,
             id,
@@ -781,7 +816,7 @@ public sealed class Microsoft365MailProvider(
             ReadAddresses(message, "toRecipients"),
             receivedAt,
             OptionalString(message, "bodyPreview") ?? "",
-            cacheBody && body.ValueKind == JsonValueKind.Object ? OptionalString(body, "content") : null,
+            body.ValueKind == JsonValueKind.Object ? OptionalString(body, "content") : null,
             body.ValueKind == JsonValueKind.Object && string.Equals(OptionalString(body, "contentType"), "html", StringComparison.OrdinalIgnoreCase),
             message.TryGetProperty("isRead", out var isRead) && isRead.GetBoolean(),
             message.TryGetProperty("hasAttachments", out var attachments) && attachments.GetBoolean(),

@@ -38,6 +38,44 @@ public sealed class Microsoft365MailProviderTests
     }
 
     [Fact]
+    public void DeltaSyncUsesPreferPagingInsteadOfTruncatingTheInitialRoundWithTop()
+    {
+        var account = Account();
+        var mailbox = new BetterMail.Core.Mailbox(account.AccountId, account.EmailAddress, "Primary");
+
+        var endpoint = Microsoft365MailProvider.SyncEndpoint(account, mailbox, "inbox", null);
+
+        Assert.DoesNotContain("$top", endpoint);
+    }
+
+    [Fact]
+    public void SearchEndpointEscapesTheQueryAndTargetsTheWholeMailbox()
+    {
+        var account = Account();
+        var mailbox = new BetterMail.Core.Mailbox(account.AccountId, account.EmailAddress, "Primary");
+
+        var endpoint = Microsoft365MailProvider.SearchEndpoint(account, mailbox, "quarterly \"report\"", 250);
+
+        Assert.StartsWith("me/messages?$search=", endpoint);
+        Assert.Contains("%22quarterly%20%5C%22report%5C%22%22", endpoint);
+        Assert.EndsWith("$top=250", endpoint);
+    }
+
+    [Fact]
+    public void KeepsOldMessageBodiesForCompleteLocalSearch()
+    {
+        using var document = JsonDocument.Parse(
+            """
+            {"id":"old","subject":"Archive","parentFolderId":"archive","receivedDateTime":"2016-01-01T00:00:00Z","from":{},"toRecipients":[],"ccRecipients":[],"bodyPreview":"preview","body":{"contentType":"html","content":"<p>historic narwhal</p>"}}
+            """);
+        var mailbox = new BetterMail.Core.Mailbox("account", "person@example.com", "Person");
+
+        var message = Microsoft365MailProvider.MapMessage(mailbox, document.RootElement);
+
+        Assert.Equal("<p>historic narwhal</p>", message.Body);
+    }
+
+    [Fact]
     public void ListsAttachmentDerivedPropertiesWithoutInvalidBaseSelect()
     {
         var account = Account();

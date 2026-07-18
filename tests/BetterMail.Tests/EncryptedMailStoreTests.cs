@@ -142,6 +142,7 @@ public sealed class EncryptedMailStoreTests
             Assert.Equal(2, discovered.Frequency);
             Assert.Equal(mailbox.Id, Assert.Single(discovered.MailboxIds));
             Assert.Equal("cursor-1", await store.GetSyncCursorAsync(mailbox.Id, cancellationToken));
+            Assert.True((await store.GetSyncStateAsync(mailbox.Id, cancellationToken)).IsComplete);
             Assert.Equal(new MailStoreCounts(2, 2, 1), await store.GetMessageCountsAsync(mailbox.Id, cancellationToken));
             var draft = new LocalDraft(
                 "draft-one",
