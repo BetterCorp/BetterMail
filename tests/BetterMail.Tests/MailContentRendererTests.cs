@@ -24,20 +24,30 @@ public sealed class MailContentRendererTests
     }
 
     [Fact]
-    public void BuildsSafeQuotedReplyContextFromTheFullCachedBody()
+    public void PreservesSafeQuotedReplyContentAndPictures()
     {
         var renderer = new MailContentRenderer();
         var message = new MailMessage(
             "mailbox", "message", null, null, "inbox", "Budget <review>",
             new("Sender & Co", "sender@example.com"), [new("Recipient", "to@example.com")],
             new DateTimeOffset(2026, 7, 16, 10, 0, 0, TimeSpan.Zero), "Preview only",
-            "<p>Full original body</p><img src='https://tracker.example/pixel'>", true, true,
+            "<p>Full original body</p><img src='cid:logo@example'><img src='https://images.example/photo.jpg'>", true, true,
             false, MailImportance.Normal, [], null);
+        var attachments = new[]
+        {
+            new MailAttachment("logo", "logo.png", "image/png", 3, true, "logo@example", [1, 2, 3])
+        };
 
-        var html = renderer.PrepareQuotedMessageHtml(message);
+        var html = renderer.PrepareQuotedMessageHtml(message, attachments);
+        var outgoing = renderer.PrepareOutgoingHtml(html, []);
 
         Assert.Contains("Full original body", html);
-        Assert.DoesNotContain("tracker.example", html);
+        Assert.Contains("<hr", html);
+        Assert.Contains("bettermail-original-message", html);
+        Assert.Contains("data:image/png;base64,AQID", html);
+        Assert.Contains("https://images.example/photo.jpg", html);
+        Assert.Contains("https://images.example/photo.jpg", outgoing.Html);
+        Assert.True(Assert.Single(outgoing.Attachments).IsInline);
         Assert.Contains("Budget &lt;review&gt;", html);
         Assert.Contains("sender@example.com", html);
         Assert.Contains("Preview only", renderer.PrepareQuotedMessageHtml(message with { Body = null }));

@@ -4335,13 +4335,18 @@ public sealed class MainWindowViewModel : ViewModelBase
         return ReplyToAsync(message);
     }
 
-    private Task ReplyToAsync(MailMessage message)
+    private async Task ReplyToAsync(MailMessage message)
     {
+        var attachments = await LoadComposeSourceAttachmentsAsync(message, includeFiles: false);
+        if (attachments is null)
+        {
+            return;
+        }
         var (accountId, mailboxId) = ReplySender(message);
-        return RequestComposeAsync(new ComposeRequest(
+        await RequestComposeAsync(new ComposeRequest(
             message.From.Address,
             PrefixSubject(message.Subject, "Re:"),
-            Body: _renderer.PrepareQuotedMessageHtml(message),
+            Body: _renderer.PrepareQuotedMessageHtml(message, attachments),
             AccountId: accountId,
             MailboxId: mailboxId,
             IsHtml: true,
@@ -4354,7 +4359,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         return ReplyAllToAsync(message);
     }
 
-    private Task ReplyAllToAsync(MailMessage message)
+    private async Task ReplyAllToAsync(MailMessage message)
     {
         var recipients = MailReplyRecipients.ReplyAll(
             message,
@@ -4363,14 +4368,19 @@ public sealed class MainWindowViewModel : ViewModelBase
         if (recipients.Count == 0)
         {
             Error = "Reply all has no external recipients after removing your linked addresses.";
-            return Task.CompletedTask;
+            return;
         }
 
+        var attachments = await LoadComposeSourceAttachmentsAsync(message, includeFiles: false);
+        if (attachments is null)
+        {
+            return;
+        }
         var (accountId, mailboxId) = ReplySender(message);
-        return RequestComposeAsync(new ComposeRequest(
+        await RequestComposeAsync(new ComposeRequest(
             recipients[0],
             PrefixSubject(message.Subject, "Re:"),
-            Body: _renderer.PrepareQuotedMessageHtml(message),
+            Body: _renderer.PrepareQuotedMessageHtml(message, attachments),
             Cc: string.Join("; ", recipients.Skip(1)),
             AccountId: accountId,
             MailboxId: mailboxId,
@@ -4384,14 +4394,55 @@ public sealed class MainWindowViewModel : ViewModelBase
         return ForwardMessageAsync(message);
     }
 
-    private Task ForwardMessageAsync(MailMessage message)
+    private async Task ForwardMessageAsync(MailMessage message)
     {
+        var attachments = await LoadComposeSourceAttachmentsAsync(message, includeFiles: true);
+        if (attachments is null)
+        {
+            return;
+        }
         var subject = PrefixSubject(message.Subject, "Fwd:");
-        var body = $"\n\n--- Forwarded message ---\nFrom: {message.From}\nDate: {message.ReceivedAt:g}\nSubject: {message.Subject}\n\n{message.Preview}";
-        return RequestComposeAsync(new ComposeRequest(
+        await RequestComposeAsync(new ComposeRequest(
             Subject: subject,
-            Body: body,
+            Body: _renderer.PrepareQuotedMessageHtml(message, attachments),
+            Attachments: attachments
+                .Where(static attachment => !attachment.IsInline && attachment.ContentBytes is { Length: > 0 })
+                .Select(static attachment => new DraftAttachment(
+                    attachment.Name,
+                    attachment.ContentType,
+                    attachment.ContentBytes!))
+                .ToArray(),
+            IsHtml: true,
             Intent: ComposeIntent.Forward));
+    }
+
+    private async Task<IReadOnlyList<MailAttachment>?> LoadComposeSourceAttachmentsAsync(
+        MailMessage message,
+        bool includeFiles)
+    {
+        var hasCidImages = _renderer.HasCidImages(message.Body, message.IsHtml);
+        if (!hasCidImages && (!includeFiles || !message.HasAttachments))
+        {
+            return [];
+        }
+        if (IsCurrentMessage(message) && Attachments.Count > 0)
+        {
+            return Attachments.ToArray();
+        }
+        if (_provider is null || !TryGetMessageContext(message, out var account, out var mailbox))
+        {
+            Error = "Original message pictures could not be loaded.";
+            return null;
+        }
+        try
+        {
+            return await _provider.GetAttachmentsAsync(account, mailbox, message.ProviderId);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Error = $"Original message pictures could not be loaded: {exception.Message}";
+            return null;
+        }
     }
 
     private Task SelectAdjacentMessageAsync(int offset)

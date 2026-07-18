@@ -325,6 +325,50 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task ReplyAndForwardPreserveOriginalPicturesAndHtml()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var account = new MailAccount(
+            "microsoft365", "account", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+        var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+        var provider = new RecordingProvider
+        {
+            AttachmentResults =
+            [
+                new("inline", "logo.png", "image/png", 3, true, "logo@example", [1, 2, 3]),
+                new("file", "report.pdf", "application/pdf", 3, false, null, [4, 5, 6])
+            ]
+        };
+        var viewModel = new MainWindowViewModel(
+            null, "data", _ => { }, _ => { }, null, provider);
+        viewModel.Accounts.Add(account);
+        viewModel.Mailboxes.Add(mailbox);
+        viewModel.SelectedMessage = Message(mailbox.Id, "inbox", "Pictures", "Preview") with
+        {
+            From = new MailAddress("Sender", "sender@example.com"),
+            Body = "<p>Full HTML</p><img src='cid:logo@example'><img src='https://images.example/photo.jpg'>",
+            IsHtml = true,
+            HasAttachments = true,
+            IsRead = true
+        };
+        var requests = new List<ComposeRequest>();
+        viewModel.ComposeRequested += requests.Add;
+
+        viewModel.ReplyCommand.Execute(null);
+        await WaitUntilAsync(() => requests.Count == 1, cancellationToken);
+        Assert.Contains("Full HTML", requests[0].Body);
+        Assert.Contains("data:image/png;base64,AQID", requests[0].Body);
+        Assert.Contains("https://images.example/photo.jpg", requests[0].Body);
+        Assert.Empty(requests[0].Attachments ?? []);
+
+        viewModel.ForwardCommand.Execute(null);
+        await WaitUntilAsync(() => requests.Count == 2, cancellationToken);
+        Assert.True(requests[1].IsHtml);
+        Assert.Contains("data:image/png;base64,AQID", requests[1].Body);
+        Assert.Equal("report.pdf", Assert.Single(requests[1].Attachments!).Name);
+    }
+
+    [Fact]
     public async Task ConversationSelectionReconcilesStableRowsAndRoutesExistingActions()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -1306,6 +1350,7 @@ public sealed class MainWindowViewModelTests
         public IReadOnlyList<MailMessage> SearchResults { get; set; } = [];
         public TaskCompletionSource? SearchRelease { get; set; }
         public TaskCompletionSource? MoveRelease { get; set; }
+        public IReadOnlyList<MailAttachment> AttachmentResults { get; set; } = [];
 
         public Task<IReadOnlyList<MailFolder>> GetFoldersAsync(
             MailAccount account,
@@ -1391,7 +1436,7 @@ public sealed class MainWindowViewModelTests
             Mailbox mailbox,
             string messageId,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<MailAttachment>>([]);
+            Task.FromResult(AttachmentResults);
 
         public Task SendAsync(
             MailAccount account,
