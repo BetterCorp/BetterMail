@@ -16,6 +16,7 @@ public enum CalendarViewMode
 public sealed class CalendarWorkspaceViewModel : ViewModelBase
 {
     private readonly ICalendarProvider _provider;
+    private readonly EncryptedMailStore? _store;
     private IReadOnlyList<MailAccount> _accounts;
     private readonly Func<DateTimeOffset> _now;
     private readonly List<CalendarEventSource> _events = [];
@@ -54,9 +55,11 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
     public CalendarWorkspaceViewModel(
         ICalendarProvider provider,
         IReadOnlyList<MailAccount> accounts,
-        Func<DateTimeOffset>? now = null)
+        Func<DateTimeOffset>? now = null,
+        EncryptedMailStore? store = null)
     {
         _provider = provider;
+        _store = store;
         _accounts = accounts;
         _now = now ?? (() => DateTimeOffset.Now);
         _selectedDate = _now();
@@ -251,6 +254,14 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
         try
         {
             var calendars = await _provider.GetCalendarsAsync(account, cancellationToken);
+            if (_store is not null)
+            {
+                await _store.ReplaceWorkspaceItemsAsync(
+                    "calendar", account.AccountId, "all", calendars,
+                    static item => item.ProviderId,
+                    static item => $"{item.Name} {item.Color}", cancellationToken);
+                await _store.GarbageCollectWorkspaceAsync(account.AccountId, cancellationToken);
+            }
             var choices = calendars.Select((calendar, index) => new CalendarChoice(
                 calendar,
                 ResolveColor(calendar.Color, accountIndex + index),
@@ -259,7 +270,15 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            return new(new(account, []), $"{account.EmailAddress}: calendars could not be loaded ({ex.Message})");
+            var cached = _store is null
+                ? []
+                : await _store.GetWorkspaceItemsAsync<CalendarInfo>(
+                    "calendar", account.AccountId, "all", cancellationToken);
+            var choices = cached.Select((calendar, index) => new CalendarChoice(
+                calendar, ResolveColor(calendar.Color, accountIndex + index), RebuildLayout)).ToArray();
+            return new(new(account, choices), cached.Count == 0
+                ? $"{account.EmailAddress}: calendars could not be loaded ({ex.Message})"
+                : null);
         }
     }
 
@@ -325,11 +344,21 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
         {
             var events = await _provider.GetEventsAsync(
                 account, calendar.Info.ProviderId, from, to, cancellationToken);
+            if (_store is not null)
+            {
+                await _store.ReplaceCalendarEventsAsync(
+                    account.AccountId, calendar.Info.ProviderId, from, to, events, cancellationToken);
+            }
             return new(events.Select(item => new CalendarEventSource(account, calendar, item)).ToArray(), null);
         }
         catch (Exception ex)
         {
-            return new([], $"{account.EmailAddress} / {calendar.Info.Name}: {ex.Message}");
+            var cached = _store is null
+                ? []
+                : await _store.GetCalendarEventsAsync(
+                    account.AccountId, calendar.Info.ProviderId, from, to, cancellationToken);
+            return new(cached.Select(item => new CalendarEventSource(account, calendar, item)).ToArray(),
+                cached.Count == 0 ? $"{account.EmailAddress} / {calendar.Info.Name}: {ex.Message}" : null);
         }
     }
 

@@ -7,6 +7,7 @@ namespace BetterMail.App;
 public sealed class DriveWorkspaceViewModel : ViewModelBase
 {
     private readonly IFilesProvider _provider;
+    private readonly EncryptedMailStore? _store;
     private IReadOnlyList<MailAccount> _accounts;
     private Func<CancellationToken, Task<DriveUploadSource?>>? _pickUpload;
     private Func<CloudDriveItem, CancellationToken, Task<Stream?>>? _pickDownload;
@@ -23,9 +24,13 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
     private bool _isSearchMode;
     private bool _initialized;
 
-    public DriveWorkspaceViewModel(IFilesProvider provider, IReadOnlyList<MailAccount> accounts)
+    public DriveWorkspaceViewModel(
+        IFilesProvider provider,
+        IReadOnlyList<MailAccount> accounts,
+        EncryptedMailStore? store = null)
     {
         _provider = provider;
+        _store = store;
         _accounts = accounts.ToArray();
         RebuildAccountFilters();
 
@@ -336,13 +341,39 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         try
         {
             var items = await _provider.GetDriveItemsAsync(node.Account, node.Item, cancellationToken);
+            if (_store is not null)
+            {
+                var scope = node.Item?.ProviderId ?? "root";
+                await _store.ReplaceWorkspaceItemsAsync(
+                    "drive-directory", node.Account.AccountId, scope, items,
+                    static item => item.ProviderId,
+                    static item => $"{item.Name} {item.Path} {item.ContentType}", cancellationToken);
+                var files = items.Where(static item => !item.IsFolder).Select(ToCloudFile).ToArray();
+                await _store.ReplaceDriveDirectoryFilesAsync(
+                    node.Account.AccountId,
+                    node.Item?.Path ?? "/drive/root:",
+                    files,
+                    cancellationToken);
+                await _store.GarbageCollectWorkspaceAsync(node.Account.AccountId, cancellationToken);
+            }
             node.SetItems(items, LoadNodeFromExpansionAsync);
             RemoveIssues(node.Account);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            node.Error = exception.Message;
-            RecordIssue(node.Account, exception.Message);
+            var cached = _store is null
+                ? []
+                : await _store.GetWorkspaceItemsAsync<CloudDriveItem>(
+                    "drive-directory", node.Account.AccountId, node.Item?.ProviderId ?? "root", cancellationToken);
+            if (cached.Count > 0)
+            {
+                node.SetItems(cached, LoadNodeFromExpansionAsync);
+            }
+            else
+            {
+                node.Error = exception.Message;
+                RecordIssue(node.Account, exception.Message);
+            }
         }
         finally
         {
@@ -375,11 +406,31 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         try
         {
             var accounts = SelectedAccountFilter?.Account is { } account ? [account] : _accounts;
+            if (_store is not null)
+            {
+                var cached = await _store.SearchWorkspaceItemsAsync<CloudFile>(
+                    "drive-file", SearchQuery.Trim(), 200,
+                    SelectedAccountFilter?.Account?.AccountId);
+                Replace(SearchResults, cached
+                    .Select(file => (File: file, Account: accounts.FirstOrDefault(
+                        candidate => candidate.AccountId == file.AccountId)))
+                    .Where(static item => item.Account is not null)
+                    .Select(static item => new DriveSearchResult(item.Account!, item.File))
+                    .OrderBy(static result => result.File.Name, StringComparer.OrdinalIgnoreCase));
+                IsSearchMode = true;
+            }
             var batches = await Task.WhenAll(accounts.Select(async candidate =>
             {
                 try
                 {
                     var files = await _provider.SearchFilesAsync(candidate, SearchQuery.Trim());
+                    if (_store is not null)
+                    {
+                        await _store.UpsertWorkspaceItemsAsync(
+                            "drive-file", candidate.AccountId, "index", files,
+                            static item => item.ProviderId,
+                            static item => $"{item.Name} {item.Path}");
+                    }
                     RemoveIssues(candidate);
                     return new DriveSearchBatch(candidate, files, null);
                 }
@@ -392,9 +443,14 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
             {
                 RecordIssue(failed.Account, failed.Error!);
             }
-            Replace(SearchResults, batches
+            var online = batches
                 .SelectMany(batch => batch.Files.Select(file => new DriveSearchResult(batch.Account, file)))
-                .OrderBy(static result => result.File.Name, StringComparer.OrdinalIgnoreCase));
+                .ToArray();
+            if (online.Length > 0 || SearchResults.Count == 0)
+            {
+                Replace(SearchResults, online.OrderBy(
+                    static result => result.File.Name, StringComparer.OrdinalIgnoreCase));
+            }
             SelectedSearchResult = null;
             IsSearchMode = true;
         }
@@ -403,6 +459,15 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
             IsBusy = false;
         }
     }
+
+    private static CloudFile ToCloudFile(CloudDriveItem item) => new(
+        item.ProviderId,
+        item.Name,
+        item.Size,
+        item.WebUrl,
+        item.AccountId,
+        item.AccountProviderId,
+        item.ParentPath);
 
     private Task ClearSearchAsync()
     {

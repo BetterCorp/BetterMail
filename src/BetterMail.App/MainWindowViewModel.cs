@@ -60,6 +60,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _isLoadingAttachments;
     private bool _isSyncing;
     private int _syncRunning;
+    private int _workspaceSyncRunning;
+    private DateTimeOffset _lastWorkspaceSyncAt = DateTimeOffset.MinValue;
     private bool _isMailActionRunning;
     private string _mailActionStatus = "";
     private bool _allowRemoteContent;
@@ -1490,6 +1492,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             }
 
             await ReconcileAllDraftsAsync();
+            _ = RefreshWorkspaceCacheAsync();
             if (mailFailure is not null)
             {
                 Error = mailFailure.Message;
@@ -1539,6 +1542,134 @@ public sealed class MainWindowViewModel : ViewModelBase
             _syncFrame = (_syncFrame + 1) % SyncFrames.Length;
             RaisePropertyChanged(nameof(SyncIcon));
             RaisePropertyChanged(nameof(SyncButtonText));
+        }
+    }
+
+    private async Task RefreshWorkspaceCacheAsync()
+    {
+        if (_store is null || _workspaceProvider is null ||
+            DateTimeOffset.UtcNow - _lastWorkspaceSyncAt < TimeSpan.FromMinutes(15) ||
+            Interlocked.CompareExchange(ref _workspaceSyncRunning, 1, 0) != 0)
+        {
+            return;
+        }
+
+        _lastWorkspaceSyncAt = DateTimeOffset.UtcNow;
+        try
+        {
+            foreach (var account in Accounts.ToArray())
+            {
+                await RefreshContactsAsync(account);
+                await RefreshCalendarsAsync(account);
+                await RefreshTasksAsync(account);
+                await RefreshNotesAsync(account);
+                await _store.GarbageCollectWorkspaceAsync(account.AccountId);
+            }
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _workspaceSyncRunning, 0);
+        }
+
+        async Task RefreshContactsAsync(MailAccount account)
+        {
+            try
+            {
+                var contacts = await _workspaceProvider.SearchContactsAsync(account, "");
+                await _store.ReplaceWorkspaceItemsAsync(
+                    "contact", account.AccountId, "all", contacts,
+                    static item => item.ProviderId,
+                    static item => $"{item.DisplayName} {string.Join(' ', item.EmailAddresses)}");
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+            }
+        }
+
+        async Task RefreshCalendarsAsync(MailAccount account)
+        {
+            try
+            {
+                var calendars = await _workspaceProvider.GetCalendarsAsync(account);
+                await _store.ReplaceWorkspaceItemsAsync(
+                    "calendar", account.AccountId, "all", calendars,
+                    static item => item.ProviderId,
+                    static item => $"{item.Name} {item.Color}");
+                var from = DateTimeOffset.UtcNow.AddYears(-1);
+                var to = DateTimeOffset.UtcNow.AddYears(2);
+                foreach (var calendar in calendars)
+                {
+                    var events = await _workspaceProvider.GetEventsAsync(
+                        account, calendar.ProviderId, from, to);
+                    await _store.ReplaceCalendarEventsAsync(
+                        account.AccountId, calendar.ProviderId, from, to, events);
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+            }
+        }
+
+        async Task RefreshTasksAsync(MailAccount account)
+        {
+            try
+            {
+                var lists = await _workspaceProvider.GetTaskListsAsync(account);
+                await _store.ReplaceWorkspaceItemsAsync(
+                    "task-list", account.AccountId, "all", lists,
+                    static item => item.ProviderId,
+                    static item => item.DisplayName);
+                foreach (var list in lists)
+                {
+                    var tasks = await _workspaceProvider.GetTasksAsync(account, list);
+                    await _store.ReplaceWorkspaceItemsAsync(
+                        "task", account.AccountId, list.ProviderId, tasks,
+                        static item => item.ProviderId,
+                        static item => $"{item.Title} {item.Notes} {string.Join(' ', item.Categories ?? [])}");
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+            }
+        }
+
+        async Task RefreshNotesAsync(MailAccount account)
+        {
+            try
+            {
+                var notebooks = await _workspaceProvider.GetNotebooksAsync(account);
+                await _store.ReplaceWorkspaceItemsAsync(
+                    "note-notebook", account.AccountId, "all", notebooks,
+                    static item => item.ProviderId,
+                    static item => item.Name);
+                var notes = new List<NoteInfo>();
+                foreach (var notebook in notebooks)
+                {
+                    var sections = await _workspaceProvider.GetSectionsAsync(account, notebook);
+                    await _store.ReplaceWorkspaceItemsAsync(
+                        "note-section", account.AccountId, notebook.ProviderId, sections,
+                        static item => item.ProviderId,
+                        static item => item.Name);
+                    foreach (var section in sections)
+                    {
+                        var pages = await _workspaceProvider.GetPagesAsync(account, section);
+                        await _store.ReplaceWorkspaceItemsAsync(
+                            "note-page", account.AccountId, section.ProviderId, pages,
+                            static item => item.ProviderId,
+                            static item => item.Title);
+                        notes.AddRange(pages.Select(page => new NoteInfo(
+                            page.ProviderId, page.Title, page.ModifiedAt, page.WebUrl,
+                            page.AccountId, page.AccountProviderId, page.SectionProviderId)));
+                    }
+                }
+                await _store.ReplaceWorkspaceItemsAsync(
+                    "note", account.AccountId, "all", notes,
+                    static item => item.ProviderId,
+                    static item => item.Title);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+            }
         }
     }
 
@@ -2016,7 +2147,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         var savedTask = _workspaceProvider is null
             ? Task.FromResult<IReadOnlyList<ContactInfo>>([])
             : SearchAccountsAsync(
-                (account, token) => _workspaceProvider.SearchContactsAsync(account, query, token),
+                (account, token) => GetSavedContactsAsync(account, query, token),
                 cancellationToken);
         await Task.WhenAll(discoveredTask, savedTask);
         return savedTask.Result.Select(contact => new GlobalSearchResult(
@@ -2031,16 +2162,32 @@ public sealed class MainWindowViewModel : ViewModelBase
         string query,
         CancellationToken cancellationToken)
     {
-        if (_workspaceProvider is null)
+        var cached = await _store!.SearchWorkspaceItemsAsync<CalendarEvent>(
+            "calendar-event", query, 30, SelectedSearchAccountFilter?.AccountId, cancellationToken);
+        if (cached.Count > 0 || _workspaceProvider is null)
         {
-            return [];
+            return CalendarResults(cached, query);
         }
         var now = DateTimeOffset.Now;
         var events = await SearchAccountsAsync(
             (account, token) => _workspaceProvider.GetEventsAsync(
                 account, now.AddYears(-1), now.AddYears(2), token),
             cancellationToken);
-        return events.Where(item => Contains(item.Subject, query) || Contains(item.Location, query))
+        foreach (var group in events.GroupBy(item => (item.AccountId, item.CalendarId)))
+        {
+            if (group.Key.AccountId is not null)
+            {
+                await _store.ReplaceCalendarEventsAsync(
+                    group.Key.AccountId, group.Key.CalendarId,
+                    now.AddYears(-1), now.AddYears(2), group.ToArray(), cancellationToken);
+            }
+        }
+        return CalendarResults(events, query);
+
+        static IReadOnlyList<GlobalSearchResult> CalendarResults(
+            IEnumerable<CalendarEvent> source,
+            string search) => source
+            .Where(item => Contains(item.Subject, search) || Contains(item.Location, search))
             .OrderBy(item => item.StartsAt)
             .Take(30)
             .Select(item => new GlobalSearchResult(
@@ -2052,14 +2199,32 @@ public sealed class MainWindowViewModel : ViewModelBase
         string query,
         CancellationToken cancellationToken)
     {
-        if (_workspaceProvider is null)
+        var cached = await _store!.SearchWorkspaceItemsAsync<TaskInfo>(
+            "task", query, 30, SelectedSearchAccountFilter?.AccountId, cancellationToken);
+        if (cached.Count > 0 || _workspaceProvider is null)
         {
-            return [];
+            return TaskResults(cached, query);
         }
         var tasks = await SearchAccountsAsync(
             (account, token) => _workspaceProvider.GetTasksAsync(account, token),
             cancellationToken);
-        return tasks.Where(item => Contains(item.Title, query) || Contains(item.Notes, query))
+        foreach (var group in tasks.GroupBy(item => (item.AccountId, item.ListId)))
+        {
+            if (group.Key.AccountId is not null)
+            {
+                await _store.ReplaceWorkspaceItemsAsync(
+                    "task", group.Key.AccountId, group.Key.ListId, group.ToArray(),
+                    static item => item.ProviderId,
+                    static item => $"{item.Title} {item.Notes} {string.Join(' ', item.Categories ?? [])}",
+                    cancellationToken);
+            }
+        }
+        return TaskResults(tasks, query);
+
+        static IReadOnlyList<GlobalSearchResult> TaskResults(
+            IEnumerable<TaskInfo> source,
+            string search) => source
+            .Where(item => Contains(item.Title, search) || Contains(item.Notes, search))
             .Take(30)
             .Select(item => new GlobalSearchResult("To Do", item.Title, item.DueText, "To Do", item))
             .ToArray();
@@ -2069,14 +2234,28 @@ public sealed class MainWindowViewModel : ViewModelBase
         string query,
         CancellationToken cancellationToken)
     {
-        if (_workspaceProvider is null)
+        var cached = await _store!.SearchWorkspaceItemsAsync<CloudFile>(
+            "drive-file", query, 40, SelectedSearchAccountFilter?.AccountId, cancellationToken);
+        if (cached.Count > 0 || _workspaceProvider is null)
         {
-            return [];
+            return DriveResults(cached);
         }
         var files = await SearchAccountsAsync(
             (account, token) => _workspaceProvider.SearchFilesAsync(account, query, token),
             cancellationToken);
-        return files.Take(40)
+        foreach (var group in files.GroupBy(static item => item.AccountId))
+        {
+            if (group.Key is not null)
+            {
+                await _store.UpsertWorkspaceItemsAsync(
+                    "drive-file", group.Key, "index", group.ToArray(),
+                    static item => item.ProviderId,
+                    static item => $"{item.Name} {item.Path}", cancellationToken);
+            }
+        }
+        return DriveResults(files);
+
+        static IReadOnlyList<GlobalSearchResult> DriveResults(IEnumerable<CloudFile> source) => source.Take(40)
             .Select(item => new GlobalSearchResult("OneDrive", item.Name, item.Path, "OneDrive", item))
             .ToArray();
     }
@@ -2085,14 +2264,30 @@ public sealed class MainWindowViewModel : ViewModelBase
         string query,
         CancellationToken cancellationToken)
     {
-        if (_workspaceProvider is null)
+        var cached = await _store!.SearchWorkspaceItemsAsync<NoteInfo>(
+            "note", query, 30, SelectedSearchAccountFilter?.AccountId, cancellationToken);
+        if (cached.Count > 0 || _workspaceProvider is null)
         {
-            return [];
+            return NoteResults(cached, query);
         }
         var notes = await SearchAccountsAsync(
             (account, token) => _workspaceProvider.GetNotesAsync(account, token),
             cancellationToken);
-        return notes.Where(item => Contains(item.Title, query))
+        foreach (var group in notes.GroupBy(static item => item.AccountId))
+        {
+            if (group.Key is not null)
+            {
+                await _store.ReplaceWorkspaceItemsAsync(
+                    "note", group.Key, "all", group.ToArray(),
+                    static item => item.ProviderId,
+                    static item => item.Title, cancellationToken);
+            }
+        }
+        return NoteResults(notes, query);
+
+        static IReadOnlyList<GlobalSearchResult> NoteResults(
+            IEnumerable<NoteInfo> source,
+            string search) => source.Where(item => Contains(item.Title, search))
             .OrderByDescending(item => item.ModifiedAt)
             .Take(30)
             .Select(item => new GlobalSearchResult("Notes", item.Title, item.ModifiedText, "Notes", item))
@@ -2122,6 +2317,53 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private static bool Contains(string? value, string query) =>
         value?.Contains(query, StringComparison.OrdinalIgnoreCase) == true;
+
+    private async Task<IReadOnlyList<ContactInfo>> GetSavedContactsAsync(
+        MailAccount account,
+        string query,
+        CancellationToken cancellationToken)
+    {
+        var cached = string.IsNullOrWhiteSpace(query)
+            ? Array.Empty<ContactInfo>()
+            : await _store!.SearchWorkspaceItemsAsync<ContactInfo>(
+                "contact", query, 500, account.AccountId, cancellationToken);
+        if (cached.Count > 0)
+        {
+            return Filter(cached);
+        }
+
+        try
+        {
+            var contacts = await _workspaceProvider!.SearchContactsAsync(account, query, cancellationToken);
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                await _store!.ReplaceWorkspaceItemsAsync(
+                    "contact", account.AccountId, "all", contacts,
+                    static item => item.ProviderId,
+                    static item => $"{item.DisplayName} {string.Join(' ', item.EmailAddresses)}",
+                    cancellationToken);
+            }
+            else
+            {
+                await _store!.UpsertWorkspaceItemsAsync(
+                    "contact", account.AccountId, "all", contacts,
+                    static item => item.ProviderId,
+                    static item => $"{item.DisplayName} {string.Join(' ', item.EmailAddresses)}",
+                    cancellationToken);
+            }
+            return Filter(contacts);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return Filter(cached);
+        }
+
+        IReadOnlyList<ContactInfo> Filter(IEnumerable<ContactInfo> contacts) => contacts
+            .Where(contact => string.IsNullOrWhiteSpace(query) ||
+                Contains(contact.DisplayName, query) ||
+                contact.EmailAddresses.Any(address => Contains(address, query)))
+            .ToArray();
+    }
 
     private bool IsSearchableMail(MailMessage message)
     {
@@ -2659,7 +2901,8 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        CalendarWorkspace ??= new CalendarWorkspaceViewModel(_workspaceProvider, Accounts.ToArray());
+        CalendarWorkspace ??= new CalendarWorkspaceViewModel(
+            _workspaceProvider, Accounts.ToArray(), store: _store);
         await CalendarWorkspace.UpdateAccountsAsync(Accounts.ToArray());
     }
 
@@ -2670,7 +2913,8 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        NotesWorkspace ??= new NotesWorkspaceViewModel(_workspaceProvider, Accounts.ToArray(), _renderer);
+        NotesWorkspace ??= new NotesWorkspaceViewModel(
+            _workspaceProvider, Accounts.ToArray(), _renderer, _store);
         await NotesWorkspace.UpdateAccountsAsync(Accounts.ToArray());
     }
 
@@ -2683,7 +2927,8 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         if (DriveWorkspace is null)
         {
-            DriveWorkspace = new DriveWorkspaceViewModel(_workspaceProvider, Accounts.ToArray());
+            DriveWorkspace = new DriveWorkspaceViewModel(
+                _workspaceProvider, Accounts.ToArray(), _store);
             DriveWorkspace.ItemChosen += HandleDriveItemChosen;
             DriveWorkspace.LinkChosen += HandleDriveLinkChosen;
         }
@@ -2698,7 +2943,8 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        TasksWorkspace ??= new TasksWorkspaceViewModel(_workspaceProvider, Accounts.ToArray());
+        TasksWorkspace ??= new TasksWorkspaceViewModel(
+            _workspaceProvider, Accounts.ToArray(), _store);
         await TasksWorkspace.UpdateAccountsAsync(Accounts.ToArray());
     }
 
@@ -2849,6 +3095,23 @@ public sealed class MainWindowViewModel : ViewModelBase
             try
             {
                 var contacts = await _workspaceProvider.SearchContactsAsync(account, ModuleSearchText);
+                if (_store is not null)
+                {
+                    if (string.IsNullOrWhiteSpace(ModuleSearchText))
+                    {
+                        await _store.ReplaceWorkspaceItemsAsync(
+                            "contact", account.AccountId, "all", contacts,
+                            static item => item.ProviderId,
+                            static item => $"{item.DisplayName} {string.Join(' ', item.EmailAddresses)}");
+                    }
+                    else
+                    {
+                        await _store.UpsertWorkspaceItemsAsync(
+                            "contact", account.AccountId, "all", contacts,
+                            static item => item.ProviderId,
+                            static item => $"{item.DisplayName} {string.Join(' ', item.EmailAddresses)}");
+                    }
+                }
                 return new AccountContactResult(account, contacts, null);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -2939,7 +3202,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             {
                 try
                 {
-                    return await _workspaceProvider!.SearchContactsAsync(account, query, cancellationToken);
+                    return await GetSavedContactsAsync(account, query, cancellationToken);
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {

@@ -7,6 +7,7 @@ namespace BetterMail.App;
 public sealed class TasksWorkspaceViewModel : ViewModelBase
 {
     private readonly ITasksProvider _provider;
+    private readonly EncryptedMailStore? _store;
     private IReadOnlyList<MailAccount> _accounts;
     private TaskListChoice? _selectedList;
     private TaskWorkspaceItem? _selectedTask;
@@ -24,9 +25,11 @@ public sealed class TasksWorkspaceViewModel : ViewModelBase
 
     public TasksWorkspaceViewModel(
         ITasksProvider provider,
-        IReadOnlyList<MailAccount> accounts)
+        IReadOnlyList<MailAccount> accounts,
+        EncryptedMailStore? store = null)
     {
         _provider = provider;
+        _store = store;
         _accounts = accounts;
         ShowAllTasksCommand = new AsyncCommand(ShowAllTasksAsync);
         SelectListCommand = new AsyncCommand<TaskListChoice>(SelectListAsync);
@@ -203,7 +206,16 @@ public sealed class TasksWorkspaceViewModel : ViewModelBase
         var group = new TaskAccountGroup(account);
         try
         {
-            foreach (var list in await _provider.GetTaskListsAsync(account, cancellationToken))
+            var lists = await _provider.GetTaskListsAsync(account, cancellationToken);
+            if (_store is not null)
+            {
+                await _store.ReplaceWorkspaceItemsAsync(
+                    "task-list", account.AccountId, "all", lists,
+                    static item => item.ProviderId,
+                    static item => item.DisplayName, cancellationToken);
+                await _store.GarbageCollectWorkspaceAsync(account.AccountId, cancellationToken);
+            }
+            foreach (var list in lists)
             {
                 if (list.AccountId != account.AccountId)
                 {
@@ -214,7 +226,18 @@ public sealed class TasksWorkspaceViewModel : ViewModelBase
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            group.Error = $"{account.EmailAddress}: task lists could not be loaded ({ex.Message})";
+            var cached = _store is null
+                ? []
+                : await _store.GetWorkspaceItemsAsync<TaskListInfo>(
+                    "task-list", account.AccountId, "all", cancellationToken);
+            foreach (var list in cached)
+            {
+                group.Lists.Add(new(group, list));
+            }
+            if (cached.Count == 0)
+            {
+                group.Error = $"{account.EmailAddress}: task lists could not be loaded ({ex.Message})";
+            }
         }
         return group;
     }
@@ -233,12 +256,26 @@ public sealed class TasksWorkspaceViewModel : ViewModelBase
             {
                 throw new InvalidOperationException("The task provider returned data for a different account or list.");
             }
+            if (_store is not null)
+            {
+                await _store.ReplaceWorkspaceItemsAsync(
+                    "task", list.Group.Account.AccountId, list.Info.ProviderId, tasks,
+                    static item => item.ProviderId,
+                    static item => $"{item.Title} {item.Notes} {string.Join(' ', item.Categories ?? [])}", cancellationToken);
+            }
             list.Replace(tasks.Select(task => new TaskWorkspaceItem(list, task)));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            list.Replace([]);
-            list.Error = $"{list.Group.Account.EmailAddress} / {list.DisplayName}: {ex.Message}";
+            var cached = _store is null
+                ? []
+                : await _store.GetWorkspaceItemsAsync<TaskInfo>(
+                    "task", list.Group.Account.AccountId, list.Info.ProviderId, cancellationToken);
+            list.Replace(cached.Select(task => new TaskWorkspaceItem(list, task)));
+            if (cached.Count == 0)
+            {
+                list.Error = $"{list.Group.Account.EmailAddress} / {list.DisplayName}: {ex.Message}";
+            }
         }
     }
 

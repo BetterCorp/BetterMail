@@ -108,6 +108,8 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                 "DELETE FROM sync_cursors WHERE mailbox_id LIKE $account || ':%';",
                 "DELETE FROM mail_folders WHERE mailbox_id IN (SELECT account_id || ':' || lower(address) FROM mailboxes WHERE account_id = $account);",
                 "DELETE FROM mailboxes WHERE account_id = $account;",
+                "DELETE FROM workspace_items WHERE account_id = $account;",
+                "DELETE FROM workspace_snapshots WHERE account_id = $account;",
                 "DELETE FROM accounts WHERE provider_id = $provider AND account_id = $account;"
             })
             {
@@ -193,6 +195,44 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                 command.Parameters.AddWithValue("$wellKnown", (object?)folder.WellKnownName ?? DBNull.Value);
                 command.Parameters.AddWithValue("$parent", (object?)folder.ParentProviderId ?? DBNull.Value);
                 await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await using (var deleteOrphanedMessages = connection.CreateCommand())
+            {
+                deleteOrphanedMessages.Transaction = transaction;
+                deleteOrphanedMessages.CommandText = """
+                    DELETE FROM messages
+                    WHERE mailbox_id = $mailbox
+                      AND $hasFolders = 1
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM mail_folders
+                          WHERE mail_folders.mailbox_id = messages.mailbox_id
+                            AND mail_folders.provider_id = messages.folder_id
+                      );
+                    """;
+                deleteOrphanedMessages.Parameters.AddWithValue("$mailbox", mailboxId);
+                deleteOrphanedMessages.Parameters.AddWithValue("$hasFolders", folders.Count > 0);
+                await deleteOrphanedMessages.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await using (var deleteOrphanedThreads = connection.CreateCommand())
+            {
+                deleteOrphanedThreads.Transaction = transaction;
+                deleteOrphanedThreads.CommandText = """
+                    DELETE FROM message_threads
+                    WHERE mailbox_id = $mailbox
+                      AND $hasFolders = 1
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM messages
+                          WHERE messages.mailbox_id = message_threads.mailbox_id
+                            AND messages.provider_id = message_threads.provider_id
+                      );
+                    """;
+                deleteOrphanedThreads.Parameters.AddWithValue("$mailbox", mailboxId);
+                deleteOrphanedThreads.Parameters.AddWithValue("$hasFolders", folders.Count > 0);
+                await deleteOrphanedThreads.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -432,6 +472,267 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                 .Take(Math.Clamp(limit, 1, 5000))
                 .ToArray();
         }, cancellationToken);
+
+    public async Task ReplaceWorkspaceItemsAsync<T>(
+        string kind,
+        string accountId,
+        string scopeId,
+        IReadOnlyList<T> items,
+        Func<T, string> providerId,
+        Func<T, string> searchText,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateWorkspaceKey(kind, accountId, scopeId);
+        await WithLockAsync(async connection =>
+        {
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            await using (var delete = connection.CreateCommand())
+            {
+                delete.Transaction = transaction;
+                delete.CommandText = "DELETE FROM workspace_items WHERE kind = $kind AND account_id = $account AND scope_id = $scope;";
+                delete.Parameters.AddWithValue("$kind", kind);
+                delete.Parameters.AddWithValue("$account", accountId);
+                delete.Parameters.AddWithValue("$scope", scopeId);
+                await delete.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+            foreach (var item in items)
+            {
+                await UpsertWorkspaceItemAsync(
+                    connection, transaction, kind, accountId, scopeId,
+                    providerId(item), item, searchText(item), null, null, cancellationToken).ConfigureAwait(false);
+            }
+            await MarkWorkspaceSnapshotAsync(
+                connection, transaction, kind, accountId, scopeId, cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task UpsertWorkspaceItemsAsync<T>(
+        string kind,
+        string accountId,
+        string scopeId,
+        IReadOnlyList<T> items,
+        Func<T, string> providerId,
+        Func<T, string> searchText,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateWorkspaceKey(kind, accountId, scopeId);
+        await WithLockAsync(async connection =>
+        {
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            foreach (var item in items)
+            {
+                await UpsertWorkspaceItemAsync(
+                    connection, transaction, kind, accountId, scopeId,
+                    providerId(item), item, searchText(item), null, null, cancellationToken).ConfigureAwait(false);
+            }
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<IReadOnlyList<T>> GetWorkspaceItemsAsync<T>(
+        string kind,
+        string accountId,
+        string? scopeId = null,
+        CancellationToken cancellationToken = default) =>
+        QueryWorkspaceItemsAsync<T>(kind, accountId, scopeId, null, 10000, cancellationToken);
+
+    public Task<IReadOnlyList<T>> SearchWorkspaceItemsAsync<T>(
+        string kind,
+        string query,
+        int limit = 200,
+        string? accountId = null,
+        CancellationToken cancellationToken = default) =>
+        QueryWorkspaceItemsAsync<T>(kind, accountId, null, query, limit, cancellationToken);
+
+    public Task GarbageCollectWorkspaceAsync(
+        string accountId,
+        CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            foreach (var sql in new[]
+            {
+                """
+                DELETE FROM workspace_items
+                WHERE kind = 'calendar-event' AND account_id = $account
+                  AND EXISTS (
+                      SELECT 1 FROM workspace_snapshots
+                      WHERE kind = 'calendar' AND account_id = $account AND scope_id = 'all'
+                  )
+                  AND scope_id NOT IN (
+                      SELECT provider_id FROM workspace_items
+                      WHERE kind = 'calendar' AND account_id = $account
+                  );
+                """,
+                """
+                DELETE FROM workspace_items
+                WHERE kind = 'task' AND account_id = $account
+                  AND EXISTS (
+                      SELECT 1 FROM workspace_snapshots
+                      WHERE kind = 'task-list' AND account_id = $account AND scope_id = 'all'
+                  )
+                  AND scope_id NOT IN (
+                      SELECT provider_id FROM workspace_items
+                      WHERE kind = 'task-list' AND account_id = $account
+                  );
+                """,
+                """
+                DELETE FROM workspace_items
+                WHERE kind = 'note-section' AND account_id = $account
+                  AND EXISTS (
+                      SELECT 1 FROM workspace_snapshots
+                      WHERE kind = 'note-notebook' AND account_id = $account AND scope_id = 'all'
+                  )
+                  AND scope_id NOT IN (
+                      SELECT provider_id FROM workspace_items
+                      WHERE kind = 'note-notebook' AND account_id = $account
+                  );
+                """,
+                """
+                DELETE FROM workspace_items
+                WHERE kind = 'note-page' AND account_id = $account
+                  AND EXISTS (
+                      SELECT 1 FROM workspace_snapshots
+                      WHERE kind = 'note-section' AND account_id = $account
+                  )
+                  AND scope_id NOT IN (
+                      SELECT provider_id FROM workspace_items
+                      WHERE kind = 'note-section' AND account_id = $account
+                  );
+                """,
+                """
+                DELETE FROM workspace_items
+                WHERE kind = 'note-content' AND account_id = $account
+                  AND EXISTS (
+                      SELECT 1 FROM workspace_snapshots
+                      WHERE kind = 'note-page' AND account_id = $account
+                  )
+                  AND scope_id NOT IN (
+                      SELECT provider_id FROM workspace_items
+                      WHERE kind = 'note-page' AND account_id = $account
+                  );
+                """,
+                """
+                DELETE FROM workspace_items
+                WHERE kind = 'drive-directory' AND account_id = $account AND scope_id <> 'root'
+                  AND EXISTS (
+                      SELECT 1 FROM workspace_snapshots
+                      WHERE kind = 'drive-directory' AND account_id = $account AND scope_id = 'root'
+                  )
+                  AND scope_id NOT IN (
+                      SELECT provider_id FROM workspace_items
+                      WHERE kind = 'drive-directory' AND account_id = $account
+                        AND json_extract(payload_json, '$.IsFolder') = 1
+                  );
+                """
+            })
+            {
+                await using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = sql;
+                command.Parameters.AddWithValue("$account", accountId);
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+
+    public async Task ReplaceDriveDirectoryFilesAsync(
+        string accountId,
+        string parentPath,
+        IReadOnlyList<CloudFile> files,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(accountId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(parentPath);
+        await WithLockAsync(async connection =>
+        {
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            await using (var delete = connection.CreateCommand())
+            {
+                delete.Transaction = transaction;
+                delete.CommandText = """
+                    DELETE FROM workspace_items
+                    WHERE kind = 'drive-file'
+                      AND account_id = $account
+                      AND scope_id = 'index'
+                      AND coalesce(json_extract(payload_json, '$.ParentPath'), '') = $parent;
+                    """;
+                delete.Parameters.AddWithValue("$account", accountId);
+                delete.Parameters.AddWithValue("$parent", parentPath);
+                await delete.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+            foreach (var file in files)
+            {
+                await UpsertWorkspaceItemAsync(
+                    connection, transaction, "drive-file", accountId, "index",
+                    file.ProviderId, file, $"{file.Name} {file.Path}",
+                    null, null, cancellationToken).ConfigureAwait(false);
+            }
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task ReplaceCalendarEventsAsync(
+        string accountId,
+        string calendarId,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        IReadOnlyList<CalendarEvent> events,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(accountId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(calendarId);
+        if (to <= from)
+        {
+            throw new ArgumentOutOfRangeException(nameof(to));
+        }
+
+        await WithLockAsync(async connection =>
+        {
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            await using (var delete = connection.CreateCommand())
+            {
+                delete.Transaction = transaction;
+                delete.CommandText = """
+                    DELETE FROM workspace_items
+                    WHERE kind = 'calendar-event'
+                      AND account_id = $account
+                      AND scope_id = $calendar
+                      AND period_start < $to
+                      AND period_end > $from;
+                    """;
+                delete.Parameters.AddWithValue("$account", accountId);
+                delete.Parameters.AddWithValue("$calendar", calendarId);
+                delete.Parameters.AddWithValue("$from", from.UtcDateTime.ToString("O", CultureInfo.InvariantCulture));
+                delete.Parameters.AddWithValue("$to", to.UtcDateTime.ToString("O", CultureInfo.InvariantCulture));
+                await delete.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+            foreach (var calendarEvent in events)
+            {
+                await UpsertWorkspaceItemAsync(
+                    connection, transaction, "calendar-event", accountId, calendarId,
+                    calendarEvent.ProviderId, calendarEvent,
+                    $"{calendarEvent.Subject} {calendarEvent.Location}",
+                    calendarEvent.StartsAt, calendarEvent.EndsAt, cancellationToken).ConfigureAwait(false);
+            }
+            await MarkWorkspaceSnapshotAsync(
+                connection, transaction, "calendar-event", accountId, calendarId, cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<IReadOnlyList<CalendarEvent>> GetCalendarEventsAsync(
+        string accountId,
+        string calendarId,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken = default) =>
+        QueryWorkspaceItemsAsync<CalendarEvent>(
+            "calendar-event", accountId, calendarId, null, 10000, cancellationToken,
+            "AND period_start < $to AND period_end > $from",
+            ("$from", from.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)),
+            ("$to", to.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)));
 
     public async Task SaveLocalDraftAsync(LocalDraft draft, CancellationToken cancellationToken = default)
     {
@@ -677,6 +978,138 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         await ExecuteAsync(connection, $"ALTER TABLE {table} ADD COLUMN {column} {definition};", cancellationToken).ConfigureAwait(false);
     }
 
+    private Task<IReadOnlyList<T>> QueryWorkspaceItemsAsync<T>(
+        string kind,
+        string? accountId,
+        string? scopeId,
+        string? query,
+        int limit,
+        CancellationToken cancellationToken,
+        string extraWhere = "",
+        params (string Name, object Value)[] extraParameters) =>
+        WithLockAsync<IReadOnlyList<T>>(async connection =>
+        {
+            var values = new List<T>();
+            await using var command = connection.CreateCommand();
+            var filters = new List<string> { "kind = $kind" };
+            if (!string.IsNullOrWhiteSpace(accountId))
+            {
+                filters.Add("account_id = $account");
+                command.Parameters.AddWithValue("$account", accountId);
+            }
+            if (!string.IsNullOrWhiteSpace(scopeId))
+            {
+                filters.Add("scope_id = $scope");
+                command.Parameters.AddWithValue("$scope", scopeId);
+            }
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                filters.Add("rowid IN (SELECT rowid FROM workspace_search WHERE workspace_search MATCH $query)");
+                command.Parameters.AddWithValue("$query", BuildFtsQuery(query));
+            }
+            command.CommandText = $"""
+                SELECT payload_json
+                FROM workspace_items
+                WHERE {string.Join(" AND ", filters)} {extraWhere}
+                ORDER BY updated_at DESC
+                LIMIT $limit;
+                """;
+            command.Parameters.AddWithValue("$kind", kind);
+            command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 10000));
+            foreach (var (name, value) in extraParameters)
+            {
+                command.Parameters.AddWithValue(name, value);
+            }
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var item = JsonSerializer.Deserialize<T>(reader.GetString(0));
+                if (item is not null)
+                {
+                    values.Add(item);
+                }
+            }
+            return values;
+        }, cancellationToken);
+
+    private static async Task UpsertWorkspaceItemAsync<T>(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string kind,
+        string accountId,
+        string scopeId,
+        string providerId,
+        T item,
+        string searchText,
+        DateTimeOffset? periodStart,
+        DateTimeOffset? periodEnd,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerId);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO workspace_items(
+                kind, account_id, scope_id, provider_id, payload_json, search_text,
+                period_start, period_end, updated_at)
+            VALUES($kind, $account, $scope, $provider, $payload, $search, $start, $end, $updated)
+            ON CONFLICT(kind, account_id, scope_id, provider_id) DO UPDATE SET
+                payload_json = excluded.payload_json,
+                search_text = excluded.search_text,
+                period_start = excluded.period_start,
+                period_end = excluded.period_end,
+                updated_at = excluded.updated_at;
+            """;
+        command.Parameters.AddWithValue("$kind", kind);
+        command.Parameters.AddWithValue("$account", accountId);
+        command.Parameters.AddWithValue("$scope", scopeId);
+        command.Parameters.AddWithValue("$provider", providerId);
+        command.Parameters.AddWithValue("$payload", JsonSerializer.Serialize(item));
+        command.Parameters.AddWithValue("$search", searchText ?? "");
+        command.Parameters.AddWithValue("$start", periodStart is null
+            ? DBNull.Value
+            : periodStart.Value.UtcDateTime.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$end", periodEnd is null
+            ? DBNull.Value
+            : periodEnd.Value.UtcDateTime.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task MarkWorkspaceSnapshotAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string kind,
+        string accountId,
+        string scopeId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO workspace_snapshots(kind, account_id, scope_id, updated_at)
+            VALUES($kind, $account, $scope, $updated)
+            ON CONFLICT(kind, account_id, scope_id) DO UPDATE SET
+                updated_at = excluded.updated_at;
+            """;
+        command.Parameters.AddWithValue("$kind", kind);
+        command.Parameters.AddWithValue("$account", accountId);
+        command.Parameters.AddWithValue("$scope", scopeId);
+        command.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static string BuildFtsQuery(string query) =>
+        string.Join(' ', query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(static term => $"\"{term.Replace("\"", "\"\"")}\"*"));
+
+    private static void ValidateWorkspaceKey(string kind, string accountId, string scopeId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(kind);
+        ArgumentException.ThrowIfNullOrWhiteSpace(accountId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(scopeId);
+    }
+
     private static async Task DeleteMessageAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction, string mailboxId, string providerId, CancellationToken cancellationToken)
     {
         await using (var threadCommand = connection.CreateCommand())
@@ -892,6 +1325,48 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             cursor TEXT NOT NULL,
             is_complete INTEGER NOT NULL DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS workspace_items(
+            rowid INTEGER PRIMARY KEY,
+            kind TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            scope_id TEXT NOT NULL,
+            provider_id TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            search_text TEXT NOT NULL,
+            period_start TEXT,
+            period_end TEXT,
+            updated_at TEXT NOT NULL,
+            UNIQUE(kind, account_id, scope_id, provider_id)
+        );
+        CREATE TABLE IF NOT EXISTS workspace_snapshots(
+            kind TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            scope_id TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(kind, account_id, scope_id)
+        );
+        CREATE INDEX IF NOT EXISTS workspace_items_lookup
+            ON workspace_items(kind, account_id, scope_id);
+        CREATE INDEX IF NOT EXISTS workspace_items_period
+            ON workspace_items(kind, account_id, scope_id, period_start, period_end);
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS workspace_search USING fts5(
+            search_text,
+            content='workspace_items', content_rowid='rowid'
+        );
+        CREATE TRIGGER IF NOT EXISTS workspace_items_ai AFTER INSERT ON workspace_items BEGIN
+            INSERT INTO workspace_search(rowid, search_text) VALUES (new.rowid, new.search_text);
+        END;
+        CREATE TRIGGER IF NOT EXISTS workspace_items_ad AFTER DELETE ON workspace_items BEGIN
+            INSERT INTO workspace_search(workspace_search, rowid, search_text)
+            VALUES ('delete', old.rowid, old.search_text);
+        END;
+        CREATE TRIGGER IF NOT EXISTS workspace_items_au AFTER UPDATE ON workspace_items BEGIN
+            INSERT INTO workspace_search(workspace_search, rowid, search_text)
+            VALUES ('delete', old.rowid, old.search_text);
+            INSERT INTO workspace_search(rowid, search_text) VALUES (new.rowid, new.search_text);
+        END;
 
         CREATE TABLE IF NOT EXISTS local_drafts(
             id TEXT PRIMARY KEY,

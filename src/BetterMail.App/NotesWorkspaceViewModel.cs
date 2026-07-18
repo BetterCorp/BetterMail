@@ -8,6 +8,7 @@ namespace BetterMail.App;
 public sealed class NotesWorkspaceViewModel : ViewModelBase
 {
     private readonly INotesProvider _provider;
+    private readonly EncryptedMailStore? _store;
     private IReadOnlyList<MailAccount> _accounts;
     private readonly MailContentRenderer _renderer;
     private NoteTreeNode? _selectedNode;
@@ -29,9 +30,11 @@ public sealed class NotesWorkspaceViewModel : ViewModelBase
     public NotesWorkspaceViewModel(
         INotesProvider provider,
         IReadOnlyList<MailAccount> accounts,
-        MailContentRenderer? renderer = null)
+        MailContentRenderer? renderer = null,
+        EncryptedMailStore? store = null)
     {
         _provider = provider;
+        _store = store;
         _accounts = accounts;
         _renderer = renderer ?? new MailContentRenderer();
         RefreshCommand = new AsyncCommand(RefreshAsync);
@@ -170,19 +173,7 @@ public sealed class NotesWorkspaceViewModel : ViewModelBase
         node.Error = null;
         try
         {
-            var children = node.Kind switch
-            {
-                NoteNodeKind.Account => (await _provider.GetNotebooksAsync(node.Account, cancellationToken))
-                    .Select(item => NoteTreeNode.ForNotebook(node, item, LoadChildrenAsync)),
-                NoteNodeKind.Notebook => (await _provider.GetSectionsAsync(
-                        node.Account, node.Notebook!, cancellationToken))
-                    .Select(item => NoteTreeNode.ForSection(node, item, LoadChildrenAsync)),
-                NoteNodeKind.Section => (await _provider.GetPagesAsync(
-                        node.Account, node.Section!, cancellationToken))
-                    .OrderBy(static page => page.Order)
-                    .Select(item => NoteTreeNode.ForPage(node, item, LoadChildrenAsync)),
-                _ => []
-            };
+            var children = await LoadCachedChildrenAsync(node, cancellationToken);
             node.ReplaceChildren(children);
             node.IsLoaded = true;
         }
@@ -191,8 +182,13 @@ public sealed class NotesWorkspaceViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            node.ReplaceChildren([]);
-            node.Error = $"{node.Account.EmailAddress}: {ex.Message}";
+            var cached = await GetCachedChildrenAsync(node, cancellationToken);
+            node.ReplaceChildren(cached);
+            node.IsLoaded = cached.Count > 0;
+            if (cached.Count == 0)
+            {
+                node.Error = $"{node.Account.EmailAddress}: {ex.Message}";
+            }
         }
         finally
         {
@@ -281,6 +277,13 @@ public sealed class NotesWorkspaceViewModel : ViewModelBase
             {
                 throw new InvalidOperationException("OneNote returned content for a different account or page.");
             }
+            if (_store is not null)
+            {
+                await _store.ReplaceWorkspaceItemsAsync(
+                    "note-content", node.Account.AccountId, page.ProviderId, [content],
+                    static item => item.PageProviderId,
+                    static item => item.UntrustedHtml);
+            }
             _rawPageHtml = content.UntrustedHtml;
             RenderPage();
         }
@@ -288,7 +291,19 @@ public sealed class NotesWorkspaceViewModel : ViewModelBase
         {
             if (version == _selectionVersion)
             {
-                OperationError = $"{node.Account.EmailAddress}: {ex.Message}";
+                var cached = _store is null
+                    ? []
+                    : await _store.GetWorkspaceItemsAsync<NotePageContent>(
+                        "note-content", node.Account.AccountId, page.ProviderId);
+                if (cached.FirstOrDefault() is { } content)
+                {
+                    _rawPageHtml = content.UntrustedHtml;
+                    RenderPage();
+                }
+                else
+                {
+                    OperationError = $"{node.Account.EmailAddress}: {ex.Message}";
+                }
             }
         }
         finally
@@ -298,6 +313,78 @@ public sealed class NotesWorkspaceViewModel : ViewModelBase
                 IsLoadingPage = false;
             }
         }
+    }
+
+    private async Task<IReadOnlyList<NoteTreeNode>> LoadCachedChildrenAsync(
+        NoteTreeNode node,
+        CancellationToken cancellationToken)
+    {
+        switch (node.Kind)
+        {
+            case NoteNodeKind.Account:
+            {
+                var items = await _provider.GetNotebooksAsync(node.Account, cancellationToken);
+                if (_store is not null)
+                {
+                    await _store.ReplaceWorkspaceItemsAsync(
+                        "note-notebook", node.Account.AccountId, "all", items,
+                        static item => item.ProviderId, static item => item.Name, cancellationToken);
+                    await _store.GarbageCollectWorkspaceAsync(node.Account.AccountId, cancellationToken);
+                }
+                return items.Select(item => NoteTreeNode.ForNotebook(node, item, LoadChildrenAsync)).ToArray();
+            }
+            case NoteNodeKind.Notebook:
+            {
+                var items = await _provider.GetSectionsAsync(node.Account, node.Notebook!, cancellationToken);
+                if (_store is not null)
+                {
+                    await _store.ReplaceWorkspaceItemsAsync(
+                        "note-section", node.Account.AccountId, node.Notebook!.ProviderId, items,
+                        static item => item.ProviderId, static item => item.Name, cancellationToken);
+                    await _store.GarbageCollectWorkspaceAsync(node.Account.AccountId, cancellationToken);
+                }
+                return items.Select(item => NoteTreeNode.ForSection(node, item, LoadChildrenAsync)).ToArray();
+            }
+            case NoteNodeKind.Section:
+            {
+                var items = await _provider.GetPagesAsync(node.Account, node.Section!, cancellationToken);
+                if (_store is not null)
+                {
+                    await _store.ReplaceWorkspaceItemsAsync(
+                        "note-page", node.Account.AccountId, node.Section!.ProviderId, items,
+                        static item => item.ProviderId, static item => item.Title, cancellationToken);
+                    await _store.GarbageCollectWorkspaceAsync(node.Account.AccountId, cancellationToken);
+                }
+                return items.OrderBy(static item => item.Order)
+                    .Select(item => NoteTreeNode.ForPage(node, item, LoadChildrenAsync)).ToArray();
+            }
+            default:
+                return [];
+        }
+    }
+
+    private async Task<IReadOnlyList<NoteTreeNode>> GetCachedChildrenAsync(
+        NoteTreeNode node,
+        CancellationToken cancellationToken)
+    {
+        if (_store is null)
+        {
+            return [];
+        }
+        return node.Kind switch
+        {
+            NoteNodeKind.Account => (await _store.GetWorkspaceItemsAsync<NoteNotebook>(
+                    "note-notebook", node.Account.AccountId, "all", cancellationToken))
+                .Select(item => NoteTreeNode.ForNotebook(node, item, LoadChildrenAsync)).ToArray(),
+            NoteNodeKind.Notebook => (await _store.GetWorkspaceItemsAsync<NoteSection>(
+                    "note-section", node.Account.AccountId, node.Notebook!.ProviderId, cancellationToken))
+                .Select(item => NoteTreeNode.ForSection(node, item, LoadChildrenAsync)).ToArray(),
+            NoteNodeKind.Section => (await _store.GetWorkspaceItemsAsync<NotePage>(
+                    "note-page", node.Account.AccountId, node.Section!.ProviderId, cancellationToken))
+                .OrderBy(static item => item.Order)
+                .Select(item => NoteTreeNode.ForPage(node, item, LoadChildrenAsync)).ToArray(),
+            _ => []
+        };
     }
 
     internal Task OpenNewPageAsync()

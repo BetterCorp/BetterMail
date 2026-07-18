@@ -31,26 +31,29 @@ public sealed class Microsoft365WorkspaceProvider(
         BaseAddress = new Uri("https://graph.microsoft.com/v1.0/")
     };
 
-    public async Task<IReadOnlyList<CalendarInfo>> GetCalendarsAsync(
-        MailAccount account, CancellationToken cancellationToken = default)
-    {
-        using var document = await GetJsonAsync(
-            account, "me/calendars?$select=id,name,color,canEdit&$top=100", CalendarScopes, cancellationToken);
-        return document.RootElement.GetProperty("value").EnumerateArray().Select(item => new CalendarInfo(
-            RequiredString(item, "id"),
-            RequiredString(item, "name"),
-            OptionalString(item, "color"),
-            item.TryGetProperty("canEdit", out var canEdit) && canEdit.GetBoolean(),
-            account.AccountId)).ToArray();
-    }
+    public Task<IReadOnlyList<CalendarInfo>> GetCalendarsAsync(
+        MailAccount account, CancellationToken cancellationToken = default) =>
+        GetPagedAsync(
+            account,
+            "me/calendars?$select=id,name,color,canEdit&$top=100",
+            CalendarScopes,
+            item => new CalendarInfo(
+                RequiredString(item, "id"),
+                RequiredString(item, "name"),
+                OptionalString(item, "color"),
+                item.TryGetProperty("canEdit", out var canEdit) && canEdit.GetBoolean(),
+                account.AccountId),
+            cancellationToken);
 
     public async Task<IReadOnlyList<CalendarEvent>> GetEventsAsync(
         MailAccount account, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken = default)
     {
-        var endpoint = CalendarViewEndpoint(null, from, to);
-        using var document = await GetJsonAsync(account, endpoint, CalendarScopes, cancellationToken);
-        return document.RootElement.GetProperty("value").EnumerateArray()
-            .Select(item => MapEvent(item, null, account.AccountId)).ToArray();
+        return await GetPagedAsync(
+            account,
+            CalendarViewEndpoint(null, from, to),
+            CalendarScopes,
+            item => MapEvent(item, null, account.AccountId),
+            cancellationToken);
     }
 
     public async Task<IReadOnlyList<CalendarEvent>> GetEventsAsync(
@@ -60,10 +63,12 @@ public sealed class Microsoft365WorkspaceProvider(
         DateTimeOffset to,
         CancellationToken cancellationToken = default)
     {
-        using var document = await GetJsonAsync(
-            account, CalendarViewEndpoint(calendarId, from, to), CalendarScopes, cancellationToken);
-        return document.RootElement.GetProperty("value").EnumerateArray()
-            .Select(item => MapEvent(item, calendarId, account.AccountId)).ToArray();
+        return await GetPagedAsync(
+            account,
+            CalendarViewEndpoint(calendarId, from, to),
+            CalendarScopes,
+            item => MapEvent(item, calendarId, account.AccountId),
+            cancellationToken);
     }
 
     public async Task<CalendarEvent> CreateEventAsync(
@@ -118,10 +123,13 @@ public sealed class Microsoft365WorkspaceProvider(
     public async Task<IReadOnlyList<ContactInfo>> SearchContactsAsync(
         MailAccount account, string query, CancellationToken cancellationToken = default)
     {
-        using var document = await GetJsonAsync(
-            account, "me/contacts?$select=id,displayName,emailAddresses&$top=250", ContactScopes, cancellationToken);
-        return document.RootElement.GetProperty("value").EnumerateArray()
-            .Select(item => MapContact(item, account.AccountId))
+        var contacts = await GetPagedAsync(
+            account,
+            "me/contacts?$select=id,displayName,emailAddresses&$top=250",
+            ContactScopes,
+            item => MapContact(item, account.AccountId),
+            cancellationToken);
+        return contacts
             .Where(contact => string.IsNullOrWhiteSpace(query) ||
                               contact.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                               contact.EmailAddresses.Any(address => address.Contains(query, StringComparison.OrdinalIgnoreCase)))

@@ -214,6 +214,117 @@ public sealed class EncryptedMailStoreTests
         Directory.Delete(directory, recursive: true);
     }
 
+    [Fact]
+    public async Task RemovingFolderSnapshotDeletesOrphanedMessagesAndSearchRows()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-folder-gc-{Guid.NewGuid():N}");
+        var mailbox = new Mailbox("account", "person@example.com", "Person");
+        await using (var store = new EncryptedMailStore(
+            Path.Combine(directory, "mail.db"),
+            Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))))
+        {
+            await store.InitializeAsync(cancellationToken);
+            await store.SaveFoldersAsync(mailbox.Id,
+            [
+                new(mailbox.Id, "inbox", "Inbox", 0, 1, "inbox"),
+                new(mailbox.Id, "removed", "Old folder", 0, 1)
+            ], cancellationToken);
+            await store.ApplySyncPageAsync("cursor", new MailSyncPage(
+            [
+                Message(mailbox.Id, "keep", "Keep this", "Still present") with { FolderId = "inbox" },
+                Message(mailbox.Id, "orphan", "Vanishing walrus", "Removed folder") with { FolderId = "removed" }
+            ], null, false), cancellationToken);
+
+            await store.SaveFoldersAsync(mailbox.Id,
+                [new(mailbox.Id, "inbox", "Inbox", 0, 1, "inbox")], cancellationToken);
+
+            Assert.NotNull(await store.GetMessageAsync(mailbox.Id, "keep", cancellationToken));
+            Assert.Null(await store.GetMessageAsync(mailbox.Id, "orphan", cancellationToken));
+            Assert.Empty(await store.SearchAsync("Vanishing walrus", cancellationToken: cancellationToken));
+        }
+        Directory.Delete(directory, recursive: true);
+    }
+
+    [Fact]
+    public async Task ReconcilesAndSearchesEncryptedWorkspaceSnapshots()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-workspace-cache-{Guid.NewGuid():N}");
+        await using (var store = new EncryptedMailStore(
+            Path.Combine(directory, "mail.db"),
+            Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))))
+        {
+            await store.InitializeAsync(cancellationToken);
+            var accountId = "account";
+            var contact = new ContactInfo("contact", "Adele Vance", ["adele@example.com"], accountId);
+            await store.ReplaceWorkspaceItemsAsync(
+                "contact", accountId, "all", [contact],
+                static item => item.ProviderId,
+                static item => $"{item.DisplayName} {string.Join(' ', item.EmailAddresses)}",
+                cancellationToken);
+            var cachedContact = Assert.Single(await store.SearchWorkspaceItemsAsync<ContactInfo>(
+                "contact", "Adele", accountId: accountId, cancellationToken: cancellationToken));
+            Assert.Equal(contact.ProviderId, cachedContact.ProviderId);
+            Assert.Equal(contact.DisplayName, cachedContact.DisplayName);
+            Assert.Equal(contact.EmailAddresses, cachedContact.EmailAddresses);
+
+            await store.ReplaceWorkspaceItemsAsync<ContactInfo>(
+                "contact", accountId, "all", [],
+                static item => item.ProviderId,
+                static item => item.DisplayName,
+                cancellationToken);
+            Assert.Empty(await store.SearchWorkspaceItemsAsync<ContactInfo>(
+                "contact", "Adele", accountId: accountId, cancellationToken: cancellationToken));
+
+            var firstRange = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);
+            var secondRange = firstRange.AddMonths(1);
+            var july = new CalendarEvent(
+                "july", "calendar", "July planning", firstRange.AddDays(2), firstRange.AddDays(2).AddHours(1), null,
+                AccountId: accountId);
+            var august = new CalendarEvent(
+                "august", "calendar", "August planning", secondRange.AddDays(2), secondRange.AddDays(2).AddHours(1), null,
+                AccountId: accountId);
+            await store.ReplaceCalendarEventsAsync(
+                accountId, "calendar", firstRange, secondRange, [july], cancellationToken);
+            await store.ReplaceCalendarEventsAsync(
+                accountId, "calendar", secondRange, secondRange.AddMonths(1), [august], cancellationToken);
+            await store.ReplaceCalendarEventsAsync(
+                accountId, "calendar", firstRange, secondRange, [], cancellationToken);
+
+            Assert.Empty(await store.GetCalendarEventsAsync(
+                accountId, "calendar", firstRange, secondRange, cancellationToken));
+            Assert.Equal(august, Assert.Single(await store.GetCalendarEventsAsync(
+                accountId, "calendar", secondRange, secondRange.AddMonths(1), cancellationToken)));
+            await store.GarbageCollectWorkspaceAsync(accountId, cancellationToken);
+            Assert.Single(await store.GetCalendarEventsAsync(
+                accountId, "calendar", secondRange, secondRange.AddMonths(1), cancellationToken));
+            await store.ReplaceWorkspaceItemsAsync<CalendarInfo>(
+                "calendar", accountId, "all", [],
+                static item => item.ProviderId,
+                static item => item.Name,
+                cancellationToken);
+            await store.GarbageCollectWorkspaceAsync(accountId, cancellationToken);
+            Assert.Empty(await store.GetCalendarEventsAsync(
+                accountId, "calendar", secondRange, secondRange.AddMonths(1), cancellationToken));
+
+            var oldFile = new CloudFile(
+                "old-file", "old-contract.pdf", 10, null, accountId, "microsoft365", "/drive/root:");
+            var currentFile = new CloudFile(
+                "current-file", "current-contract.pdf", 10, null, accountId, "microsoft365", "/drive/root:");
+            await store.ReplaceDriveDirectoryFilesAsync(
+                accountId, "/drive/root:", [oldFile, currentFile], cancellationToken);
+            await store.ReplaceDriveDirectoryFilesAsync(
+                accountId, "/drive/root:", [currentFile], cancellationToken);
+            Assert.Empty(await store.SearchWorkspaceItemsAsync<CloudFile>(
+                "drive-file", "old-contract", accountId: accountId, cancellationToken: cancellationToken));
+            Assert.Equal("current-file", Assert.Single(await store.SearchWorkspaceItemsAsync<CloudFile>(
+                "drive-file", "current-contract", accountId: accountId,
+                cancellationToken: cancellationToken)).ProviderId);
+        }
+        Directory.Delete(directory, recursive: true);
+    }
+
     private static MailMessage Message(string mailboxId, string id, string subject, string body) => new(
         mailboxId,
         id,
