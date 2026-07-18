@@ -123,7 +123,8 @@
                              IsVisible="{Binding IsLoadingMailStatistics}" VerticalAlignment="Center" />
               </Grid>
               <TextBlock Text="{Binding MailStatisticsSummary}" Opacity="0.68" TextWrapping="Wrap" />
-              <TextBlock Text="Cloud counts reflect the latest successful folder sync." FontSize="11" Opacity="0.58" />
+              <TextBlock Text="Microsoft 365 totals cover the full mailbox; local totals follow the selected sync history."
+                         FontSize="11" Opacity="0.58" TextWrapping="Wrap" />
               <ItemsControl ItemsSource="{Binding MailStatistics}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="app:MailboxStatisticsItem">

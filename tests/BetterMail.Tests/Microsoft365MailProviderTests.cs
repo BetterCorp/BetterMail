@@ -25,16 +25,34 @@ public sealed class Microsoft365MailProviderTests
     }
 
     [Fact]
-    public void AddsTheSupportedReceivedDateFilterToInitialDeltaSync()
+    public void UsesAnUncappedPagedListingForBoundedHistoryBackfill()
     {
         var account = Account();
         var mailbox = new BetterMail.Core.Mailbox(account.AccountId, account.EmailAddress, "Primary");
 
-        var endpoint = Microsoft365MailProvider.SyncEndpoint(
+        var endpoint = Microsoft365MailProvider.HistoryEndpoint(
             account, mailbox, "inbox", new DateTimeOffset(2026, 4, 16, 0, 0, 0, TimeSpan.Zero));
 
+        Assert.Contains("/messages?", endpoint);
+        Assert.DoesNotContain("/messages/delta", endpoint);
         Assert.Contains("$filter=receivedDateTime+ge+2026-04-16T00:00:00Z", endpoint);
         Assert.Contains("$orderby=receivedDateTime+desc", endpoint);
+        Assert.Contains("$top=50", endpoint);
+    }
+
+    [Fact]
+    public void SwitchesCompletedHistoryBackfillToDeltaTracking()
+    {
+        using var finalHistoryPage = JsonDocument.Parse("""{"value":[]}""");
+        const string deltaEndpoint = "me/mailFolders/inbox/messages/delta?$filter=receivedDateTime+ge+cutoff";
+
+        var continuation = Microsoft365MailProvider.SyncContinuation(
+            finalHistoryPage.RootElement,
+            "last-history-page",
+            deltaEndpoint);
+
+        Assert.True(continuation.HasMore);
+        Assert.Equal(deltaEndpoint, continuation.NextCursor);
     }
 
     [Fact]

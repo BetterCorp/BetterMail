@@ -83,8 +83,12 @@ public sealed class Microsoft365MailProvider(
         CancellationToken cancellationToken = default)
     {
         var endpoint = string.IsNullOrWhiteSpace(cursor)
-            ? SyncEndpoint(account, mailbox, folderId, receivedSince)
+            ? receivedSince is null
+                ? SyncEndpoint(account, mailbox, folderId, null)
+                : HistoryEndpoint(account, mailbox, folderId, receivedSince.Value)
             : cursor;
+        var isHistoryBackfill = receivedSince is not null &&
+            !endpoint.Contains("/messages/delta", StringComparison.OrdinalIgnoreCase);
 
         using var document = await GetJsonAsync(account, endpoint, cancellationToken).ConfigureAwait(false);
         var messages = new List<MailMessage>();
@@ -106,12 +110,30 @@ public sealed class Microsoft365MailProvider(
         }
 
         var root = document.RootElement;
-        var hasMore = root.TryGetProperty("@odata.nextLink", out var nextLink);
-        var nextCursor = hasMore
-            ? nextLink.GetString()
-            : root.TryGetProperty("@odata.deltaLink", out var deltaLink) ? deltaLink.GetString() : cursor;
+        var (nextCursor, hasMore) = SyncContinuation(
+            root,
+            cursor,
+            isHistoryBackfill ? SyncEndpoint(account, mailbox, folderId, receivedSince) : null);
 
         return new MailSyncPage(messages, nextCursor, hasMore);
+    }
+
+    internal static (string? NextCursor, bool HasMore) SyncContinuation(
+        JsonElement root,
+        string? cursor,
+        string? historyDeltaEndpoint)
+    {
+        if (root.TryGetProperty("@odata.nextLink", out var nextLink))
+        {
+            return (nextLink.GetString(), true);
+        }
+        if (historyDeltaEndpoint is not null)
+        {
+            return (historyDeltaEndpoint, true);
+        }
+        return (
+            root.TryGetProperty("@odata.deltaLink", out var deltaLink) ? deltaLink.GetString() : cursor,
+            false);
     }
 
     public async Task<IReadOnlyList<MailMessage>> SearchMessagesAsync(
@@ -155,6 +177,20 @@ public sealed class Microsoft365MailProvider(
         }
         var cutoff = receivedSince.Value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture);
         return $"{endpoint}&$filter=receivedDateTime+ge+{cutoff}&$orderby=receivedDateTime+desc";
+    }
+
+    internal static string HistoryEndpoint(
+        MailAccount account,
+        Mailbox mailbox,
+        string folderId,
+        DateTimeOffset receivedSince)
+    {
+        var cutoff = receivedSince.UtcDateTime.ToString(
+            "yyyy-MM-ddTHH:mm:ss'Z'",
+            System.Globalization.CultureInfo.InvariantCulture);
+        return $"{MailboxPath(account, mailbox)}/mailFolders/{Uri.EscapeDataString(folderId)}/messages" +
+            $"?$select={MessageSelect}&$filter=receivedDateTime+ge+{cutoff}" +
+            "&$orderby=receivedDateTime+desc&$top=50";
     }
 
     internal static string SearchEndpoint(MailAccount account, Mailbox mailbox, string query, int limit)

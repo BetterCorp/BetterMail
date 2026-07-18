@@ -36,7 +36,7 @@ public sealed class SyncEngineTests
         await new SyncEngine(provider, store).SyncFolderAsync(
             account, mailbox, folder, 90, TestContext.Current.CancellationToken);
 
-        Assert.EndsWith(":history:90", store.CursorId);
+        Assert.EndsWith(":history:bounded-v2-90", store.CursorId);
         Assert.InRange(provider.ReceivedSince!.Value, DateTimeOffset.UtcNow.AddDays(-91), DateTimeOffset.UtcNow.AddDays(-89));
     }
 

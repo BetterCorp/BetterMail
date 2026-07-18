@@ -5,11 +5,14 @@ namespace BetterMail.Core;
 public sealed class SyncEngine(IMailProvider provider, IMailStore store)
 {
     private const string FullHistoryVersion = "all-v2";
+    private const string BoundedHistoryVersion = "bounded-v2";
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _mailboxLocks = new();
 
     public static string CursorId(string mailboxId, string folderId, int historyDays)
     {
-        var historyKey = historyDays > 0 ? historyDays.ToString() : FullHistoryVersion;
+        var historyKey = historyDays > 0
+            ? $"{BoundedHistoryVersion}-{historyDays}"
+            : FullHistoryVersion;
         return $"{mailboxId}:folder:{folderId}:history:{historyKey}";
     }
 

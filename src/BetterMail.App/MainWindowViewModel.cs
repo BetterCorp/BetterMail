@@ -293,8 +293,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
     public bool HasMailStatistics => MailStatistics.Count > 0;
     public string MailStatisticsSummary =>
-        $"{MailStatistics.Sum(static item => item.SyncedMessages):N0} synced locally | " +
-        $"{MailStatistics.Sum(static item => item.CloudMessages):N0} on Microsoft 365 | " +
+        $"{MailStatistics.Sum(static item => item.SyncedMessages):N0} synced locally ({MailSyncRange}) | " +
+        $"{MailStatistics.Sum(static item => item.CloudMessages):N0} total on Microsoft 365 | " +
         $"{Folders.Count:N0} folders | {Drafts.Count:N0} local drafts";
 
     public ICommand ConnectCommand { get; }
