@@ -23,9 +23,6 @@ public sealed partial class MainWindow : Window
     private PointerPressedEventArgs? _mailDragStart;
     private Point _mailDragOrigin;
     private IReadOnlyList<MailMessage> _draggedMessages = [];
-    private Vector? _messageScrollOffsetBeforeSync;
-    private string? _messageScrollContextBeforeSync;
-    private EventHandler? _messageScrollRestoreHandler;
     private WindowSessionStore? _windowSessions;
     private readonly Dictionary<PreviewWindowSession, Window> _previewWindows = [];
     private bool _isClosing;
@@ -595,56 +592,12 @@ public sealed partial class MainWindow : Window
 
     private void ViewModelPropertyChanged(object? sender, PropertyChangedEventArgs args)
     {
-        if (args.PropertyName == nameof(MainWindowViewModel.IsSyncing) && _viewModel is not null)
-        {
-            if (_viewModel.IsSyncing)
-            {
-                if (_messageScrollRestoreHandler is not null)
-                {
-                    MessageList.LayoutUpdated -= _messageScrollRestoreHandler;
-                    _messageScrollRestoreHandler = null;
-                }
-                _messageScrollOffsetBeforeSync = MessageList
-                    .GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault()?.Offset;
-                _messageScrollContextBeforeSync = _viewModel.MailListContextKey;
-            }
-            else if (_messageScrollOffsetBeforeSync is { } offset)
-            {
-                if (_messageScrollContextBeforeSync == _viewModel.MailListContextKey)
-                {
-                    RestoreMessageScrollAfterLayout(offset);
-                }
-                else
-                {
-                    _messageScrollOffsetBeforeSync = null;
-                    _messageScrollContextBeforeSync = null;
-                }
-            }
-        }
         if (args.PropertyName is nameof(MainWindowViewModel.ShowMailSurface)
             or nameof(MainWindowViewModel.IsSettingsOpen)
             or nameof(MainWindowViewModel.ActiveModule))
         {
             UpdateMailPanes();
         }
-    }
-
-    private void RestoreMessageScrollAfterLayout(Vector offset)
-    {
-        _messageScrollRestoreHandler = (_, _) =>
-        {
-            MessageList.LayoutUpdated -= _messageScrollRestoreHandler;
-            _messageScrollRestoreHandler = null;
-            var scroll = MessageList.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
-            if (scroll is not null)
-            {
-                scroll.Offset = offset;
-            }
-            _messageScrollOffsetBeforeSync = null;
-            _messageScrollContextBeforeSync = null;
-        };
-        MessageList.LayoutUpdated += _messageScrollRestoreHandler;
-        MessageList.InvalidateMeasure();
     }
 
     private void FocusMailSearch()

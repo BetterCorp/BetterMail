@@ -26,10 +26,24 @@ public sealed class NoOpDesktopNotificationService : IDesktopNotificationService
 
 public static class DesktopNotificationServices
 {
-    public static IDesktopNotificationService Create(Func<nint> ownerHandle) =>
-        OperatingSystem.IsWindows()
-            ? new WindowsDesktopNotificationService(ownerHandle)
-            : NoOpDesktopNotificationService.Instance;
+    public static IDesktopNotificationService Create(Func<nint> ownerHandle)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return NoOpDesktopNotificationService.Instance;
+        }
+#if WINDOWS
+        try
+        {
+            return new WindowsAppNotificationService();
+        }
+        catch
+        {
+            // Fall back when Windows notifications are unavailable or disabled by policy.
+        }
+#endif
+        return new WindowsDesktopNotificationService(ownerHandle);
+    }
 }
 
 public sealed record InboxNotificationContext(

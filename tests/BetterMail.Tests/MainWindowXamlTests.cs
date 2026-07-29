@@ -84,7 +84,7 @@ public sealed class MainWindowXamlTests
         Assert.Equal(expected, FilePreviewWindow.PreviewKindFor(name, contentType).ToString());
 
     [Fact]
-    public void PreviewWindowsRestoreFromLocalCacheAndSyncRestoresScrollAfterLayout()
+    public void PreviewWindowsRestoreFromLocalCacheWithoutForcingSyncLayout()
     {
         var root = FindRepositoryRoot();
         var app = File.ReadAllText(Path.Combine(root, "src", "BetterMail.App", "App.axaml.cs"));
@@ -94,7 +94,8 @@ public sealed class MainWindowXamlTests
         Assert.Contains("await mainWindow.RestorePreviewWindowsAsync()", app);
         Assert.Contains("GetCachedPreviewAsync", viewModel);
         Assert.Contains("new WindowSessionStore(_viewModel.DataDirectory)", window);
-        Assert.Contains("MessageList.LayoutUpdated +=", window);
+        Assert.DoesNotContain("MessageList.InvalidateMeasure()", window);
+        Assert.DoesNotContain("MessageList.LayoutUpdated +=", window);
         Assert.DoesNotContain("DispatcherPriority.Loaded", window);
     }
 

@@ -786,12 +786,18 @@ public sealed class MainWindowViewModelTests
             var selectedAfterSync = viewModel.SelectedMessage;
             var conversationAfterSync = viewModel.ConversationThread.SelectedMessage;
             var unchangedListUpdates = 0;
+            var unchangedFolderUpdates = 0;
+            var unchangedFolderGroupUpdates = 0;
             viewModel.Messages.CollectionChanged += (_, _) => unchangedListUpdates++;
+            viewModel.Folders.CollectionChanged += (_, _) => unchangedFolderUpdates++;
+            viewModel.FolderGroups.CollectionChanged += (_, _) => unchangedFolderGroupUpdates++;
             await WaitUntilAsync(() => viewModel.SyncCommand.CanExecute(null), cancellationToken);
             viewModel.SyncCommand.Execute(null);
             await WaitUntilAsync(() => provider.SyncCalls == 3 && !viewModel.IsSyncing, cancellationToken);
 
             Assert.Equal(0, unchangedListUpdates);
+            Assert.Equal(0, unchangedFolderUpdates);
+            Assert.Equal(0, unchangedFolderGroupUpdates);
             Assert.Same(selectedAfterSync, viewModel.SelectedMessage);
             Assert.Same(conversationAfterSync, viewModel.ConversationThread.SelectedMessage);
         }

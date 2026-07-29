@@ -2837,18 +2837,40 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        var selectedFolderId = _selectedFolder?.ProviderId;
-        var selectedMailboxId = _selectedFolder?.MailboxId;
         var mailboxes = Mailboxes.ToDictionary(static mailbox => mailbox.Id);
-        Replace(Folders, (await _store.GetFoldersAsync()).Select(folder => new MailFolderItem(
+        var refreshed = (await _store.GetFoldersAsync()).Select(folder => new MailFolderItem(
             folder,
-            mailboxes.TryGetValue(folder.MailboxId, out var mailbox) ? mailbox.DisplayName : folder.MailboxId)));
-        _selectedFolder = Folders.FirstOrDefault(folder =>
-            folder.ProviderId == selectedFolderId && folder.MailboxId == selectedMailboxId);
-        Replace(FolderGroups, Mailboxes.Select(mailbox => new MailboxFolderGroup(
-            mailbox,
-            BuildFolderTree(Folders.Where(folder => folder.MailboxId == mailbox.Id)))));
-        if (!IsGlobalSearchOpen && !IsSearchResultsView)
+            mailboxes.TryGetValue(folder.MailboxId, out var mailbox) ? mailbox.DisplayName : folder.MailboxId))
+            .ToArray();
+        var structureChanged =
+            Folders.Count != refreshed.Length ||
+            FolderGroups.Count != Mailboxes.Count ||
+            !Folders.Zip(refreshed).All(static pair =>
+                pair.First.MailboxId == pair.Second.MailboxId &&
+                pair.First.ProviderId == pair.Second.ProviderId &&
+                pair.First.ParentProviderId == pair.Second.ParentProviderId) ||
+            !FolderGroups.Select(static group => group.Mailbox.Id)
+                .SequenceEqual(Mailboxes.Select(static mailbox => mailbox.Id));
+        var filtersChanged = structureChanged;
+        if (structureChanged)
+        {
+            var selectedFolderId = _selectedFolder?.ProviderId;
+            var selectedMailboxId = _selectedFolder?.MailboxId;
+            Replace(Folders, refreshed);
+            _selectedFolder = Folders.FirstOrDefault(folder =>
+                folder.ProviderId == selectedFolderId && folder.MailboxId == selectedMailboxId);
+            Replace(FolderGroups, Mailboxes.Select(mailbox => new MailboxFolderGroup(
+                mailbox,
+                BuildFolderTree(Folders.Where(folder => folder.MailboxId == mailbox.Id)))));
+        }
+        else
+        {
+            for (var index = 0; index < Folders.Count; index++)
+            {
+                filtersChanged |= Folders[index].Update(refreshed[index].Folder, refreshed[index].MailboxDisplayName);
+            }
+        }
+        if (filtersChanged && !IsGlobalSearchOpen && !IsSearchResultsView)
         {
             RebuildSearchFilters();
         }
@@ -4775,8 +4797,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 }
 
-public sealed record MailFolderItem(MailFolder Folder, string MailboxDisplayName)
+public sealed class MailFolderItem(MailFolder folder, string mailboxDisplayName) : ViewModelBase
 {
+    public MailFolder Folder { get; private set; } = folder;
+    public string MailboxDisplayName { get; private set; } = mailboxDisplayName;
     public string MailboxId => Folder.MailboxId;
     public string ProviderId => Folder.ProviderId;
     public string DisplayName => Folder.DisplayName;
@@ -4785,6 +4809,32 @@ public sealed record MailFolderItem(MailFolder Folder, string MailboxDisplayName
     public string? WellKnownName => Folder.WellKnownName;
     public string? ParentProviderId => Folder.ParentProviderId;
     public string CountText => UnreadCount > 0 ? UnreadCount.ToString("N0") : "";
+
+    internal bool Update(MailFolder folder, string mailboxDisplayName)
+    {
+        var filtersChanged =
+            DisplayName != folder.DisplayName ||
+            WellKnownName != folder.WellKnownName ||
+            MailboxDisplayName != mailboxDisplayName;
+        if (Folder == folder && MailboxDisplayName == mailboxDisplayName)
+        {
+            return false;
+        }
+        var countChanged = UnreadCount != folder.UnreadCount;
+        Folder = folder;
+        MailboxDisplayName = mailboxDisplayName;
+        RaisePropertyChanged(nameof(Folder));
+        RaisePropertyChanged(nameof(MailboxDisplayName));
+        RaisePropertyChanged(nameof(DisplayName));
+        RaisePropertyChanged(nameof(UnreadCount));
+        RaisePropertyChanged(nameof(TotalCount));
+        RaisePropertyChanged(nameof(WellKnownName));
+        if (countChanged)
+        {
+            RaisePropertyChanged(nameof(CountText));
+        }
+        return filtersChanged;
+    }
 }
 
 public sealed record MailFolderNode(MailFolderItem Item, IReadOnlyList<MailFolderNode> Children)

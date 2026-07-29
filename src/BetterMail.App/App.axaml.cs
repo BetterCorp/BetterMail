@@ -12,6 +12,7 @@ public sealed partial class App : Application
 {
     private EncryptedMailStore? _store;
     private AppUpdater? _updater;
+    private IDesktopNotificationService? _desktopNotificationService;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
@@ -40,6 +41,7 @@ public sealed partial class App : Application
             desktop.Exit += async (_, _) =>
             {
                 _updater?.Dispose();
+                (_desktopNotificationService as IDisposable)?.Dispose();
                 await DisposeStoreAsync();
             };
 
@@ -66,7 +68,7 @@ public sealed partial class App : Application
         }
 
         MainWindow? mainWindow = null;
-        var notificationService = DesktopNotificationServices.Create(
+        _desktopNotificationService = DesktopNotificationServices.Create(
             () => mainWindow?.TryGetPlatformHandle()?.Handle ?? 0);
         var viewModel = new MainWindowViewModel(
             _store,
@@ -74,7 +76,7 @@ public sealed partial class App : Application
             ApplyTheme,
             ApplyAccent,
             startupError,
-            desktopNotificationService: notificationService);
+            desktopNotificationService: _desktopNotificationService);
         viewModel.SelectedThemeMode = preferences.ThemeMode;
         viewModel.SelectedAccentName = preferences.AccentName;
         viewModel.IsCompact = preferences.IsCompact;

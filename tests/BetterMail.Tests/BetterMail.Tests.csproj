@@ -4,6 +4,9 @@
     <IsTestProject>true</IsTestProject>
     <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
   </PropertyGroup>
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/BetterMail.App/BetterMail.App.csproj" />
     <ProjectReference Include="../../src/BetterMail.Core/BetterMail.Core.csproj" />

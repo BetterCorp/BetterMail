@@ -11,6 +11,7 @@
     <PackageVersion Include="HtmlSanitizer" Version="9.1.949-beta" />
     <PackageVersion Include="Microsoft.Data.Sqlite.Core" Version="10.0.9" />
     <PackageVersion Include="Microsoft.Identity.Client" Version="4.86.0" />
+    <PackageVersion Include="Microsoft.WindowsAppSDK" Version="1.8.260710003" />
     <PackageVersion Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.86.0" />
     <PackageVersion Include="SQLite3MC.PCLRaw.bundle" Version="2.3.5" />
     <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />

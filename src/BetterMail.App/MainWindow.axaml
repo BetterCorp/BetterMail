@@ -343,11 +343,11 @@
                                   DragDrop.AllowDrop="True"
                                   DragDrop.DragOver="FolderDragOver"
                                   DragDrop.Drop="FolderDrop"
-                                  AutomationProperties.Name="{Binding DisplayName}"
+                                  AutomationProperties.Name="{Binding Item.DisplayName}"
                                   AutomationProperties.HelpText="Open mail folder">
                             <Grid ColumnDefinitions="*,Auto">
-                              <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                              <TextBlock Grid.Column="1" Text="{Binding CountText}" FontWeight="SemiBold" Foreground="#0F6CBD" Margin="6,0,1,0" VerticalAlignment="Center" />
+                              <TextBlock Text="{Binding Item.DisplayName}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                              <TextBlock Grid.Column="1" Text="{Binding Item.CountText}" FontWeight="SemiBold" Foreground="#0F6CBD" Margin="6,0,1,0" VerticalAlignment="Center" />
                             </Grid>
                           </Button>
                         </TreeDataTemplate>

@@ -8,6 +8,15 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\BetterMail.ico</ApplicationIcon>
   </PropertyGroup>
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <WindowsPackageType>None</WindowsPackageType>
+  </PropertyGroup>
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows')) And '$(RuntimeIdentifier)' != ''">
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../BetterMail.Core/BetterMail.Core.csproj" />
     <ProjectReference Include="../BetterMail.Microsoft365/BetterMail.Microsoft365.csproj" />
@@ -28,6 +37,9 @@
     <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="HtmlSanitizer" />
     <PackageReference Include="Velopack" />
+  </ItemGroup>
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <PackageReference Include="Microsoft.WindowsAppSDK" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="BetterMail.Tests" />
