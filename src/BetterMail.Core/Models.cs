@@ -104,6 +104,13 @@ public sealed record MailMessage(
     public bool IsUnread => !IsRead;
     public string MailboxColor => AccountColors.For(MailboxId);
     public string SenderDisplayName => string.IsNullOrWhiteSpace(From.Name) ? From.Address : From.Name;
+    public bool HasSameContent(MailMessage? other) =>
+        other is not null &&
+        To.SequenceEqual(other.To) &&
+        Categories.SequenceEqual(other.Categories) &&
+        (Cc ?? []).SequenceEqual(other.Cc ?? []) &&
+        this with { To = other.To, Categories = other.Categories, Cc = other.Cc } == other;
+
     public string DisplayPreview
     {
         get

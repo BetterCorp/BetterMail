@@ -3834,7 +3834,7 @@ public sealed class MainWindowViewModel : ViewModelBase
                 Messages.Move(existingIndex, index);
             }
 
-            if (Messages[index] != message)
+            if (!Messages[index].HasSameContent(message))
             {
                 var wasSelected = SameMessage(selected, message);
                 _isReplacingSelectedMessage = wasSelected;
@@ -4723,8 +4723,15 @@ public sealed class MainWindowViewModel : ViewModelBase
             var hydrated = messages.FirstOrDefault(message => SameMessage(message, selected));
             if (hydrated is not null)
             {
-                selected = hydrated;
-                SelectedMessage = hydrated;
+                if (selected.Body is not null && hydrated.Body is null)
+                {
+                    hydrated = hydrated with { Body = selected.Body };
+                }
+                if (!selected.HasSameContent(hydrated))
+                {
+                    selected = hydrated;
+                    SelectedMessage = hydrated;
+                }
             }
             else
             {

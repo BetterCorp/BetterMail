@@ -144,6 +144,7 @@ public sealed class NewMailNotificationCoordinator(IDesktopNotificationService s
 internal sealed class WindowsDesktopNotificationService(Func<nint> ownerHandle)
     : IDesktopNotificationService
 {
+    private const int OwnerHandleAttempts = 20;
     private const uint NimAdd = 0;
     private const uint NimModify = 1;
     private const uint NifIcon = 0x2;
@@ -159,22 +160,42 @@ internal sealed class WindowsDesktopNotificationService(Func<nint> ownerHandle)
     private bool _registered;
     private nint _applicationIcon;
 
-    public ValueTask ShowAsync(DesktopNotification notification)
+    public ValueTask ShowAsync(DesktopNotification notification) =>
+        new(ShowAsyncCore(notification));
+
+    private async Task ShowAsyncCore(DesktopNotification notification)
     {
-        nint handle;
-        try
-        {
-            handle = ownerHandle();
-        }
-        catch
-        {
-            return ValueTask.CompletedTask;
-        }
+        var handle = await WaitForOwnerHandleAsync(ownerHandle);
         if (handle != 0)
         {
-            _ = Task.Run(() => ShowInBackground(handle, notification));
+            await Task.Run(() => ShowInBackground(handle, notification));
         }
-        return ValueTask.CompletedTask;
+    }
+
+    internal static async Task<nint> WaitForOwnerHandleAsync(
+        Func<nint> getOwnerHandle,
+        TimeSpan? retryDelay = null)
+    {
+        for (var attempt = 0; attempt < OwnerHandleAttempts; attempt++)
+        {
+            try
+            {
+                var handle = getOwnerHandle();
+                if (handle != 0)
+                {
+                    return handle;
+                }
+            }
+            catch
+            {
+                // The window may still be establishing its platform handle.
+            }
+            if (attempt + 1 < OwnerHandleAttempts)
+            {
+                await Task.Delay(retryDelay ?? TimeSpan.FromMilliseconds(250));
+            }
+        }
+        return 0;
     }
 
     private void ShowInBackground(nint handle, DesktopNotification notification)
@@ -184,17 +205,9 @@ internal sealed class WindowsDesktopNotificationService(Func<nint> ownerHandle)
             lock (_gate)
             {
                 var data = CreateData(handle);
-                if (!_registered)
+                if (!EnsureRegistered(ref data))
                 {
-                    data.uFlags = NifIcon | NifTip;
-                    _applicationIcon = _applicationIcon == 0 ? LoadApplicationIcon() : _applicationIcon;
-                    data.hIcon = _applicationIcon;
-                    data.szTip = "BetterMail";
-                    if (!ShellNotifyIconW(NimAdd, ref data))
-                    {
-                        return;
-                    }
-                    _registered = true;
+                    return;
                 }
                 data.uFlags = NifInfo;
                 data.szInfoTitle = Truncate(
@@ -208,13 +221,35 @@ internal sealed class WindowsDesktopNotificationService(Func<nint> ownerHandle)
                     255);
                 data.hBalloonIcon = _applicationIcon;
                 data.dwInfoFlags = NiifUser | NiifRespectQuietTime;
-                ShellNotifyIconW(NimModify, ref data);
+                if (!ShellNotifyIconW(NimModify, ref data))
+                {
+                    _registered = false;
+                    if (EnsureRegistered(ref data))
+                    {
+                        data.uFlags = NifInfo;
+                        ShellNotifyIconW(NimModify, ref data);
+                    }
+                }
             }
         }
         catch
         {
             // Native notification availability varies by Windows policy and shell state.
         }
+    }
+
+    private bool EnsureRegistered(ref NotifyIconData data)
+    {
+        if (_registered)
+        {
+            return true;
+        }
+        data.uFlags = NifIcon | NifTip;
+        _applicationIcon = _applicationIcon == 0 ? LoadApplicationIcon() : _applicationIcon;
+        data.hIcon = _applicationIcon;
+        data.szTip = "BetterMail";
+        _registered = ShellNotifyIconW(NimAdd, ref data);
+        return _registered;
     }
 
     private static NotifyIconData CreateData(nint handle) => new()

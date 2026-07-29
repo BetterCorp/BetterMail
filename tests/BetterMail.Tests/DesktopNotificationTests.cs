@@ -101,15 +101,16 @@ public sealed class DesktopNotificationTests
     }
 
     [Fact]
-    public void WindowsMailNotificationsAreQueuedInsteadOfDiscarded()
+    public async Task WindowsMailNotificationsWaitForTheWindowHandle()
     {
-        var root = FindRepositoryRoot();
-        var source = File.ReadAllText(Path.Combine(
-            root, "src", "BetterMail.App", "DesktopNotifications.cs"));
+        var attempts = 0;
 
-        Assert.DoesNotContain("NifRealtime", source);
-        Assert.DoesNotContain("NimDelete", source);
-        Assert.Contains("data.uFlags = NifInfo;", source);
+        var handle = await WindowsDesktopNotificationService.WaitForOwnerHandleAsync(
+            () => ++attempts == 3 ? 42 : 0,
+            TimeSpan.Zero);
+
+        Assert.Equal(42, handle);
+        Assert.Equal(3, attempts);
     }
 
     private static InboxNotificationContext Context(bool shared)
@@ -165,17 +166,4 @@ public sealed class DesktopNotificationTests
         }
     }
 
-    private static string FindRepositoryRoot()
-    {
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
-             directory is not null;
-             directory = directory.Parent)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "BetterMail.slnx")))
-            {
-                return directory.FullName;
-            }
-        }
-        throw new DirectoryNotFoundException("BetterMail repository root was not found.");
-    }
 }

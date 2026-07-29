@@ -782,6 +782,18 @@ public sealed class MainWindowViewModelTests
             viewModel.ClearGlobalSearchCommand.Execute(null);
             await WaitUntilAsync(() => !viewModel.HasSearchText, cancellationToken);
             Assert.Equal("", viewModel.SearchText);
+
+            var selectedAfterSync = viewModel.SelectedMessage;
+            var conversationAfterSync = viewModel.ConversationThread.SelectedMessage;
+            var unchangedListUpdates = 0;
+            viewModel.Messages.CollectionChanged += (_, _) => unchangedListUpdates++;
+            await WaitUntilAsync(() => viewModel.SyncCommand.CanExecute(null), cancellationToken);
+            viewModel.SyncCommand.Execute(null);
+            await WaitUntilAsync(() => provider.SyncCalls == 3 && !viewModel.IsSyncing, cancellationToken);
+
+            Assert.Equal(0, unchangedListUpdates);
+            Assert.Same(selectedAfterSync, viewModel.SelectedMessage);
+            Assert.Same(conversationAfterSync, viewModel.ConversationThread.SelectedMessage);
         }
         finally
         {

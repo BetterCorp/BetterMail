@@ -329,6 +329,10 @@ public sealed class ConversationMessageItem : ViewModelBase
 
     public void Update(MailMessage message)
     {
+        if (_message.HasSameContent(message))
+        {
+            return;
+        }
         var bodyChanged = !string.Equals(_message.Body, message.Body, StringComparison.Ordinal) ||
             (_message.Body is null && !string.Equals(_message.Preview, message.Preview, StringComparison.Ordinal)) ||
             _message.IsHtml != message.IsHtml;
