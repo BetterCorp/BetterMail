@@ -73,6 +73,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     private int _selectionVersion;
     private CancellationTokenSource? _selectionWorkCancellation;
     private CancellationTokenSource? _globalSearchCancellation;
+    // ponytail: one small shared result set; use UI-thread dispatch if search mutation grows.
+    private readonly object _globalSearchResultsGate = new();
     private string? _dismissedSearchText;
     private readonly List<MailMessage> _latestMailSearchResults = [];
     private readonly HashSet<string> _subjectRepairAttempts = new(StringComparer.Ordinal);
@@ -703,7 +705,10 @@ public sealed class MainWindowViewModel : ViewModelBase
             RaisePropertyChanged(nameof(ShowMessageBody));
             RaisePropertyChanged(nameof(ShowMailSurface));
             RaisePropertyChanged(nameof(ShowWorkspaceSurface));
-            ReorderGlobalSearchResults();
+            lock (_globalSearchResultsGate)
+            {
+                ReorderGlobalSearchResults();
+            }
             ((AsyncCommand)ReplyCommand).Refresh();
             ((AsyncCommand)ReplyAllCommand).Refresh();
             ((AsyncCommand)ForwardCommand).Refresh();
@@ -1956,7 +1961,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         _globalSearchCancellation = new CancellationTokenSource();
         var source = _globalSearchCancellation;
         var query = SearchText.Trim();
-        GlobalSearchResults.Clear();
+        lock (_globalSearchResultsGate)
+        {
+            GlobalSearchResults.Clear();
+        }
         if (_store is null || query.Length < 2)
         {
             ClearLatestMailSearchResults();
@@ -2049,16 +2057,19 @@ public sealed class MainWindowViewModel : ViewModelBase
             results = [new(category, $"{category} search unavailable", exception.Message, category)];
         }
 
-        if (!ReferenceEquals(_globalSearchCancellation, source) || source.IsCancellationRequested)
+        lock (_globalSearchResultsGate)
         {
-            return;
+            if (!ReferenceEquals(_globalSearchCancellation, source) || source.IsCancellationRequested)
+            {
+                return;
+            }
+            foreach (var result in results
+                .Select(result => result with { AccountGroup = SearchGroupFor(result.Value) }))
+            {
+                GlobalSearchResults.Add(result);
+            }
+            ReorderGlobalSearchResults();
         }
-        foreach (var result in results
-            .Select(result => result with { AccountGroup = SearchGroupFor(result.Value) }))
-        {
-            GlobalSearchResults.Add(result);
-        }
-        ReorderGlobalSearchResults();
     }
 
     private async Task<IReadOnlyList<GlobalSearchResult>> SearchCachedMailGloballyAsync(
@@ -2176,22 +2187,25 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void ReplaceGlobalMailSearchResults(IEnumerable<MailMessage> messages)
     {
-        for (var index = GlobalSearchResults.Count - 1; index >= 0; index--)
+        lock (_globalSearchResultsGate)
         {
-            if (GlobalSearchResults[index].Category == "Mail")
+            for (var index = GlobalSearchResults.Count - 1; index >= 0; index--)
             {
-                GlobalSearchResults.RemoveAt(index);
+                if (GlobalSearchResults[index].Category == "Mail")
+                {
+                    GlobalSearchResults.RemoveAt(index);
+                }
             }
-        }
 
-        foreach (var result in messages
-            .Select(message => new GlobalSearchResult(
-                "Mail", message.Subject, MailSearchSubtitle(message), "Mail", message))
-            .Select(result => result with { AccountGroup = SearchGroupFor(result.Value) }))
-        {
-            GlobalSearchResults.Add(result);
+            foreach (var result in messages
+                .Select(message => new GlobalSearchResult(
+                    "Mail", message.Subject, MailSearchSubtitle(message), "Mail", message))
+                .Select(result => result with { AccountGroup = SearchGroupFor(result.Value) }))
+            {
+                GlobalSearchResults.Add(result);
+            }
+            ReorderGlobalSearchResults();
         }
-        ReorderGlobalSearchResults();
     }
 
     private void ReorderGlobalSearchResults()

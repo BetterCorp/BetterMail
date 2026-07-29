@@ -498,8 +498,13 @@ public sealed class MainWindowViewModelTests
             await WaitUntilAsync(() => viewModel.ActiveModule == "OneDrive", cancellationToken);
 
             viewModel.SearchText = "Planning";
-            viewModel.SearchCommand.Execute(null);
-            await WaitUntilAsync(() => !viewModel.IsGlobalSearchRunning && viewModel.GlobalSearchResults.Count >= 6, cancellationToken);
+            for (var attempt = 0; attempt < 10; attempt++)
+            {
+                viewModel.SearchCommand.Execute(null);
+                await WaitUntilAsync(
+                    () => !viewModel.IsGlobalSearchRunning && viewModel.GlobalSearchResults.Count >= 6,
+                    cancellationToken);
+            }
 
             Assert.False(viewModel.IsBusy);
             Assert.True(viewModel.IsGlobalSearchOpen);
