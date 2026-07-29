@@ -716,10 +716,17 @@ public sealed class MainWindowViewModelTests
             var provider = new BlockingSyncProvider(inbox, updated, sent);
             var viewModel = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
             await viewModel.InitializeAsync();
+            await WaitUntilAsync(
+                () => viewModel.ConversationThread.SelectedMessage?.Message.Body == original.Body,
+                cancellationToken);
+            var conversationMessage = viewModel.ConversationThread.SelectedMessage!;
+            await WaitUntilAsync(
+                () => Decode(conversationMessage.BodyUri).Contains("Stable body", StringComparison.Ordinal),
+                cancellationToken);
             var bodyRefreshes = 0;
-            viewModel.PropertyChanged += (_, args) =>
+            conversationMessage.PropertyChanged += (_, args) =>
             {
-                if (args.PropertyName == nameof(MainWindowViewModel.SelectedMessageBodyUri))
+                if (args.PropertyName == nameof(ConversationMessageItem.BodyUri))
                 {
                     bodyRefreshes++;
                 }

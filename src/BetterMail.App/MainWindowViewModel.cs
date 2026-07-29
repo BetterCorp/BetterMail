@@ -3798,6 +3798,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         for (var index = 0; index < updated.Count; index++)
         {
             var message = updated[index];
+            if (SameMessage(selected, message) && selected?.Body is not null && message.Body is null)
+            {
+                message = message with { Body = selected.Body };
+            }
             if (index >= Messages.Count)
             {
                 Messages.Add(message);

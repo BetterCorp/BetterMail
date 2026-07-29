@@ -365,6 +365,10 @@ public sealed class ConversationMessageItem : ViewModelBase
 
     public void SetAttachments(IReadOnlyList<MailAttachment> attachments)
     {
+        if (_attachments.SequenceEqual(attachments))
+        {
+            return;
+        }
         _attachments = attachments;
         if (_renderRequested)
         {
