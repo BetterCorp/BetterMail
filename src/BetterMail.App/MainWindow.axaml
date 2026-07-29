@@ -384,7 +384,7 @@
           </Grid>
         </Border>
 
-        <Grid Grid.Row="1">
+        <Grid Grid.Row="1" RowDefinitions="*,Auto">
           <ListBox x:Name="MessageList" ItemsSource="{Binding Messages}"
                    SelectedItem="{Binding SelectedMessage, Mode=TwoWay}"
                    SelectionMode="Multiple"
@@ -610,7 +610,17 @@
             </ListBox.ItemTemplate>
           </ListBox>
 
+          <Button Content="Load older messages"
+                  Grid.Row="1"
+                  Command="{Binding LoadMoreMessagesCommand}"
+                  IsVisible="{Binding HasMoreMessages}"
+                  HorizontalAlignment="Center"
+                  Margin="12"
+                  Padding="14,6"
+                  AutomationProperties.Name="Load older messages" />
+
           <ListBox ItemsSource="{Binding Drafts}"
+                   Grid.RowSpan="2"
                    IsVisible="{Binding IsDraftsView}"
                    Background="Transparent"
                    BorderThickness="0"

@@ -22,10 +22,11 @@ public sealed class WorkspaceThemeXamlTests
         Assert.Equal(3, Count(calendar, "Background=" + quote + "{Binding Color}" + quote));
         Assert.Equal(2, Count(calendar, "Foreground=" + quote + "White" + quote));
 
-        Assert.Equal(2, Count(drive, "Classes=" + quote + "workspaceList" + quote));
+        Assert.Equal(3, Count(drive, "Classes=" + quote + "workspaceList" + quote));
         Assert.Contains("Classes=" + quote + "workspaceTree" + quote, drive);
-        Assert.Contains("ColumnDefinitions=" + quote + "3*,*,Auto" + quote, drive);
+        Assert.Contains("ColumnDefinitions=" + quote + "Auto,3*,*,Auto" + quote, drive);
         Assert.Contains("ColumnDefinitions=" + quote + "3*,Auto" + quote, drive);
+        Assert.Contains("WrapPanel Orientation=" + quote + "Horizontal" + quote, drive);
         Assert.DoesNotContain("ColumnDefinitions=" + quote + "*,120,90" + quote, drive);
     }
 

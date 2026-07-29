@@ -83,7 +83,7 @@
               <TextBlock Text="Download messages from" FontWeight="SemiBold" />
               <ComboBox ItemsSource="{Binding MailSyncRanges}" SelectedItem="{Binding MailSyncRange}"
                         AutomationProperties.Name="Mail sync history" />
-              <TextBlock Text="Changing this starts a background sync. Existing local mail is kept."
+              <TextBlock Text="Changing this starts a background sync. Older local copies are removed; Microsoft 365 mail is never deleted."
                          Opacity="0.62" TextWrapping="Wrap" />
             </StackPanel>
           </Border>

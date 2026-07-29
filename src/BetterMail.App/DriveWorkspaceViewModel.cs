@@ -4,6 +4,12 @@ using BetterMail.Core;
 
 namespace BetterMail.App;
 
+public enum DriveViewMode
+{
+    List,
+    Grid
+}
+
 public sealed class DriveWorkspaceViewModel : ViewModelBase
 {
     private readonly IFilesProvider _provider;
@@ -23,6 +29,7 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
     private bool _isBusy;
     private bool _isSearchMode;
     private bool _initialized;
+    private DriveViewMode _viewMode;
 
     public DriveWorkspaceViewModel(
         IFilesProvider provider,
@@ -34,8 +41,11 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         _accounts = accounts.ToArray();
         RebuildAccountFilters();
 
-        ToggleNodeCommand = new AsyncCommand<DriveTreeNode>(ToggleNodeAsync);
+        SelectDirectoryCommand = new AsyncCommand<DriveTreeNode>(node => SelectDirectoryAsync(node));
+        GoUpCommand = new AsyncCommand(GoUpAsync, () => SelectedDirectory?.Parent is not null && !IsBusy);
         OpenItemCommand = new AsyncCommand<DriveItemEntry>(OpenItemAsync);
+        ListViewCommand = new AsyncCommand(() => SetViewModeAsync(DriveViewMode.List));
+        GridViewCommand = new AsyncCommand(() => SetViewModeAsync(DriveViewMode.Grid));
         RefreshCommand = new AsyncCommand(RefreshSelectedAsync, () => SelectedDirectory is not null && !IsBusy);
         SearchCommand = new AsyncCommand(SearchAsync, () => !IsBusy);
         ClearSearchCommand = new AsyncCommand(ClearSearchAsync);
@@ -60,8 +70,11 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
     public ObservableCollection<string> LoadIssues { get; } = [];
     public ObservableCollection<DriveAccountFilter> AccountFilters { get; } = [];
 
-    public ICommand ToggleNodeCommand { get; }
+    public ICommand SelectDirectoryCommand { get; }
+    public ICommand GoUpCommand { get; }
     public ICommand OpenItemCommand { get; }
+    public ICommand ListViewCommand { get; }
+    public ICommand GridViewCommand { get; }
     public ICommand RefreshCommand { get; }
     public ICommand SearchCommand { get; }
     public ICommand ClearSearchCommand { get; }
@@ -86,6 +99,7 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
             if (SetProperty(ref _selectedDirectory, value))
             {
                 RaisePropertyChanged(nameof(DirectoryTitle));
+                RaisePropertyChanged(nameof(CanGoUp));
                 RefreshCommands();
             }
         }
@@ -168,6 +182,21 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
     public bool IsDeletePending => _pendingDelete is not null;
     public string DeletePrompt => _pendingDelete is null ? "" : $"Delete “{_pendingDelete.Item.Name}”?";
     public string DirectoryTitle => SelectedDirectory?.PathLabel ?? "Drive";
+    public bool CanGoUp => SelectedDirectory?.Parent is not null;
+    public DriveViewMode ViewMode
+    {
+        get => _viewMode;
+        private set
+        {
+            if (SetProperty(ref _viewMode, value))
+            {
+                RaisePropertyChanged(nameof(IsListView));
+                RaisePropertyChanged(nameof(IsGridView));
+            }
+        }
+    }
+    public bool IsListView => ViewMode == DriveViewMode.List;
+    public bool IsGridView => ViewMode == DriveViewMode.Grid;
     public bool IsBusy
     {
         get => _isBusy;
@@ -263,7 +292,7 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         }
         await LoadNodeAsync(node, force: false, cancellationToken);
         SelectedDirectory = node;
-        Replace(CurrentItems, node.Items.Select(item => new DriveItemEntry(node.Account, item)));
+        Replace(CurrentItems, Entries(node));
         SelectedItem = null;
         SelectedSearchResult = null;
         IsSearchMode = false;
@@ -300,12 +329,6 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
             _provider.DownloadFileAsync(selected.Account, selected.Item, destination, cancellationToken));
     }
 
-    private Task ToggleNodeAsync(DriveTreeNode node)
-    {
-        node.IsExpanded = !node.IsExpanded;
-        return Task.CompletedTask;
-    }
-
     private async Task LoadNodeFromExpansionAsync(DriveTreeNode node)
     {
         if (node.IsExpanded)
@@ -328,6 +351,17 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
             await SelectDirectoryAsync(child);
             child.IsExpanded = true;
         }
+    }
+
+    private Task GoUpAsync() =>
+        SelectedDirectory?.Parent is { } parent
+            ? SelectDirectoryAsync(parent)
+            : Task.CompletedTask;
+
+    private Task SetViewModeAsync(DriveViewMode mode)
+    {
+        ViewMode = mode;
+        return Task.CompletedTask;
     }
 
     private async Task LoadNodeAsync(DriveTreeNode node, bool force, CancellationToken cancellationToken)
@@ -386,7 +420,7 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         await LoadNodeAsync(node, force: true, cancellationToken);
         if (ReferenceEquals(node, SelectedDirectory))
         {
-            Replace(CurrentItems, node.Items.Select(item => new DriveItemEntry(node.Account, item)));
+            Replace(CurrentItems, Entries(node));
             SelectedItem = null;
         }
     }
@@ -468,6 +502,12 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         item.AccountId,
         item.AccountProviderId,
         item.ParentPath);
+
+    private static IEnumerable<DriveItemEntry> Entries(DriveTreeNode node) =>
+        node.Items
+            .OrderByDescending(static item => item.IsFolder)
+            .ThenBy(static item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(item => new DriveItemEntry(node.Account, item));
 
     private Task ClearSearchAsync()
     {
@@ -651,6 +691,7 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
 
     private void RefreshCommands()
     {
+        ((AsyncCommand)GoUpCommand).Refresh();
         ((AsyncCommand)RefreshCommand).Refresh();
         ((AsyncCommand)SearchCommand).Refresh();
         ((AsyncCommand)CreateFolderCommand).Refresh();
@@ -792,6 +833,7 @@ public sealed class DriveTreeNode : ViewModelBase
 public sealed record DriveItemEntry(MailAccount Account, CloudDriveItem Item)
 {
     public string TypeText => Item.IsFolder ? "Folder" : Item.ContentType ?? "File";
+    public string Glyph => Item.IsFolder ? "\uE8B7" : "\uE8A5";
 }
 
 public sealed record DriveSearchResult(MailAccount Account, CloudFile File)

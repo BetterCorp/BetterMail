@@ -222,6 +222,7 @@ public sealed partial class DriveWorkspaceView : UserControl
         }
         var command = args.Key switch
         {
+            Key.Up when args.KeyModifiers.HasFlag(KeyModifiers.Alt) => viewModel.GoUpCommand,
             Key.F5 => viewModel.RefreshCommand,
             Key.Delete => viewModel.RequestDeleteCommand,
             Key.Enter => viewModel.OpenItemCommand,

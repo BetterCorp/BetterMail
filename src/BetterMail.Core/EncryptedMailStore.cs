@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 
@@ -8,8 +10,13 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private SqliteConnection? _connection;
+    private bool _optimizedSearch;
+    private bool _correspondentsReady;
 
-    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    public Task InitializeAsync(CancellationToken cancellationToken = default) =>
+        Task.Run(() => InitializeCoreAsync(cancellationToken), cancellationToken);
+
+    private async Task InitializeCoreAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -31,11 +38,13 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
 
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
             await ExecuteAsync(connection, $"PRAGMA key = '{ValidateHexKey(key)}';", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;", cancellationToken).ConfigureAwait(false);
+            connection.CreateFunction<byte[]?, string?>("decode_body", DecodeBody);
+            connection.CreateFunction<string?, byte[]?>("encode_body", EncodeBody);
+            await ExecuteAsync(connection, "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;", cancellationToken).ConfigureAwait(false);
             await ExecuteAsync(connection, Schema, cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, BackfillThreadIndex, cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "messages", "is_flagged", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "messages", "cc_recipients_json", "TEXT NOT NULL DEFAULT '[]'", cancellationToken).ConfigureAwait(false);
+            await EnsureColumnAsync(connection, "messages", "body_blob", "BLOB", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "mail_folders", "parent_provider_id", "TEXT", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "sync_cursors", "is_complete", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "local_drafts", "is_html", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
@@ -43,6 +52,13 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             await EnsureColumnAsync(connection, "local_drafts", "synced_local_updated_at", "TEXT", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "local_drafts", "provider_updated_at", "TEXT", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "local_drafts", "provider_etag", "TEXT", cancellationToken).ConfigureAwait(false);
+            await RunOnceAsync(connection, "thread-index-v1", BackfillThreadIndex, cancellationToken).ConfigureAwait(false);
+            _optimizedSearch = await MigrationCompleteAsync(connection, "message-search-v2", cancellationToken).ConfigureAwait(false);
+            _correspondentsReady = await MigrationCompleteAsync(connection, "message-correspondents-v1", cancellationToken).ConfigureAwait(false);
+            if (!_optimizedSearch)
+            {
+                await ExecuteAsync(connection, LegacySearchSchema, cancellationToken).ConfigureAwait(false);
+            }
             _connection = connection;
         }
         finally
@@ -340,9 +356,110 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             parameters.Add(("$folder", folderId));
         }
 
-        return QueryMessagesAsync(filters.Count == 0 ? "" : $"WHERE {string.Join(" AND ", filters)}", limit, cancellationToken, parameters.ToArray());
+        return QueryMessagesAsync(filters.Count == 0 ? "" : $"WHERE {string.Join(" AND ", filters)}", limit, true, cancellationToken, parameters.ToArray());
     }
 
+
+    public Task<MailPage> GetMessagesPageAsync(
+        IReadOnlyList<MailFolderKey> folders,
+        MailPageCursor? cursor = null,
+        int pageSize = 200,
+        CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            var messages = new List<MailMessage>();
+            long lastRowId = 0;
+            var filters = new List<string>();
+            await using var command = connection.CreateCommand();
+            if (folders.Count > 0)
+            {
+                var folderFilters = new List<string>(folders.Count);
+                for (var index = 0; index < folders.Count; index++)
+                {
+                    folderFilters.Add($"(mailbox_id = $mailbox{index} AND folder_id = $folder{index})");
+                    command.Parameters.AddWithValue($"$mailbox{index}", folders[index].MailboxId);
+                    command.Parameters.AddWithValue($"$folder{index}", folders[index].FolderId);
+                }
+                filters.Add($"({string.Join(" OR ", folderFilters)})");
+            }
+            if (cursor is not null)
+            {
+                filters.Add("(received_at < $received OR (received_at = $received AND rowid < $rowid))");
+                command.Parameters.AddWithValue("$received", cursor.ReceivedAt.ToString("O", CultureInfo.InvariantCulture));
+                command.Parameters.AddWithValue("$rowid", cursor.RowId);
+            }
+
+            var limit = Math.Clamp(pageSize, 1, 500);
+            command.Parameters.AddWithValue("$limit", limit);
+            command.CommandText = $"""
+                SELECT mailbox_id, provider_id, conversation_id, internet_message_id, folder_id, subject,
+                       from_name, from_address, recipients_json, received_at, preview, NULL, is_html,
+                       is_read, has_attachments, importance, categories_json, etag, is_flagged,
+                       cc_recipients_json, NULL, rowid
+                FROM messages {(filters.Count == 0 ? "" : $"WHERE {string.Join(" AND ", filters)}")}
+                ORDER BY received_at DESC, rowid DESC LIMIT $limit;
+                """;
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                messages.Add(ReadMessage(reader));
+                lastRowId = reader.GetInt64(21);
+            }
+
+            return new MailPage(
+                messages,
+                messages.Count == limit ? new(messages[^1].ReceivedAt, lastRowId) : null);
+        }, cancellationToken);
+
+    public async Task<int> PruneMessagesBeforeAsync(
+        string mailboxId,
+        DateTimeOffset cutoff,
+        CancellationToken cancellationToken = default)
+    {
+        var deleted = 0;
+        while (true)
+        {
+            var batch = await WithLockAsync(async connection =>
+            {
+                await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+                await using (var threads = connection.CreateCommand())
+                {
+                    threads.Transaction = transaction;
+                    threads.CommandText = """
+                        DELETE FROM message_threads
+                        WHERE (mailbox_id, provider_id) IN (
+                            SELECT mailbox_id, provider_id FROM messages
+                            WHERE mailbox_id = $mailbox AND received_at < $cutoff
+                            ORDER BY rowid LIMIT 500
+                        );
+                        """;
+                    threads.Parameters.AddWithValue("$mailbox", mailboxId);
+                    threads.Parameters.AddWithValue("$cutoff", cutoff.ToString("O", CultureInfo.InvariantCulture));
+                    await threads.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                }
+                await using var messages = connection.CreateCommand();
+                messages.Transaction = transaction;
+                messages.CommandText = """
+                    DELETE FROM messages WHERE rowid IN (
+                        SELECT rowid FROM messages
+                        WHERE mailbox_id = $mailbox AND received_at < $cutoff
+                        ORDER BY rowid LIMIT 500
+                    );
+                    """;
+                messages.Parameters.AddWithValue("$mailbox", mailboxId);
+                messages.Parameters.AddWithValue("$cutoff", cutoff.ToString("O", CultureInfo.InvariantCulture));
+                var count = await messages.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return count;
+            }, cancellationToken).ConfigureAwait(false);
+            deleted += batch;
+            if (batch < 500)
+            {
+                return deleted;
+            }
+            await Task.Yield();
+        }
+    }
     public async Task<MailMessage?> GetMessageAsync(
         string mailboxId,
         string providerMessageId,
@@ -350,6 +467,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         (await QueryMessagesAsync(
             "WHERE mailbox_id = $mailbox AND provider_id = $provider",
             1,
+            true,
             cancellationToken,
             ("$mailbox", mailboxId),
             ("$provider", providerMessageId)).ConfigureAwait(false)).SingleOrDefault();
@@ -388,8 +506,11 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         var ftsQuery = string.Join(' ', query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(static term => $"\"{term.Replace("\"", "\"\"")}\"*"));
         return QueryMessagesAsync(
-            "WHERE rowid IN (SELECT rowid FROM message_search WHERE message_search MATCH $query)",
+            _optimizedSearch
+                ? "WHERE rowid IN (SELECT rowid FROM message_search_v2 WHERE message_search_v2 MATCH $query)"
+                : "WHERE rowid IN (SELECT rowid FROM message_search WHERE message_search MATCH $query UNION SELECT rowid FROM message_search_v2 WHERE message_search_v2 MATCH $query)",
             limit,
+            false,
             cancellationToken,
             ("$query", ftsQuery));
     }
@@ -400,6 +521,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         QueryMessagesAsync(
             "WHERE EXISTS (SELECT 1 FROM message_threads thread WHERE thread.mailbox_id = messages.mailbox_id AND thread.provider_id = messages.provider_id AND thread.thread_id = $thread)",
             1000,
+            true,
             cancellationToken,
             ("$thread", threadId));
 
@@ -411,31 +533,34 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         {
             var groups = new List<(string Email, string Name, string MailboxId, int Count, DateTimeOffset Last)>();
             await using var command = connection.CreateCommand();
-            command.CommandText = """
-                WITH correspondents(email, display_name, mailbox_id, contacted_at) AS (
-                    SELECT lower(trim(from_address)), trim(from_name), mailbox_id, received_at
-                    FROM messages
-                    UNION ALL
-                    SELECT lower(trim(json_extract(recipient.value, '$.Address'))),
-                           trim(json_extract(recipient.value, '$.Name')),
-                           messages.mailbox_id,
-                           messages.received_at
-                    FROM messages, json_each(messages.recipients_json) AS recipient
-                    UNION ALL
-                    SELECT lower(trim(json_extract(recipient.value, '$.Address'))),
-                           trim(json_extract(recipient.value, '$.Name')),
-                           messages.mailbox_id,
-                           messages.received_at
-                    FROM messages, json_each(messages.cc_recipients_json) AS recipient
-                )
-                SELECT email, display_name, mailbox_id, count(*), max(contacted_at)
-                FROM correspondents
-                WHERE email <> ''
-                  AND instr(email, '@') > 1
-                  AND ($query = '' OR email LIKE $pattern OR display_name LIKE $pattern)
-                GROUP BY email, display_name, mailbox_id
-                ORDER BY max(contacted_at) DESC;
-                """;
+            command.CommandText = _correspondentsReady
+                ? """
+                    SELECT email, display_name, mailbox_id, count(*), max(contacted_at)
+                    FROM message_correspondents
+                    WHERE instr(email, '@') > 1
+                      AND ($query = '' OR email LIKE $pattern OR display_name LIKE $pattern)
+                    GROUP BY email, display_name, mailbox_id
+                    ORDER BY max(contacted_at) DESC;
+                    """
+                : """
+                    WITH correspondents(email, display_name, mailbox_id, contacted_at) AS (
+                        SELECT lower(trim(from_address)), trim(from_name), mailbox_id, received_at FROM messages
+                        UNION ALL
+                        SELECT lower(trim(json_extract(recipient.value, '$.Address'))),
+                               trim(json_extract(recipient.value, '$.Name')), messages.mailbox_id, messages.received_at
+                        FROM messages, json_each(messages.recipients_json) AS recipient
+                        UNION ALL
+                        SELECT lower(trim(json_extract(recipient.value, '$.Address'))),
+                               trim(json_extract(recipient.value, '$.Name')), messages.mailbox_id, messages.received_at
+                        FROM messages, json_each(messages.cc_recipients_json) AS recipient
+                    )
+                    SELECT email, display_name, mailbox_id, count(*), max(contacted_at)
+                    FROM correspondents
+                    WHERE email <> '' AND instr(email, '@') > 1
+                      AND ($query = '' OR email LIKE $pattern OR display_name LIKE $pattern)
+                    GROUP BY email, display_name, mailbox_id
+                    ORDER BY max(contacted_at) DESC;
+                    """;
             command.Parameters.AddWithValue("$query", query.Trim());
             command.Parameters.AddWithValue("$pattern", $"%{query.Trim()}%");
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -889,6 +1014,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
     private Task<IReadOnlyList<MailMessage>> QueryMessagesAsync(
         string where,
         int limit,
+        bool includeBody,
         CancellationToken cancellationToken,
         params (string Name, object Value)[] parameters) => WithLockAsync<IReadOnlyList<MailMessage>>(async connection =>
     {
@@ -896,11 +1022,11 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
             SELECT mailbox_id, provider_id, conversation_id, internet_message_id, folder_id, subject,
-                   from_name, from_address, recipients_json, received_at, preview, body, is_html,
+                   from_name, from_address, recipients_json, received_at, preview, {(includeBody ? "body" : "NULL")}, is_html,
                    is_read, has_attachments, importance, categories_json, etag, is_flagged,
-                   cc_recipients_json
+                   cc_recipients_json, {(includeBody ? "body_blob" : "NULL")}
             FROM messages {where}
-            ORDER BY received_at DESC LIMIT $limit;
+            ORDER BY received_at DESC, rowid DESC LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 10000));
         foreach (var parameter in parameters)
@@ -922,7 +1048,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await action(GetConnection()).ConfigureAwait(false);
+            await Task.Run(() => action(GetConnection()), cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -935,7 +1061,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            return await action(GetConnection()).ConfigureAwait(false);
+            return await Task.Run(() => action(GetConnection()), cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -1135,12 +1261,12 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         command.CommandText = """
             INSERT INTO messages(
                 mailbox_id, provider_id, conversation_id, internet_message_id, folder_id, subject,
-                from_name, from_address, recipients_json, received_at, preview, body, is_html,
+                from_name, from_address, recipients_json, received_at, preview, body, body_blob, is_html,
                 is_read, has_attachments, importance, categories_json, etag, is_flagged,
                 cc_recipients_json)
             VALUES(
                 $mailbox, $provider, $conversation, $internet, $folder, $subject,
-                $fromName, $fromAddress, $recipients, $received, $preview, $body, $isHtml,
+                $fromName, $fromAddress, $recipients, $received, $preview, $body, $bodyBlob, $isHtml,
                 $isRead, $attachments, $importance, $categories, $etag, $flagged, $ccRecipients)
             ON CONFLICT(mailbox_id, provider_id) DO UPDATE SET
                 conversation_id = excluded.conversation_id,
@@ -1156,7 +1282,8 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                 END,
                 received_at = excluded.received_at,
                 preview = excluded.preview,
-                body = COALESCE(excluded.body, messages.body),
+                body = CASE WHEN excluded.body_blob IS NULL THEN messages.body ELSE NULL END,
+                body_blob = COALESCE(excluded.body_blob, messages.body_blob),
                 is_html = excluded.is_html,
                 is_read = excluded.is_read,
                 has_attachments = excluded.has_attachments,
@@ -1178,7 +1305,8 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         command.Parameters.AddWithValue("$hasCcRecipients", message.Cc is not null);
         command.Parameters.AddWithValue("$received", message.ReceivedAt.ToString("O", CultureInfo.InvariantCulture));
         command.Parameters.AddWithValue("$preview", message.Preview);
-        command.Parameters.AddWithValue("$body", (object?)message.Body ?? DBNull.Value);
+        command.Parameters.AddWithValue("$body", DBNull.Value);
+        command.Parameters.AddWithValue("$bodyBlob", (object?)EncodeBody(message.Body) ?? DBNull.Value);
         command.Parameters.AddWithValue("$isHtml", message.IsHtml);
         command.Parameters.AddWithValue("$isRead", message.IsRead);
         command.Parameters.AddWithValue("$attachments", message.HasAttachments);
@@ -1215,7 +1343,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         JsonSerializer.Deserialize<List<MailAddress>>(reader.GetString(8)) ?? [],
         DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
         reader.GetString(10),
-        reader.IsDBNull(11) ? null : reader.GetString(11),
+        reader.IsDBNull(11) ? DecodeBody(reader.IsDBNull(20) ? null : (byte[])reader[20]) : reader.GetString(11),
         reader.GetBoolean(12),
         reader.GetBoolean(13),
         reader.GetBoolean(14),
@@ -1225,6 +1353,249 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         reader.GetBoolean(18),
         Cc: JsonSerializer.Deserialize<List<MailAddress>>(reader.GetString(19)) ?? []);
 
+
+
+    public Task<bool> VacuumIfUsefulAsync(CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            static async Task<long> PragmaAsync(
+                SqliteConnection connection,
+                string pragma,
+                CancellationToken cancellationToken)
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = pragma;
+                return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
+            }
+
+            var pageSize = await PragmaAsync(connection, "PRAGMA page_size;", cancellationToken).ConfigureAwait(false);
+            var pageCount = await PragmaAsync(connection, "PRAGMA page_count;", cancellationToken).ConfigureAwait(false);
+            var freePages = await PragmaAsync(connection, "PRAGMA freelist_count;", cancellationToken).ConfigureAwait(false);
+            var reclaimable = pageSize * freePages;
+            if (reclaimable < 64L * 1024 * 1024 && freePages * 10 < pageCount)
+            {
+                return false;
+            }
+
+            var database = new FileInfo(Path.GetFullPath(databasePath));
+            var root = Path.GetPathRoot(database.FullName);
+            if (root is null || new DriveInfo(root).AvailableFreeSpace < database.Length * 2)
+            {
+                return false;
+            }
+
+            await ExecuteAsync(connection, "PRAGMA wal_checkpoint(TRUNCATE);", cancellationToken).ConfigureAwait(false);
+            await ExecuteAsync(connection, "VACUUM;", cancellationToken).ConfigureAwait(false);
+            return true;
+        }, cancellationToken);
+    public Task<bool> RunMaintenanceBatchAsync(CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            if (!_optimizedSearch)
+            {
+                var cursor = await MigrationCursorAsync(connection, "message-search-v2", cancellationToken).ConfigureAwait(false);
+                await using var nextCommand = connection.CreateCommand();
+                nextCommand.CommandText = """
+                    SELECT max(rowid) FROM (
+                        SELECT rowid FROM messages WHERE rowid > $cursor ORDER BY rowid LIMIT 250
+                    );
+                    """;
+                nextCommand.Parameters.AddWithValue("$cursor", cursor);
+                var nextValue = await nextCommand.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+                if (nextValue is not long next)
+                {
+                    await ExecuteAsync(connection, """
+                        INSERT INTO store_migrations(name, cursor, completed)
+                        VALUES('message-search-v2', 0, 1)
+                        ON CONFLICT(name) DO UPDATE SET completed = 1;
+                        DROP TRIGGER IF EXISTS messages_ai;
+                        DROP TRIGGER IF EXISTS messages_ad;
+                        DROP TRIGGER IF EXISTS messages_au;
+                        DROP TABLE IF EXISTS message_search;
+                        """, cancellationToken).ConfigureAwait(false);
+                    _optimizedSearch = true;
+                    return true;
+                }
+
+                await using var migrate = connection.CreateCommand();
+                migrate.CommandText = """
+                    INSERT OR REPLACE INTO message_search_v2(
+                        rowid, subject, from_name, from_address, preview, body)
+                    SELECT rowid, subject, from_name, from_address, preview,
+                           coalesce(body, decode_body(body_blob))
+                    FROM messages WHERE rowid > $cursor AND rowid <= $next;
+                    INSERT INTO store_migrations(name, cursor, completed)
+                    VALUES('message-search-v2', $next, 0)
+                    ON CONFLICT(name) DO UPDATE SET cursor = excluded.cursor;
+                    """;
+                migrate.Parameters.AddWithValue("$cursor", cursor);
+                migrate.Parameters.AddWithValue("$next", next);
+                await migrate.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                return true;
+            }
+
+
+            if (!_correspondentsReady)
+            {
+                var cursor = await MigrationCursorAsync(connection, "message-correspondents-v1", cancellationToken).ConfigureAwait(false);
+                await using var nextCommand = connection.CreateCommand();
+                nextCommand.CommandText = """
+                    SELECT max(rowid) FROM (
+                        SELECT rowid FROM messages WHERE rowid > $cursor ORDER BY rowid LIMIT 250
+                    );
+                    """;
+                nextCommand.Parameters.AddWithValue("$cursor", cursor);
+                var nextValue = await nextCommand.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+                if (nextValue is not long next)
+                {
+                    await ExecuteAsync(connection, """
+                        INSERT INTO store_migrations(name, cursor, completed)
+                        VALUES('message-correspondents-v1', 0, 1)
+                        ON CONFLICT(name) DO UPDATE SET completed = 1;
+                        """, cancellationToken).ConfigureAwait(false);
+                    _correspondentsReady = true;
+                    return true;
+                }
+
+                await using var migrate = connection.CreateCommand();
+                migrate.CommandText = """
+                    INSERT OR IGNORE INTO message_correspondents
+                    SELECT rowid, mailbox_id, lower(trim(from_address)), trim(from_name), received_at
+                    FROM messages
+                    WHERE rowid > $cursor AND rowid <= $next AND trim(from_address) <> '';
+                    INSERT OR IGNORE INTO message_correspondents
+                    SELECT messages.rowid, messages.mailbox_id,
+                           lower(trim(json_extract(recipient.value, '$.Address'))),
+                           trim(coalesce(json_extract(recipient.value, '$.Name'), '')), messages.received_at
+                    FROM messages, json_each(messages.recipients_json) AS recipient
+                    WHERE messages.rowid > $cursor AND messages.rowid <= $next
+                      AND trim(coalesce(json_extract(recipient.value, '$.Address'), '')) <> '';
+                    INSERT OR IGNORE INTO message_correspondents
+                    SELECT messages.rowid, messages.mailbox_id,
+                           lower(trim(json_extract(recipient.value, '$.Address'))),
+                           trim(coalesce(json_extract(recipient.value, '$.Name'), '')), messages.received_at
+                    FROM messages, json_each(messages.cc_recipients_json) AS recipient
+                    WHERE messages.rowid > $cursor AND messages.rowid <= $next
+                      AND trim(coalesce(json_extract(recipient.value, '$.Address'), '')) <> '';
+                    INSERT INTO store_migrations(name, cursor, completed)
+                    VALUES('message-correspondents-v1', $next, 0)
+                    ON CONFLICT(name) DO UPDATE SET cursor = excluded.cursor;
+                    """;
+                migrate.Parameters.AddWithValue("$cursor", cursor);
+                migrate.Parameters.AddWithValue("$next", next);
+                await migrate.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                return true;
+            }
+            if (await MigrationCompleteAsync(connection, "message-bodies-v1", cancellationToken).ConfigureAwait(false))
+            {
+                return false;
+            }
+
+            await using var compress = connection.CreateCommand();
+            compress.CommandText = """
+                UPDATE messages
+                SET body_blob = encode_body(body), body = NULL
+                WHERE rowid IN (
+                    SELECT rowid FROM messages WHERE body IS NOT NULL ORDER BY rowid LIMIT 100
+                );
+                """;
+            var changed = await compress.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            if (changed == 0)
+            {
+                await ExecuteAsync(connection, """
+                    INSERT INTO store_migrations(name, cursor, completed)
+                    VALUES('message-bodies-v1', 0, 1)
+                    ON CONFLICT(name) DO UPDATE SET completed = 1;
+                    """, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+            return true;
+        }, cancellationToken);
+
+    private static async Task RunOnceAsync(
+        SqliteConnection connection,
+        string name,
+        string sql,
+        CancellationToken cancellationToken)
+    {
+        if (await MigrationCompleteAsync(connection, name, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+        await ExecuteAsync(connection, sql, cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO store_migrations(name, cursor, completed) VALUES($name, 0, 1)
+            ON CONFLICT(name) DO UPDATE SET completed = 1;
+            """;
+        command.Parameters.AddWithValue("$name", name);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<bool> MigrationCompleteAsync(
+        SqliteConnection connection,
+        string name,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT completed FROM store_migrations WHERE name = $name;";
+        command.Parameters.AddWithValue("$name", name);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) ?? 0) == 1;
+    }
+
+    private static async Task<long> MigrationCursorAsync(
+        SqliteConnection connection,
+        string name,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT cursor FROM store_migrations WHERE name = $name;";
+        command.Parameters.AddWithValue("$name", name);
+        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) ?? 0);
+    }
+
+    private static byte[]? EncodeBody(string? body)
+    {
+        if (body is null)
+        {
+            return null;
+        }
+        var raw = Encoding.UTF8.GetBytes(body);
+        using var output = new MemoryStream();
+        output.WriteByte(1);
+        using (var compressor = new BrotliStream(output, CompressionLevel.Fastest, leaveOpen: true))
+        {
+            compressor.Write(raw);
+        }
+        if (output.Length < raw.Length + 1)
+        {
+            return output.ToArray();
+        }
+        var stored = new byte[raw.Length + 1];
+        raw.CopyTo(stored, 1);
+        return stored;
+    }
+
+    private static string? DecodeBody(byte[]? stored)
+    {
+        if (stored is null)
+        {
+            return null;
+        }
+        if (stored.Length == 0 || stored[0] == 0)
+        {
+            return Encoding.UTF8.GetString(stored.AsSpan(Math.Min(1, stored.Length)));
+        }
+        if (stored[0] != 1)
+        {
+            throw new InvalidDataException("Unknown cached mail body encoding.");
+        }
+        using var input = new MemoryStream(stored, 1, stored.Length - 1, writable: false);
+        using var decompressor = new BrotliStream(input, CompressionMode.Decompress);
+        using var output = new MemoryStream();
+        decompressor.CopyTo(output);
+        return Encoding.UTF8.GetString(output.GetBuffer(), 0, checked((int)output.Length));
+    }
     private static object FormatNullable(DateTimeOffset? value) =>
         value is null ? DBNull.Value : value.Value.ToString("O", CultureInfo.InvariantCulture);
 
@@ -1257,6 +1628,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             received_at TEXT NOT NULL,
             preview TEXT NOT NULL,
             body TEXT,
+            body_blob BLOB,
             is_html INTEGER NOT NULL,
             is_read INTEGER NOT NULL,
             has_attachments INTEGER NOT NULL,
@@ -1290,6 +1662,10 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
 
         CREATE INDEX IF NOT EXISTS messages_received_at ON messages(received_at DESC);
         CREATE INDEX IF NOT EXISTS messages_mailbox ON messages(mailbox_id, received_at DESC);
+        CREATE INDEX IF NOT EXISTS messages_folder
+            ON messages(mailbox_id, folder_id, received_at DESC, rowid DESC);
+        CREATE INDEX IF NOT EXISTS messages_counts
+            ON messages(mailbox_id, is_read, is_flagged);
 
         CREATE TABLE IF NOT EXISTS message_threads(
             thread_id TEXT NOT NULL,
@@ -1300,26 +1676,76 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         );
         CREATE INDEX IF NOT EXISTS message_threads_lookup ON message_threads(thread_id, received_at);
 
-        CREATE VIRTUAL TABLE IF NOT EXISTS message_search USING fts5(
+        CREATE VIRTUAL TABLE IF NOT EXISTS message_search_v2 USING fts5(
             subject, from_name, from_address, preview, body,
-            content='messages', content_rowid='rowid'
+            content='', contentless_delete=1
+        );
+        CREATE TRIGGER IF NOT EXISTS messages_v2_ai AFTER INSERT ON messages BEGIN
+            INSERT INTO message_search_v2(rowid, subject, from_name, from_address, preview, body)
+            VALUES (new.rowid, new.subject, new.from_name, new.from_address, new.preview,
+                    coalesce(new.body, decode_body(new.body_blob)));
+        END;
+        CREATE TRIGGER IF NOT EXISTS messages_v2_ad AFTER DELETE ON messages BEGIN
+            DELETE FROM message_search_v2 WHERE rowid = old.rowid;
+        END;
+        CREATE TRIGGER IF NOT EXISTS messages_v2_au AFTER UPDATE ON messages BEGIN
+            UPDATE message_search_v2
+            SET subject = new.subject,
+                from_name = new.from_name,
+                from_address = new.from_address,
+                preview = new.preview,
+                body = coalesce(new.body, decode_body(new.body_blob))
+            WHERE rowid = old.rowid;
+        END;
+
+        CREATE TABLE IF NOT EXISTS store_migrations(
+            name TEXT PRIMARY KEY,
+            cursor INTEGER NOT NULL DEFAULT 0,
+            completed INTEGER NOT NULL DEFAULT 0
         );
 
-        CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
-            INSERT INTO message_search(rowid, subject, from_name, from_address, preview, body)
-            VALUES (new.rowid, new.subject, new.from_name, new.from_address, new.preview, new.body);
-        END;
-        CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
-            INSERT INTO message_search(message_search, rowid, subject, from_name, from_address, preview, body)
-            VALUES ('delete', old.rowid, old.subject, old.from_name, old.from_address, old.preview, old.body);
-        END;
-        CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
-            INSERT INTO message_search(message_search, rowid, subject, from_name, from_address, preview, body)
-            VALUES ('delete', old.rowid, old.subject, old.from_name, old.from_address, old.preview, old.body);
-            INSERT INTO message_search(rowid, subject, from_name, from_address, preview, body)
-            VALUES (new.rowid, new.subject, new.from_name, new.from_address, new.preview, new.body);
-        END;
 
+        CREATE TABLE IF NOT EXISTS message_correspondents(
+            message_rowid INTEGER NOT NULL,
+            mailbox_id TEXT NOT NULL,
+            email TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            contacted_at TEXT NOT NULL,
+            PRIMARY KEY(message_rowid, email, display_name)
+        );
+        CREATE INDEX IF NOT EXISTS message_correspondents_lookup
+            ON message_correspondents(email, contacted_at DESC);
+        CREATE TRIGGER IF NOT EXISTS message_correspondents_ai AFTER INSERT ON messages BEGIN
+            INSERT OR IGNORE INTO message_correspondents
+            SELECT new.rowid, new.mailbox_id, lower(trim(new.from_address)), trim(new.from_name), new.received_at
+            WHERE trim(new.from_address) <> '';
+            INSERT OR IGNORE INTO message_correspondents
+            SELECT new.rowid, new.mailbox_id, lower(trim(json_extract(value, '$.Address'))),
+                   trim(coalesce(json_extract(value, '$.Name'), '')), new.received_at
+            FROM json_each(new.recipients_json) WHERE trim(coalesce(json_extract(value, '$.Address'), '')) <> '';
+            INSERT OR IGNORE INTO message_correspondents
+            SELECT new.rowid, new.mailbox_id, lower(trim(json_extract(value, '$.Address'))),
+                   trim(coalesce(json_extract(value, '$.Name'), '')), new.received_at
+            FROM json_each(new.cc_recipients_json) WHERE trim(coalesce(json_extract(value, '$.Address'), '')) <> '';
+        END;
+        CREATE TRIGGER IF NOT EXISTS message_correspondents_ad AFTER DELETE ON messages BEGIN
+            DELETE FROM message_correspondents WHERE message_rowid = old.rowid;
+        END;
+        CREATE TRIGGER IF NOT EXISTS message_correspondents_au
+        AFTER UPDATE OF mailbox_id, from_name, from_address, recipients_json, cc_recipients_json, received_at ON messages BEGIN
+            DELETE FROM message_correspondents WHERE message_rowid = old.rowid;
+            INSERT OR IGNORE INTO message_correspondents
+            SELECT new.rowid, new.mailbox_id, lower(trim(new.from_address)), trim(new.from_name), new.received_at
+            WHERE trim(new.from_address) <> '';
+            INSERT OR IGNORE INTO message_correspondents
+            SELECT new.rowid, new.mailbox_id, lower(trim(json_extract(value, '$.Address'))),
+                   trim(coalesce(json_extract(value, '$.Name'), '')), new.received_at
+            FROM json_each(new.recipients_json) WHERE trim(coalesce(json_extract(value, '$.Address'), '')) <> '';
+            INSERT OR IGNORE INTO message_correspondents
+            SELECT new.rowid, new.mailbox_id, lower(trim(json_extract(value, '$.Address'))),
+                   trim(coalesce(json_extract(value, '$.Name'), '')), new.received_at
+            FROM json_each(new.cc_recipients_json) WHERE trim(coalesce(json_extract(value, '$.Address'), '')) <> '';
+        END;
         CREATE TABLE IF NOT EXISTS sync_cursors(
             mailbox_id TEXT PRIMARY KEY,
             cursor TEXT NOT NULL,
@@ -1388,6 +1814,27 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         CREATE INDEX IF NOT EXISTS local_drafts_updated_at ON local_drafts(updated_at DESC);
         """;
 
+
+    private const string LegacySearchSchema = """
+        CREATE VIRTUAL TABLE IF NOT EXISTS message_search USING fts5(
+            subject, from_name, from_address, preview, body,
+            content='messages', content_rowid='rowid'
+        );
+        CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+            INSERT INTO message_search(rowid, subject, from_name, from_address, preview, body)
+            VALUES (new.rowid, new.subject, new.from_name, new.from_address, new.preview, new.body);
+        END;
+        CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+            INSERT INTO message_search(message_search, rowid, subject, from_name, from_address, preview, body)
+            VALUES ('delete', old.rowid, old.subject, old.from_name, old.from_address, old.preview, old.body);
+        END;
+        CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+            INSERT INTO message_search(message_search, rowid, subject, from_name, from_address, preview, body)
+            VALUES ('delete', old.rowid, old.subject, old.from_name, old.from_address, old.preview, old.body);
+            INSERT INTO message_search(rowid, subject, from_name, from_address, preview, body)
+            VALUES (new.rowid, new.subject, new.from_name, new.from_address, new.preview, new.body);
+        END;
+        """;
     private const string BackfillThreadIndex = """
         INSERT OR IGNORE INTO message_threads(thread_id, mailbox_id, provider_id, received_at)
         SELECT mailbox_id || CASE

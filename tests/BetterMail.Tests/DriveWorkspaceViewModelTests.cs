@@ -43,6 +43,20 @@ public sealed class DriveWorkspaceViewModelTests
         Assert.Single(viewModel.CurrentItems);
         Assert.Equal("nested.txt", viewModel.CurrentItems[0].Item.Name);
 
+        viewModel.GoUpCommand.Execute(null);
+        await WaitUntilAsync(() => ReferenceEquals(viewModel.SelectedDirectory, goodRoot), cancellationToken);
+        Assert.False(viewModel.CanGoUp);
+
+        viewModel.SelectDirectoryCommand.Execute(projects);
+        await WaitUntilAsync(() => ReferenceEquals(viewModel.SelectedDirectory, projects), cancellationToken);
+        Assert.True(viewModel.CanGoUp);
+
+        viewModel.GridViewCommand.Execute(null);
+        await WaitUntilAsync(() => viewModel.IsGridView, cancellationToken);
+        Assert.False(viewModel.IsListView);
+        viewModel.ListViewCommand.Execute(null);
+        await WaitUntilAsync(() => viewModel.IsListView, cancellationToken);
+
         await viewModel.SelectDirectoryAsync(viewModel.Roots[1], cancellationToken);
         Assert.Contains(viewModel.LoadIssues, issue => issue.Contains(bad.EmailAddress));
         Assert.True(goodRoot.IsLoaded);

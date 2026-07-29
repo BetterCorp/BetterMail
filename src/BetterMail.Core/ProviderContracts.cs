@@ -413,6 +413,14 @@ public interface IMailStore : IAsyncDisposable
     Task<IReadOnlyList<MailMessage>> SearchAsync(string query, int limit = 5000, CancellationToken cancellationToken = default);
 }
 
+public sealed record MailFolderKey(string MailboxId, string FolderId);
+
+public sealed record MailPageCursor(DateTimeOffset ReceivedAt, long RowId);
+
+public sealed record MailPage(
+    IReadOnlyList<MailMessage> Messages,
+    MailPageCursor? NextCursor);
+
 public interface IDraftStore
 {
     Task SaveLocalDraftAsync(LocalDraft draft, CancellationToken cancellationToken = default);

@@ -325,6 +325,57 @@ public sealed class EncryptedMailStoreTests
         Directory.Delete(directory, recursive: true);
     }
 
+
+    [Fact]
+    public async Task PagesCompressesSearchesAndPrunesOnlyOldLocalMessages()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-large-cache-{Guid.NewGuid():N}");
+        var mailbox = new Mailbox("account", "person@example.com", "Person");
+        var now = DateTimeOffset.UtcNow;
+        await using (var store = new EncryptedMailStore(
+            Path.Combine(directory, "mail.db"),
+            Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))))
+        {
+            await store.InitializeAsync(cancellationToken);
+            await store.ApplySyncPageAsync("cursor", new MailSyncPage(
+            [
+                Message(mailbox.Id, "old", "Old", string.Concat(Enumerable.Repeat("compressible platypus body ", 200)))
+                    with { ReceivedAt = now.AddYears(-1) },
+                Message(mailbox.Id, "new-a", "New A", "Current searchable body")
+                    with { ReceivedAt = now.AddDays(-1) },
+                Message(mailbox.Id, "new-b", "New B", "Another current body")
+                    with { ReceivedAt = now.AddDays(-1) }
+            ], null, false), cancellationToken);
+
+            var first = await store.GetMessagesPageAsync([], pageSize: 2, cancellationToken: cancellationToken);
+            Assert.Equal(2, first.Messages.Count);
+            Assert.All(first.Messages, static message => Assert.Null(message.Body));
+            Assert.NotNull(first.NextCursor);
+            var second = await store.GetMessagesPageAsync([], first.NextCursor, 2, cancellationToken);
+            Assert.Single(second.Messages);
+            Assert.Empty(first.Messages.Select(static message => message.ProviderId)
+                .Intersect(second.Messages.Select(static message => message.ProviderId)));
+
+            Assert.Contains("platypus", (await store.GetMessageAsync(mailbox.Id, "old", cancellationToken))!.Body);
+            var search = Assert.Single(await store.SearchAsync("platypus", cancellationToken: cancellationToken));
+            Assert.Null(search.Body);
+
+            for (var batch = 0; batch < 20 && await store.RunMaintenanceBatchAsync(cancellationToken); batch++)
+            {
+            }
+            Assert.Contains("platypus", (await store.GetMessageAsync(mailbox.Id, "old", cancellationToken))!.Body);
+            Assert.Single(await store.SearchAsync("platypus", cancellationToken: cancellationToken));
+            Assert.Contains(await store.GetDiscoveredPeopleAsync("sender", cancellationToken: cancellationToken),
+                person => person.EmailAddress == "sender@example.com");
+
+            Assert.Equal(1, await store.PruneMessagesBeforeAsync(mailbox.Id, now.AddMonths(-6), cancellationToken));
+            Assert.Null(await store.GetMessageAsync(mailbox.Id, "old", cancellationToken));
+            Assert.Empty(await store.SearchAsync("platypus", cancellationToken: cancellationToken));
+            Assert.Equal(2, (await store.GetMessagesAsync(cancellationToken: cancellationToken)).Count);
+        }
+        Directory.Delete(directory, recursive: true);
+    }
     private static MailMessage Message(string mailboxId, string id, string subject, string body) => new(
         mailboxId,
         id,

@@ -30,6 +30,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         new("more", "More actions", "\u22EF", IsMore: true)
     ];
     private static readonly string[] DefaultMailQuickActionIds = ["read", "flag", "archive", "delete"];
+    private static readonly string[] GlobalSearchCategoryOrder =
+        ["Mail", "People", "Calendar", "To Do", "OneDrive", "Notes"];
 
     private readonly EncryptedMailStore? _store;
     private readonly string _dataDirectory;
@@ -61,6 +63,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _isSyncing;
     private int _syncRunning;
     private int _workspaceSyncRunning;
+    private int _storageMaintenanceRunning;
     private DateTimeOffset _lastWorkspaceSyncAt = DateTimeOffset.MinValue;
     private bool _isMailActionRunning;
     private string _mailActionStatus = "";
@@ -116,6 +119,9 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _isLoadingMailStatistics;
     private int _errorVersion;
     private bool _isReplacingSelectedMessage;
+    private MailPageCursor? _messagePageCursor;
+    private IReadOnlyList<MailFolderKey> _messagePageFolders = [];
+    private bool _isLoadingMoreMessages;
 
     internal string DataDirectory => _dataDirectory;
     internal string MailListContextKey => IsSearchResultsView
@@ -169,6 +175,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         RefreshWorkspaceCommand = new AsyncCommand(RefreshWorkspaceAsync, CanOpenWorkspaceModule);
         SearchWorkspaceCommand = new AsyncCommand(RefreshWorkspaceAsync, CanOpenWorkspaceModule);
         SelectFolderCommand = new AsyncCommand<MailFolderItem>(SelectFolderAsync);
+        LoadMoreMessagesCommand = new AsyncCommand(LoadMoreMessagesAsync, () => HasMoreMessages && !_isLoadingMoreMessages);
         SearchCommand = new AsyncCommand(() => StartGlobalSearchAsync(debounce: false, forceOpen: true), () => _store is not null);
         OpenGlobalSearchResultCommand = new AsyncCommand<GlobalSearchResult>(OpenGlobalSearchResultAsync);
         OpenGlobalSearchGroupCommand = new AsyncCommand<GlobalSearchResult>(OpenGlobalSearchGroupAsync);
@@ -318,6 +325,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ICommand RefreshWorkspaceCommand { get; }
     public ICommand SearchWorkspaceCommand { get; }
     public ICommand SelectFolderCommand { get; }
+    public ICommand LoadMoreMessagesCommand { get; }
     public ICommand SearchCommand { get; }
     public ICommand OpenGlobalSearchResultCommand { get; }
     public ICommand OpenGlobalSearchGroupCommand { get; }
@@ -574,6 +582,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public bool ShowEmptyState => IsMessageListView && Messages.Count == 0 && !IsBusy;
     public bool ShowDraftEmptyState => IsDraftsView && Drafts.Count == 0;
     public string MessageCountText => $"{Messages.Count:N0} messages";
+    public bool HasMoreMessages => _messagePageCursor is not null && !IsSearchResultsView;
     public string CurrentItemCountText => IsDraftsView
         ? $"{Drafts.Count:N0} draft{(Drafts.Count == 1 ? "" : "s")}"
         : MessageCountText;
@@ -694,6 +703,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             RaisePropertyChanged(nameof(ShowMessageBody));
             RaisePropertyChanged(nameof(ShowMailSurface));
             RaisePropertyChanged(nameof(ShowWorkspaceSurface));
+            ReorderGlobalSearchResults();
             ((AsyncCommand)ReplyCommand).Refresh();
             ((AsyncCommand)ReplyAllCommand).Refresh();
             ((AsyncCommand)ForwardCommand).Refresh();
@@ -1508,6 +1518,67 @@ public sealed class MainWindowViewModel : ViewModelBase
             Interlocked.Exchange(ref _syncRunning, 0);
             IsSyncing = false;
             await animation;
+            _ = RunStorageMaintenanceAsync();
+        }
+    }
+
+
+    private async Task RunStorageMaintenanceAsync()
+    {
+        if (_store is null || Interlocked.CompareExchange(ref _storageMaintenanceRunning, 1, 0) != 0)
+        {
+            return;
+        }
+        try
+        {
+            while (await _store.RunMaintenanceBatchAsync())
+            {
+                await Task.Delay(50);
+            }
+            if (WindowsSessionLock.IsLocked())
+            {
+                using var vacuumCancellation = new CancellationTokenSource();
+                var unlockWatcher = CancelVacuumWhenUnlockedAsync(vacuumCancellation);
+                try
+                {
+                    await _store.VacuumIfUsefulAsync(vacuumCancellation.Token);
+                }
+                catch (OperationCanceledException) when (!WindowsSessionLock.IsLocked())
+                {
+                    // The user returned; interactive database work takes priority.
+                }
+                finally
+                {
+                    vacuumCancellation.Cancel();
+                    await unlockWatcher;
+                }
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Error = $"Storage optimization paused: {exception.Message}";
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _storageMaintenanceRunning, 0);
+        }
+    }
+
+    private static async Task CancelVacuumWhenUnlockedAsync(CancellationTokenSource cancellation)
+    {
+        try
+        {
+            while (!cancellation.IsCancellationRequested && WindowsSessionLock.IsLocked())
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellation.Token);
+            }
+            if (!cancellation.IsCancellationRequested)
+            {
+                cancellation.Cancel();
+            }
+        }
+        catch (OperationCanceledException)
+        {
         }
     }
 
@@ -1697,13 +1768,13 @@ public sealed class MainWindowViewModel : ViewModelBase
                     {
                         _newMailNotifications.Prime(
                             notificationContext,
-                            await _store.GetMessagesAsync(mailbox.Id, folder.ProviderId));
+                            await GetInboxSnapshotAsync(mailbox.Id, folder.ProviderId));
                     }
                 }
                 await engine.SyncFolderAsync(account, mailbox, folder, MailSyncHistoryDays);
                 if (notificationContext is not null)
                 {
-                    var synced = await _store.GetMessagesAsync(mailbox.Id, folder.ProviderId);
+                    var synced = await GetInboxSnapshotAsync(mailbox.Id, folder.ProviderId);
                     if (notifyThisCycle)
                     {
                         _newMailNotifications.Observe(
@@ -1717,8 +1788,17 @@ public sealed class MainWindowViewModel : ViewModelBase
                     }
                 }
             }
+            if (MailSyncHistoryDays > 0)
+            {
+                await _store.PruneMessagesBeforeAsync(
+                    mailbox.Id,
+                    DateTimeOffset.UtcNow.AddDays(-MailSyncHistoryDays));
+            }
         }
     }
+
+    private async Task<IReadOnlyList<MailMessage>> GetInboxSnapshotAsync(string mailboxId, string folderId) =>
+        (await _store!.GetMessagesPageAsync([new(mailboxId, folderId)], pageSize: 500)).Messages;
 
     private async Task<IReadOnlyList<string>> ReconcileAllDraftsAsync()
     {
@@ -1816,7 +1896,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             var context = new InboxNotificationContext(account, mailbox, folder.Folder);
             _newMailNotifications.Prime(
                 context,
-                await _store.GetMessagesAsync(mailbox.Id, folder.ProviderId));
+                await GetInboxSnapshotAsync(mailbox.Id, folder.ProviderId));
         }
     }
 
@@ -1856,7 +1936,7 @@ public sealed class MainWindowViewModel : ViewModelBase
                 var context = new InboxNotificationContext(account, mailbox, folder);
                 _newMailNotifications.Prime(
                     context,
-                    await _store.GetMessagesAsync(mailbox.Id, folder.ProviderId));
+                    await GetInboxSnapshotAsync(mailbox.Id, folder.ProviderId));
             }
         }
         await LoadFoldersAsync();
@@ -1973,21 +2053,12 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             return;
         }
-        var startsCategory = true;
-        string? previousAccountGroup = null;
         foreach (var result in results
-            .Select(result => result with { AccountGroup = SearchGroupFor(result.Value) })
-            .OrderBy(static result => result.AccountGroup, StringComparer.OrdinalIgnoreCase))
+            .Select(result => result with { AccountGroup = SearchGroupFor(result.Value) }))
         {
-            var startsAccountGroup = !string.Equals(previousAccountGroup, result.AccountGroup, StringComparison.OrdinalIgnoreCase);
-            GlobalSearchResults.Add(result with
-            {
-                StartsCategory = startsCategory,
-                StartsAccountGroup = startsAccountGroup
-            });
-            startsCategory = false;
-            previousAccountGroup = result.AccountGroup;
+            GlobalSearchResults.Add(result);
         }
+        ReorderGlobalSearchResults();
     }
 
     private async Task<IReadOnlyList<GlobalSearchResult>> SearchCachedMailGloballyAsync(
@@ -2105,10 +2176,6 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void ReplaceGlobalMailSearchResults(IEnumerable<MailMessage> messages)
     {
-        var insertionIndex = GlobalSearchResults
-            .Select((result, index) => (result, index))
-            .FirstOrDefault(static item => item.result.Category == "Mail")
-            .index;
         for (var index = GlobalSearchResults.Count - 1; index >= 0; index--)
         {
             if (GlobalSearchResults[index].Category == "Mail")
@@ -2117,26 +2184,55 @@ public sealed class MainWindowViewModel : ViewModelBase
             }
         }
 
-        var startsCategory = true;
-        string? previousAccountGroup = null;
         foreach (var result in messages
             .Select(message => new GlobalSearchResult(
                 "Mail", message.Subject, MailSearchSubtitle(message), "Mail", message))
-            .Select(result => result with { AccountGroup = SearchGroupFor(result.Value) })
-            .OrderBy(static result => result.AccountGroup, StringComparer.OrdinalIgnoreCase))
+            .Select(result => result with { AccountGroup = SearchGroupFor(result.Value) }))
         {
-            var startsAccountGroup = !string.Equals(
-                previousAccountGroup,
-                result.AccountGroup,
-                StringComparison.OrdinalIgnoreCase);
-            GlobalSearchResults.Insert(insertionIndex++, result with
-            {
-                StartsCategory = startsCategory,
-                StartsAccountGroup = startsAccountGroup
-            });
-            startsCategory = false;
-            previousAccountGroup = result.AccountGroup;
+            GlobalSearchResults.Add(result);
         }
+        ReorderGlobalSearchResults();
+    }
+
+    private void ReorderGlobalSearchResults()
+    {
+        if (GlobalSearchResults.Count == 0)
+        {
+            return;
+        }
+
+        string? previousCategory = null;
+        string? previousAccountGroup = null;
+        var ordered = GlobalSearchResults
+            .OrderBy(result => SearchCategoryRank(ActiveModule, result.Category))
+            .ThenBy(static result => result.AccountGroup, StringComparer.OrdinalIgnoreCase)
+            .Select(result =>
+            {
+                var startsCategory = !string.Equals(
+                    previousCategory, result.Category, StringComparison.OrdinalIgnoreCase);
+                var startsAccountGroup = startsCategory || !string.Equals(
+                    previousAccountGroup, result.AccountGroup, StringComparison.OrdinalIgnoreCase);
+                previousCategory = result.Category;
+                previousAccountGroup = result.AccountGroup;
+                return result with
+                {
+                    StartsCategory = startsCategory,
+                    StartsAccountGroup = startsAccountGroup
+                };
+            })
+            .ToArray();
+        Replace(GlobalSearchResults, ordered);
+    }
+
+    internal static int SearchCategoryRank(string activeModule, string category)
+    {
+        if (string.Equals(activeModule, category, StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+        var rank = Array.FindIndex(GlobalSearchCategoryOrder, candidate =>
+            string.Equals(candidate, category, StringComparison.OrdinalIgnoreCase));
+        return rank < 0 ? int.MaxValue : rank + 1;
     }
 
     private async Task<IReadOnlyList<GlobalSearchResult>> SearchPeopleGloballyAsync(
@@ -2633,33 +2729,49 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
         if (IsSearchResultsView && SearchText.Trim().Length >= 2)
         {
+            _messagePageCursor = null;
             await SearchCachedMailGloballyAsync(SearchText.Trim(), CancellationToken.None);
             ReconcileMessages(_latestMailSearchResults);
             RaiseMessageState();
+            RaisePropertyChanged(nameof(HasMoreMessages));
             return;
         }
 
-        IReadOnlyList<MailMessage> messages;
-        if (_selectedFolder is not null)
-        {
-            messages = await _store.GetMessagesAsync(_selectedFolder.MailboxId, _selectedFolder.ProviderId);
-        }
-        else
-        {
-            var inboxes = Folders.Where(static folder => folder.WellKnownName == "inbox").ToArray();
-            messages = inboxes.Length == 0
-                ? await _store.GetMessagesAsync()
-                : (await Task.WhenAll(inboxes.Select(folder =>
-                    _store.GetMessagesAsync(folder.MailboxId, folder.ProviderId))))
-                    .SelectMany(static messages => messages)
-                    .OrderByDescending(static message => message.ReceivedAt)
-                    .Take(5000)
-                    .ToArray();
-        }
-
-        ReconcileMessages(messages);
+        _messagePageFolders = _selectedFolder is not null
+            ? [new(_selectedFolder.MailboxId, _selectedFolder.ProviderId)]
+            : Folders.Where(static folder => folder.WellKnownName == "inbox")
+                .Select(static folder => new MailFolderKey(folder.MailboxId, folder.ProviderId))
+                .ToArray();
+        var page = await _store.GetMessagesPageAsync(_messagePageFolders);
+        _messagePageCursor = page.NextCursor;
+        ReconcileMessages(page.Messages);
         RaiseMessageState();
-        _ = RepairMissingSubjectsAsync(messages);
+        RaisePropertyChanged(nameof(HasMoreMessages));
+        ((AsyncCommand)LoadMoreMessagesCommand).Refresh();
+        _ = RepairMissingSubjectsAsync(page.Messages);
+    }
+
+    private async Task LoadMoreMessagesAsync()
+    {
+        if (_store is null || _messagePageCursor is null || _isLoadingMoreMessages)
+        {
+            return;
+        }
+        _isLoadingMoreMessages = true;
+        ((AsyncCommand)LoadMoreMessagesCommand).Refresh();
+        try
+        {
+            var page = await _store.GetMessagesPageAsync(_messagePageFolders, _messagePageCursor);
+            _messagePageCursor = page.NextCursor;
+            ReconcileMessages(Messages.Concat(page.Messages).DistinctBy(MessageKey).ToArray());
+            RaiseMessageState();
+            RaisePropertyChanged(nameof(HasMoreMessages));
+        }
+        finally
+        {
+            _isLoadingMoreMessages = false;
+            ((AsyncCommand)LoadMoreMessagesCommand).Refresh();
+        }
     }
 
     private async Task RepairMissingSubjectsAsync(IEnumerable<MailMessage> messages)
@@ -2750,6 +2862,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         IsDraftsView = false;
         IsSearchResultsView = false;
         _selectedFolder = null;
+        Messages.Clear();
+        SelectedMessage = null;
         RaisePropertyChanged(nameof(CurrentFolderName));
         RaisePropertyChanged(nameof(IsUnifiedInbox));
         await LoadMessagesAsync();
@@ -2762,6 +2876,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         IsDraftsView = false;
         IsSearchResultsView = false;
         _selectedFolder = folder;
+        Messages.Clear();
+        SelectedMessage = null;
         RaisePropertyChanged(nameof(CurrentFolderName));
         RaisePropertyChanged(nameof(IsUnifiedInbox));
         await LoadMessagesAsync();
@@ -4581,13 +4697,18 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             var messages = (await _store.GetThreadMessagesAsync(
                     BetterMail.Core.ConversationThread.ThreadIdentity(selected), cancellationToken))
-                .Select(message => SameMessage(message, selected) ? selected : message)
                 .ToList();
             if (selectionVersion != _selectionVersion || !IsCurrentMessage(selected))
             {
                 return;
             }
-            if (messages.All(message => !SameMessage(message, selected)))
+            var hydrated = messages.FirstOrDefault(message => SameMessage(message, selected));
+            if (hydrated is not null)
+            {
+                selected = hydrated;
+                SelectedMessage = hydrated;
+            }
+            else
             {
                 messages.Add(selected);
             }

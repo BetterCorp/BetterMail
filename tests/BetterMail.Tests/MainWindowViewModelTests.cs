@@ -494,6 +494,9 @@ public sealed class MainWindowViewModelTests
             viewModel.Accounts.Add(account);
             viewModel.Accounts.Add(secondAccount);
 
+            viewModel.ShowFilesCommand.Execute(null);
+            await WaitUntilAsync(() => viewModel.ActiveModule == "OneDrive", cancellationToken);
+
             viewModel.SearchText = "Planning";
             viewModel.SearchCommand.Execute(null);
             await WaitUntilAsync(() => !viewModel.IsGlobalSearchRunning && viewModel.GlobalSearchResults.Count >= 6, cancellationToken);
@@ -503,6 +506,7 @@ public sealed class MainWindowViewModelTests
             Assert.Equal(
                 ["Calendar", "Mail", "Notes", "OneDrive", "People", "To Do"],
                 viewModel.GlobalSearchResults.Select(result => result.Category).Distinct().Order().ToArray());
+            Assert.Equal("OneDrive", viewModel.GlobalSearchResults[0].Category);
             Assert.All(viewModel.GlobalSearchResults, result => Assert.False(string.IsNullOrWhiteSpace(result.AccountGroup)));
             var mailResults = viewModel.GlobalSearchResults.Where(result => result.Category == "Mail").ToArray();
             Assert.Equal(2, mailResults.Length);
@@ -812,14 +816,14 @@ public sealed class MainWindowViewModelTests
 
             var archiveItem = Assert.Single(viewModel.Folders, folder => folder.ProviderId == "archive");
             viewModel.SelectFolderCommand.Execute(archiveItem);
-            await WaitUntilAsync(() => viewModel.CurrentFolderName == "Archive", cancellationToken);
+            await WaitUntilAsync(() => viewModel.CurrentFolderName == "Archive" && viewModel.SelectedMessage?.Body?.Contains("Archive body", StringComparison.Ordinal) == true, cancellationToken);
 
             Assert.Equal("Archive message", viewModel.SelectedMessage?.Subject);
             var html = Decode(viewModel.SelectedMessageBodyUri);
             Assert.Contains("<b>Archive body</b>", html);
 
             viewModel.ShowUnifiedInboxCommand.Execute(null);
-            await WaitUntilAsync(() => viewModel.CurrentFolderName == "Inbox", cancellationToken);
+            await WaitUntilAsync(() => viewModel.CurrentFolderName == "Inbox" && viewModel.SelectedMessage?.Subject == "Inbox message", cancellationToken);
             Assert.Equal("Inbox message", viewModel.SelectedMessage?.Subject);
         }
         finally
