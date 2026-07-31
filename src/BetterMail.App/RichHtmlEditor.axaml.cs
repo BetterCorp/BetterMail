@@ -179,6 +179,8 @@ public sealed partial class RichHtmlEditor : UserControl
         await Editor.InvokeScript($"document.execCommand('insertImage',false,{JsonSerializer.Serialize(source)});editor.focus()");
     }
 
+    internal void SetNativeEditorVisible(bool visible) => Editor.IsVisible = visible;
+
     private void ShowError(string message)
     {
         EditorError.Text = message;

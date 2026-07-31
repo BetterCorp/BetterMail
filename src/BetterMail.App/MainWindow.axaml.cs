@@ -33,6 +33,7 @@ public sealed partial class MainWindow : Window
         DataContextChanged += (_, _) => BindViewModel(DataContext as MainWindowViewModel);
         SizeChanged += (_, args) => ApplyResponsiveLayout(args.NewSize.Width);
         KeyDown += MainWindowKeyDown;
+        MessageList.AddHandler(ScrollViewer.ScrollChangedEvent, MessageListScrollChanged);
         Closing += (_, _) =>
         {
             _isClosing = true;
@@ -233,6 +234,19 @@ public sealed partial class MainWindow : Window
         _viewModel?.SetSelectedMessages(MessageList.SelectedItems?.OfType<MailMessage>() ?? []);
     }
 
+    private void MessageListScrollChanged(object? sender, ScrollChangedEventArgs args) =>
+        UpdateLoadOlderVisibility();
+
+    private void UpdateLoadOlderVisibility()
+    {
+        var scroll = MessageList.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+        LoadOlderButton.IsVisible = _viewModel?.HasMoreMessages == true &&
+            scroll is not null &&
+            scroll.Offset.Y >= Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height - 2);
+    }
+
+
+
     private void MessageDragPointerPressed(object? sender, PointerPressedEventArgs args)
     {
         if (args.Source is Visual source &&
@@ -240,8 +254,17 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
-        if (sender is not Border { DataContext: MailMessage message } ||
-            !args.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        if (sender is not Border { DataContext: MailMessage message })
+        {
+            return;
+        }
+        var properties = args.GetCurrentPoint(this).Properties;
+        if (properties.IsRightButtonPressed)
+        {
+            SelectMessage(message);
+            return;
+        }
+        if (!properties.IsLeftButtonPressed)
         {
             return;
         }
@@ -379,6 +402,77 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async void CopyContactEmailClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (sender is Button { DataContext: PersonEntry person } &&
+            TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard &&
+            !string.IsNullOrWhiteSpace(person.PrimaryEmail))
+        {
+            await clipboard.SetValueAsync(DataFormat.Text, person.PrimaryEmail);
+        }
+    }
+
+    private void ComposeContactClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (sender is Button { DataContext: PersonEntry person })
+        {
+            _viewModel?.ComposeTo(person);
+        }
+    }
+
+    private async void SaveAllAttachmentsClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (_viewModel is null || !_viewModel.HasMultipleAttachments)
+        {
+            return;
+        }
+        try
+        {
+            var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = "Save all attachments",
+                AllowMultiple = false
+            });
+            var folder = folders.FirstOrDefault();
+            if (folder is null)
+            {
+                return;
+            }
+
+            var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var attachment in _viewModel.Attachments.Where(static attachment => attachment.ContentBytes is not null))
+            {
+                var name = UniqueAttachmentName(attachment.Name, usedNames);
+                var file = await folder.CreateFileAsync(name);
+                if (file is null)
+                {
+                    continue;
+                }
+                await using var stream = await file.OpenWriteAsync();
+                stream.SetLength(0);
+                await stream.WriteAsync(attachment.ContentBytes!);
+            }
+        }
+        catch (Exception exception)
+        {
+            _viewModel.ReportError($"Attachments could not be saved: {exception.Message}");
+        }
+    }
+
+    internal static string UniqueAttachmentName(string name, HashSet<string> usedNames)
+    {
+        var clean = string.Concat((string.IsNullOrWhiteSpace(name) ? "attachment" : name)
+            .Select(character => Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
+        var stem = Path.GetFileNameWithoutExtension(clean);
+        var extension = Path.GetExtension(clean);
+        var candidate = clean;
+        for (var index = 2; !usedNames.Add(candidate); index++)
+        {
+            candidate = $"{stem} ({index}){extension}";
+        }
+        return candidate;
+    }
+
     private async void CopyErrorClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
     {
         if (_viewModel?.Error is { Length: > 0 } error && TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
@@ -472,10 +566,30 @@ public sealed partial class MainWindow : Window
         Execute(_viewModel?.DeleteCommand);
     private void MessageJunkClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
         Execute(_viewModel?.JunkCommand);
+    private void MessageNotJunkClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
+        Execute(_viewModel?.NotJunkCommand);
     private void MessageFlagClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
         Execute(_viewModel?.ToggleFlagCommand);
     private void MessageReadClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
         Execute(_viewModel?.ToggleReadCommand);
+    private void MessageHeadersClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
+        Execute(_viewModel?.ViewHeadersCommand);
+
+    private void MoveMenuOpened(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (sender is MenuItem menu && _viewModel is not null)
+        {
+            menu.ItemsSource = _viewModel.Folders
+                .Where(_viewModel.CanMoveSelectionToFolder)
+                .Select(folder => new MenuItem
+                {
+                    Header = folder.DisplayName,
+                    Command = _viewModel.MoveToFolderCommand,
+                    CommandParameter = folder
+                })
+                .ToArray();
+        }
+    }
 
     private async void QuickActionClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
     {
@@ -496,21 +610,10 @@ public sealed partial class MainWindow : Window
                 : _viewModel.JunkCommand,
             _ => null
         };
-        var content = button.Content;
-        button.IsEnabled = false;
-        button.Content = new ProgressBar { Width = 24, Height = 3, IsIndeterminate = true };
-        try
+        SelectMessage(message);
+        if (command is AsyncCommand asyncCommand)
         {
-            SelectMessage(message);
-            if (command is AsyncCommand asyncCommand)
-            {
-                await asyncCommand.ExecuteAsync();
-            }
-        }
-        finally
-        {
-            button.Content = content;
-            button.IsEnabled = true;
+            await asyncCommand.ExecuteAsync();
         }
     }
 
@@ -588,6 +691,7 @@ public sealed partial class MainWindow : Window
             _viewModel.PropertyChanged += ViewModelPropertyChanged;
         }
         UpdateMailPanes();
+        UpdateLoadOlderVisibility();
     }
 
     private void ViewModelPropertyChanged(object? sender, PropertyChangedEventArgs args)
@@ -597,6 +701,10 @@ public sealed partial class MainWindow : Window
             or nameof(MainWindowViewModel.ActiveModule))
         {
             UpdateMailPanes();
+        }
+        if (args.PropertyName == nameof(MainWindowViewModel.HasMoreMessages))
+        {
+            UpdateLoadOlderVisibility();
         }
     }
 

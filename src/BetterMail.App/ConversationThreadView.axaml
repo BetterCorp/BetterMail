@@ -10,6 +10,8 @@
     </Style>
     <Style Selector="Border.threadMessage.selected">
       <Setter Property="Background" Value="{DynamicResource BetterMailSelectionBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BetterMailAccentBrush}" />
+      <Setter Property="BorderThickness" Value="4,1,1,1" />
     </Style>
   </UserControl.Styles>
 
@@ -17,7 +19,7 @@
     <Border Padding="16,11"
             BorderBrush="{DynamicResource BetterMailDividerBrush}"
             BorderThickness="0,0,0,1">
-      <Grid x:Name="ThreadHeaderLayout" ColumnDefinitions="*,Auto" ColumnSpacing="10">
+      <Grid x:Name="ThreadHeaderLayout">
         <StackPanel x:Name="ThreadHeading">
           <SelectableTextBlock Text="{Binding SelectedThread.Subject, FallbackValue=Select a conversation}"
                                FontSize="20"
@@ -29,52 +31,6 @@
                      Opacity="0.62" />
         </StackPanel>
 
-        <StackPanel x:Name="WideActions"
-                    Grid.Column="1"
-                    Orientation="Horizontal">
-          <Button Classes="command"
-                  Content="Reply"
-                  Command="{Binding ReplyCommand}"
-                  AutomationProperties.Name="Reply to selected conversation message" />
-          <Button Classes="command"
-                  Content="Reply all"
-                  Command="{Binding ReplyAllCommand}"
-                  AutomationProperties.Name="Reply all to selected conversation message" />
-          <Button Classes="command"
-                  Content="Forward"
-                  Command="{Binding ForwardCommand}"
-                  AutomationProperties.Name="Forward selected conversation message" />
-        </StackPanel>
-
-        <Button x:Name="CompactActions"
-                Grid.Row="1"
-                IsVisible="False"
-                Classes="command"
-                Content="More actions"
-                HorizontalAlignment="Left"
-                AutomationProperties.Name="More conversation actions">
-          <Button.Flyout>
-            <Flyout Placement="BottomEdgeAlignedLeft">
-              <StackPanel MinWidth="150">
-                <Button Classes="command"
-                        HorizontalContentAlignment="Left"
-                        Content="Reply"
-                        Command="{Binding ReplyCommand}"
-                        AutomationProperties.Name="Reply to selected conversation message" />
-                <Button Classes="command"
-                        HorizontalContentAlignment="Left"
-                        Content="Reply all"
-                        Command="{Binding ReplyAllCommand}"
-                        AutomationProperties.Name="Reply all to selected conversation message" />
-                <Button Classes="command"
-                        HorizontalContentAlignment="Left"
-                        Content="Forward"
-                        Command="{Binding ForwardCommand}"
-                        AutomationProperties.Name="Forward selected conversation message" />
-              </StackPanel>
-            </Flyout>
-          </Button.Flyout>
-        </Button>
       </Grid>
     </Border>
 

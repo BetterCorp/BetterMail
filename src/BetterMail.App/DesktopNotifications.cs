@@ -10,7 +10,10 @@ public sealed record DesktopNotification(
     bool IsSharedMailbox,
     string FolderName,
     string Sender,
-    string Subject);
+    string Subject,
+    string MailboxId = "",
+    string FolderProviderId = "",
+    string MessageProviderId = "");
 
 public interface IDesktopNotificationService
 {
@@ -26,7 +29,9 @@ public sealed class NoOpDesktopNotificationService : IDesktopNotificationService
 
 public static class DesktopNotificationServices
 {
-    public static IDesktopNotificationService Create(Func<nint> ownerHandle)
+    public static IDesktopNotificationService Create(
+        Func<nint> ownerHandle,
+        Action<string, string, string>? activated = null)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -35,7 +40,7 @@ public static class DesktopNotificationServices
 #if WINDOWS
         try
         {
-            return new WindowsAppNotificationService();
+            return new WindowsAppNotificationService(activated);
         }
         catch
         {
@@ -125,7 +130,10 @@ public sealed class NewMailNotificationCoordinator(IDesktopNotificationService s
                 context.Mailbox.IsShared,
                 context.Folder.DisplayName,
                 message.SenderDisplayName,
-                string.IsNullOrWhiteSpace(message.Subject) ? "(no subject)" : message.Subject));
+                string.IsNullOrWhiteSpace(message.Subject) ? "(no subject)" : message.Subject,
+                context.Mailbox.Id,
+                context.Folder.ProviderId,
+                message.ProviderId));
         }
     }
 

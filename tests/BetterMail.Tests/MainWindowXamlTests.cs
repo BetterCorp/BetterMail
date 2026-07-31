@@ -56,7 +56,6 @@ public sealed class MainWindowXamlTests
                  {
                      "MainWindow.axaml.cs",
                      "SettingsView.axaml.cs",
-                     "ConversationThreadView.axaml.cs",
                      "CalendarWorkspaceView.axaml.cs",
                      "DriveWorkspaceView.axaml.cs",
                      "NotesWorkspaceView.axaml.cs",
@@ -72,6 +71,14 @@ public sealed class MainWindowXamlTests
         }
     }
 
+    [Fact]
+    public void BatchAttachmentNamesStayValidAndUnique()
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        Assert.Equal("report.pdf", MainWindow.UniqueAttachmentName("report.pdf", names));
+        Assert.Equal("report (2).pdf", MainWindow.UniqueAttachmentName("report.pdf", names));
+        Assert.Equal("bad_name.txt", MainWindow.UniqueAttachmentName("bad<name.txt", names));
+    }
     [Theory]
     [InlineData("invoice.pdf", "application/octet-stream", "Pdf")]
     [InlineData("photo.bin", "image/png; name=photo.png", "Image")]
@@ -185,7 +192,6 @@ public sealed class MainWindowXamlTests
         Assert.DoesNotContain("<NativeWebView", xaml);
         Assert.Equal(1, Count(conversationXaml, "<NativeWebView"));
         Assert.Contains("Classes.selected=" + (char)34 + "{Binding IsSelected}" + (char)34, conversationXaml);
-        Assert.Contains("x:Name=" + (char)34 + "CompactActions" + (char)34, conversationXaml);
         Assert.Contains(BindingAttribute("IsVisible", "IsGenericWorkspaceModule"), xaml);
         Assert.Contains("x:Name=" + (char)34 + "SettingsSurface" + (char)34 + " Grid.Row=" + (char)34 + "0" + (char)34 + " Grid.RowSpan=" + (char)34 + "3" + (char)34, xaml);
         Assert.Contains("x:Name=" + (char)34 + "FullAppLoader" + (char)34, xaml);

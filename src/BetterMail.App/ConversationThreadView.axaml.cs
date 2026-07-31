@@ -7,54 +7,13 @@ namespace BetterMail.App;
 
 public sealed partial class ConversationThreadView : UserControl
 {
-    private bool _layoutInitialized;
-    private bool _isCompactLayout;
-
     public ConversationThreadView()
     {
         InitializeComponent();
-        SizeChanged += (_, args) => ApplyResponsiveLayout(args.NewSize.Width);
         KeyDown += HandleKeyDown;
     }
 
     internal static bool IsCompactWidth(double width) => width < 640;
-
-    private void ApplyResponsiveLayout(double width)
-    {
-        var compact = IsCompactWidth(width);
-        if (_layoutInitialized && _isCompactLayout == compact)
-        {
-            return;
-        }
-
-        _layoutInitialized = true;
-        _isCompactLayout = compact;
-        ThreadHeaderLayout.ColumnDefinitions.Clear();
-        ThreadHeaderLayout.RowDefinitions.Clear();
-        if (compact)
-        {
-            ThreadHeaderLayout.ColumnDefinitions.Add(new(GridLength.Star));
-            ThreadHeaderLayout.RowDefinitions.Add(new(GridLength.Auto));
-            ThreadHeaderLayout.RowDefinitions.Add(new(GridLength.Auto));
-            Grid.SetRow(ThreadHeading, 0);
-            Grid.SetColumn(ThreadHeading, 0);
-            Grid.SetRow(CompactActions, 1);
-            Grid.SetColumn(CompactActions, 0);
-            WideActions.IsVisible = false;
-            CompactActions.IsVisible = true;
-            return;
-        }
-
-        ThreadHeaderLayout.ColumnDefinitions.Add(new(GridLength.Star));
-        ThreadHeaderLayout.ColumnDefinitions.Add(new(GridLength.Auto));
-        ThreadHeaderLayout.RowDefinitions.Add(new(GridLength.Auto));
-        Grid.SetRow(ThreadHeading, 0);
-        Grid.SetColumn(ThreadHeading, 0);
-        Grid.SetRow(WideActions, 0);
-        Grid.SetColumn(WideActions, 1);
-        WideActions.IsVisible = true;
-        CompactActions.IsVisible = false;
-    }
 
     private void HandleKeyDown(object? sender, KeyEventArgs args)
     {

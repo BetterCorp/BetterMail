@@ -147,7 +147,7 @@
         </StackPanel>
       </ScrollViewer>
 
-      <ScrollViewer IsVisible="{Binding ShowSignatureSettings}">
+      <ScrollViewer x:Name="SignatureScroll" IsVisible="{Binding ShowSignatureSettings}" ClipToBounds="True" ScrollChanged="SignatureScrollChanged">
         <StackPanel MaxWidth="1120" HorizontalAlignment="Stretch" Spacing="18">
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel>
@@ -257,7 +257,7 @@
               </StackPanel>
             </Border>
 
-            <Border x:Name="SignatureEditorPanel" Grid.Column="1" Classes="settingsCard">
+            <Border x:Name="SignatureEditorPanel" Grid.Column="1" Classes="settingsCard" ClipToBounds="True">
               <StackPanel Spacing="9">
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                   <TextBox Text="{Binding SignatureEditorName}" IsReadOnly="{Binding !CanEditSelectedSignature}"
@@ -265,7 +265,7 @@
                   <TextBlock Grid.Column="1" Text="Read only" VerticalAlignment="Center" Opacity="0.62"
                              IsVisible="{Binding !CanEditSelectedSignature}" />
                 </Grid>
-                <app:RichHtmlEditor Height="330" Html="{Binding SignatureEditorHtml, Mode=TwoWay}"
+                <app:RichHtmlEditor x:Name="SignatureHtmlEditor" Height="330" ClipToBounds="True" Html="{Binding SignatureEditorHtml, Mode=TwoWay}"
                                     IsReadOnly="{Binding !CanEditSelectedSignature}"
                                     Placeholder="Create your signature…" />
                 <TextBlock Text="{Binding SignatureEditorError}" Foreground="#D9493D" TextWrapping="Wrap"
@@ -368,56 +368,73 @@
 
       <ScrollViewer IsVisible="{Binding ShowAccountSettings}">
         <StackPanel MaxWidth="920" HorizontalAlignment="Stretch" Spacing="18">
-          <TextBlock Text="Accounts" FontSize="22" FontWeight="SemiBold" />
-          <Border Classes="settingsCard">
-            <StackPanel Spacing="9">
-              <ItemsControl ItemsSource="{Binding SettingsAccounts}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="app:AccountSettingsItem">
-                    <Border BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1" Padding="8,9"
-                            AutomationProperties.Name="{Binding EmailAddress, StringFormat='Account {0}'}">
-                      <StackPanel Spacing="7">
-                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Accounts" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Classes="primary" Content="Add Microsoft account" Command="{Binding ConnectCommand}"
+                    AutomationProperties.Name="Add Microsoft account" />
+          </Grid>
+          <ItemsControl ItemsSource="{Binding SettingsAccounts}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="app:AccountSettingsItem">
+                <Border Classes="settingsCard" Margin="0,0,0,12"
+                        AutomationProperties.Name="{Binding EmailAddress, StringFormat='Account {0}'}">
+                  <StackPanel Spacing="12">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                      <StackPanel Spacing="2">
+                        <TextBlock Text="{Binding DisplayName}" FontSize="17" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                         <TextBlock Text="{Binding EmailAddress}" Opacity="0.62" TextTrimming="CharacterEllipsis" />
-                        <WrapPanel Orientation="Horizontal">
-                          <Button Classes="command" Content="Re-authenticate"
-                                  Command="{Binding $parent[UserControl].DataContext.ReauthenticateAccountCommand}"
-                                  CommandParameter="{Binding Account}"
-                                  AutomationProperties.Name="{Binding EmailAddress, StringFormat='Re-authenticate {0}'}" />
-                          <Button Classes="command" Content="Add shared mailbox"
-                                  Command="{Binding $parent[UserControl].DataContext.AddSharedMailboxForAccountCommand}"
-                                  CommandParameter="{Binding Account}"
-                                  AutomationProperties.Name="{Binding EmailAddress, StringFormat='Add shared mailbox for {0}'}" />
-                          <Button Classes="command" Content="Remove"
-                                  Command="{Binding $parent[UserControl].DataContext.RequestRemoveAccountCommand}"
-                                  CommandParameter="{Binding Account}"
-                                  AutomationProperties.Name="{Binding EmailAddress, StringFormat='Remove {0}'}" />
-                        </WrapPanel>
-                        <ItemsControl ItemsSource="{Binding SharedMailboxes}" IsVisible="{Binding HasSharedMailboxes}">
-                          <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="core:Mailbox">
-                              <TextBlock Text="{Binding Address}" Margin="14,2,0,0" Opacity="0.68" TextTrimming="CharacterEllipsis" />
-                            </DataTemplate>
-                          </ItemsControl.ItemTemplate>
-                        </ItemsControl>
                       </StackPanel>
-                    </Border>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-              <Button Classes="primary" Content="Add Microsoft account" Command="{Binding ConnectCommand}"
-                      HorizontalAlignment="Left" AutomationProperties.Name="Add Microsoft account" />
-              <Border Background="#18D9493D" BorderBrush="#D9493D" BorderThickness="1" CornerRadius="3"
-                      Padding="12" IsVisible="{Binding IsConfirmingAccountRemoval}">
-                <StackPanel Spacing="9">
-                  <TextBlock Text="{Binding RemovalAccountText}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                  <TextBlock Text="This does not delete anything from Microsoft 365." Opacity="0.68" />
-                  <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Classes="command" Content="Cancel" Command="{Binding CancelRemoveAccountCommand}" />
-                    <Button Content="Remove account" Background="#D9493D" Foreground="White" Command="{Binding ConfirmRemoveAccountCommand}" />
+                      <WrapPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Content="Re-authenticate" Background="#0F6CBD" Foreground="White"
+                                Command="{Binding $parent[UserControl].DataContext.ReauthenticateAccountCommand}"
+                                CommandParameter="{Binding Account}"
+                                AutomationProperties.Name="{Binding EmailAddress, StringFormat='Re-authenticate {0}'}" />
+                        <Button Content="Add shared mailbox" Background="#107C10" Foreground="White"
+                                Command="{Binding $parent[UserControl].DataContext.AddSharedMailboxForAccountCommand}"
+                                CommandParameter="{Binding Account}"
+                                AutomationProperties.Name="{Binding EmailAddress, StringFormat='Add shared mailbox for {0}'}" />
+                        <Button Content="Remove" Background="#D9493D" Foreground="White"
+                                Command="{Binding $parent[UserControl].DataContext.RequestRemoveAccountCommand}"
+                                CommandParameter="{Binding Account}"
+                                AutomationProperties.Name="{Binding EmailAddress, StringFormat='Remove {0}'}" />
+                      </WrapPanel>
+                    </Grid>
+                    <StackPanel IsVisible="{Binding HasSharedMailboxes}" Spacing="7">
+                      <TextBlock Text="Shared mailboxes" FontSize="12" FontWeight="SemiBold" Opacity="0.68" />
+                      <ItemsControl ItemsSource="{Binding SharedMailboxes}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="app:SharedMailboxSettingsItem">
+                            <Border BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1" CornerRadius="3" Margin="0,0,0,6">
+                              <Grid ColumnDefinitions="5,*,220" ColumnSpacing="12">
+                                <Border Background="{Binding Color}" CornerRadius="3,0,0,3" />
+                                <StackPanel Grid.Column="1" Margin="10,9" Spacing="2">
+                                  <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                  <TextBlock Text="{Binding Address}" FontSize="11" Opacity="0.64" TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                                <ComboBox Grid.Column="2" Margin="0,8,10,8"
+                                          ItemsSource="{Binding PermissionModes}"
+                                          SelectedItem="{Binding SelectedPermission, Mode=TwoWay}"
+                                          AutomationProperties.Name="{Binding Address, StringFormat='Access type for {0}'}" />
+                              </Grid>
+                            </Border>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
                   </StackPanel>
-                </StackPanel>
-              </Border>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Border Background="#18D9493D" BorderBrush="#D9493D" BorderThickness="1" CornerRadius="3"
+                  Padding="12" IsVisible="{Binding IsConfirmingAccountRemoval}">
+            <StackPanel Spacing="9">
+              <TextBlock Text="{Binding RemovalAccountText}" FontWeight="SemiBold" TextWrapping="Wrap" />
+              <TextBlock Text="This does not delete anything from Microsoft 365." Opacity="0.68" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes="command" Content="Cancel" Command="{Binding CancelRemoveAccountCommand}" />
+                <Button Content="Remove account" Background="#D9493D" Foreground="White" Command="{Binding ConfirmRemoveAccountCommand}" />
+              </StackPanel>
             </StackPanel>
           </Border>
         </StackPanel>

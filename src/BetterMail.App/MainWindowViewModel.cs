@@ -267,7 +267,11 @@ public sealed class MainWindowViewModel : ViewModelBase
     public IEnumerable<Mailbox> SharedMailboxes => Mailboxes.Where(static mailbox => mailbox.IsShared);
     public IEnumerable<AccountSettingsItem> SettingsAccounts => Accounts.Select(account => new AccountSettingsItem(
         account,
-        Mailboxes.Where(mailbox => mailbox.AccountId == account.AccountId && mailbox.IsShared).ToArray()));
+        Mailboxes.Where(mailbox => mailbox.AccountId == account.AccountId && mailbox.IsShared)
+            .Select(mailbox => new SharedMailboxSettingsItem(
+                mailbox,
+                permission => ChangeSharedMailboxPermissionAsync(mailbox, permission)))
+            .ToArray()));
     public ObservableCollection<MailMessage> Messages { get; } = [];
     public ObservableCollection<MailMessage> SelectedMessages { get; } = [];
     public ObservableCollection<MailQuickActionOption> MailQuickActions { get; } = [];
@@ -464,6 +468,7 @@ public sealed class MainWindowViewModel : ViewModelBase
                 RaisePropertyChanged(nameof(ToggleFlagText));
                 RaisePropertyChanged(nameof(HasSelectedAttachments));
                 Attachments.Clear();
+                RaisePropertyChanged(nameof(HasMultipleAttachments));
                 ReconcileConversation(value);
                 RaisePropertyChanged(nameof(AttachmentSummary));
                 IsLoadingAttachments = false;
@@ -664,6 +669,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string SyncIcon => IsSyncing ? SyncFrames[_syncFrame] : "↻";
     public string SyncButtonText => $"{SyncIcon} Sync";
     public bool HasSelectedAttachments => SelectedMessage?.HasAttachments == true;
+    public bool HasMultipleAttachments => Attachments.Count > 1;
     public string AttachmentSummary => IsLoadingAttachments
         ? "Loading attachments…"
         : Attachments.Count == 0 ? "Attachments" : $"{Attachments.Count:N0} attachment{(Attachments.Count == 1 ? "" : "s")}";
@@ -1429,7 +1435,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             ((AsyncCommand)ConfirmRemoveAccountCommand).Refresh();
             if (_selectedFolder is not null && _selectedFolder.MailboxId.StartsWith(account.AccountId + ":", StringComparison.Ordinal))
             {
-                _selectedFolder = null;
+                SetSelectedFolder(null);
                 RaisePropertyChanged(nameof(CurrentFolderName));
             }
             await LoadFoldersAsync();
@@ -1932,6 +1938,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(SettingsAccounts));
         var folders = await _provider.GetFoldersAsync(account, mailbox);
         await _store.SaveFoldersAsync(mailbox.Id, folders);
+        await LoadFoldersAsync();
         var engine = new SyncEngine(_provider, _store);
         foreach (var folder in folders.Where(static folder => folder.TotalCount > 0))
         {
@@ -1946,6 +1953,67 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
         await LoadFoldersAsync();
         await LoadMessagesAsync();
+    }
+
+    private async Task ChangeSharedMailboxPermissionAsync(Mailbox mailbox, string permission)
+    {
+        if (_store is null)
+        {
+            return;
+        }
+        try
+        {
+            var updated = mailbox with
+            {
+                CanSendAs = permission == "Send As",
+                CanSendOnBehalf = permission == "Send on behalf"
+            };
+            await _store.SaveMailboxAsync(updated);
+            var index = Mailboxes.IndexOf(mailbox);
+            if (index >= 0)
+            {
+                Mailboxes[index] = updated;
+            }
+            RebuildSenderSettings();
+            RaisePropertyChanged(nameof(SharedMailboxes));
+            RaisePropertyChanged(nameof(SettingsAccounts));
+        }
+        catch (Exception exception)
+        {
+            Error = $"Shared mailbox access could not be changed: {exception.Message}";
+            RaisePropertyChanged(nameof(SettingsAccounts));
+        }
+    }
+    internal async Task OpenNotificationAsync(
+        string mailboxId,
+        string folderProviderId,
+        string messageProviderId)
+    {
+        if (_store is null)
+        {
+            return;
+        }
+        IsGlobalSearchOpen = false;
+        IsSettingsOpen = false;
+        ActiveModule = "Mail";
+        IsDraftsView = false;
+        IsSearchResultsView = false;
+        SetSelectedFolder(Folders.FirstOrDefault(folder =>
+            folder.MailboxId == mailboxId && folder.ProviderId == folderProviderId));
+        await LoadMessagesAsync();
+
+        var message = Messages.FirstOrDefault(candidate =>
+            candidate.MailboxId == mailboxId && candidate.ProviderId == messageProviderId)
+            ?? await _store.GetMessageAsync(mailboxId, messageProviderId);
+        if (message is null)
+        {
+            return;
+        }
+        if (!Messages.Any(candidate => SameMessage(candidate, message)))
+        {
+            ReconcileMessages([.. Messages, message]);
+        }
+        SelectedMessage = Messages.First(candidate => SameMessage(candidate, message));
     }
 
     private Task RequestSharedMailboxAsync(MailAccount account)
@@ -2078,13 +2146,14 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         var messages = (await _store!.SearchAsync(query, 500, cancellationToken))
             .Where(IsSearchableMail)
+            .OrderByDescending(static message => message.ReceivedAt)
+            .ThenByDescending(static message => message.ProviderId, StringComparer.Ordinal)
             .ToArray();
         cancellationToken.ThrowIfCancellationRequested();
         _latestMailSearchResults.Clear();
         _latestMailSearchResults.AddRange(messages);
         return messages.Take(100)
-            .Select(message => new GlobalSearchResult(
-                "Mail", message.Subject, MailSearchSubtitle(message), "Mail", message))
+            .Select(MailSearchResult)
             .ToArray();
     }
 
@@ -2198,8 +2267,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             }
 
             foreach (var result in messages
-                .Select(message => new GlobalSearchResult(
-                    "Mail", message.Subject, MailSearchSubtitle(message), "Mail", message))
+                .Select(MailSearchResult)
                 .Select(result => result with { AccountGroup = SearchGroupFor(result.Value) }))
             {
                 GlobalSearchResults.Add(result);
@@ -2219,6 +2287,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         string? previousAccountGroup = null;
         var ordered = GlobalSearchResults
             .OrderBy(result => SearchCategoryRank(ActiveModule, result.Category))
+            .ThenByDescending(static result => result.Category == "Mail" ? result.SortAt : null)
             .ThenBy(static result => result.AccountGroup, StringComparer.OrdinalIgnoreCase)
             .Select(result =>
             {
@@ -2538,8 +2607,14 @@ public sealed class MainWindowViewModel : ViewModelBase
             name?.StartsWith("In-Place Archive", StringComparison.OrdinalIgnoreCase) == true;
     }
 
-    private string MailSearchSubtitle(MailMessage message) =>
-        $"{MailFolderPath(message.MailboxId, message.FolderId)} · {message.SenderDisplayName} · {message.DisplayPreview}";
+    private GlobalSearchResult MailSearchResult(MailMessage message) => new(
+        "Mail",
+        string.IsNullOrWhiteSpace(message.Subject) ? "(no subject)" : message.Subject,
+        message.DisplayPreview,
+        "Mail",
+        message,
+        SortAt: message.ReceivedAt,
+        Badge: MailFolderPath(message.MailboxId, message.FolderId));
 
     private string MailFolderPath(string mailboxId, string folderProviderId)
     {
@@ -2711,9 +2786,11 @@ public sealed class MainWindowViewModel : ViewModelBase
         IsSettingsOpen = false;
         ActiveModule = "Mail";
         IsDraftsView = false;
-        _selectedFolder = null;
+        SetSelectedFolder(null);
         IsSearchResultsView = true;
-        Replace(Messages, results ?? _latestMailSearchResults);
+        Replace(Messages, (results ?? _latestMailSearchResults)
+            .OrderByDescending(static message => message.ReceivedAt)
+            .ThenByDescending(static message => message.ProviderId, StringComparer.Ordinal));
         SelectedMessages.Clear();
         SelectedMessage = selected is null
             ? Messages.FirstOrDefault()
@@ -2857,8 +2934,8 @@ public sealed class MainWindowViewModel : ViewModelBase
             var selectedFolderId = _selectedFolder?.ProviderId;
             var selectedMailboxId = _selectedFolder?.MailboxId;
             Replace(Folders, refreshed);
-            _selectedFolder = Folders.FirstOrDefault(folder =>
-                folder.ProviderId == selectedFolderId && folder.MailboxId == selectedMailboxId);
+            SetSelectedFolder(Folders.FirstOrDefault(folder =>
+                folder.ProviderId == selectedFolderId && folder.MailboxId == selectedMailboxId));
             Replace(FolderGroups, Mailboxes.Select(mailbox => new MailboxFolderGroup(
                 mailbox,
                 BuildFolderTree(Folders.Where(folder => folder.MailboxId == mailbox.Id)))));
@@ -2891,13 +2968,26 @@ public sealed class MainWindowViewModel : ViewModelBase
             .ToArray();
     }
 
+    private void SetSelectedFolder(MailFolderItem? folder)
+    {
+        if (ReferenceEquals(_selectedFolder, folder))
+        {
+            return;
+        }
+        if (_selectedFolder is not null) _selectedFolder.IsSelected = false;
+        _selectedFolder = folder;
+        if (_selectedFolder is not null) _selectedFolder.IsSelected = true;
+        RaisePropertyChanged(nameof(CurrentFolderName));
+        RaisePropertyChanged(nameof(IsUnifiedInbox));
+    }
+
     private async Task ShowUnifiedInboxAsync()
     {
         IsSettingsOpen = false;
         ActiveModule = "Mail";
         IsDraftsView = false;
         IsSearchResultsView = false;
-        _selectedFolder = null;
+        SetSelectedFolder(null);
         Messages.Clear();
         SelectedMessage = null;
         RaisePropertyChanged(nameof(CurrentFolderName));
@@ -2911,7 +3001,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         ActiveModule = "Mail";
         IsDraftsView = false;
         IsSearchResultsView = false;
-        _selectedFolder = folder;
+        SetSelectedFolder(folder);
         Messages.Clear();
         SelectedMessage = null;
         RaisePropertyChanged(nameof(CurrentFolderName));
@@ -2926,6 +3016,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         IsDraftsView = true;
         IsSearchResultsView = false;
         SelectedMessage = null;
+        SetSelectedFolder(null);
         return Task.CompletedTask;
     }
 
@@ -3233,6 +3324,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         ((AsyncCommand)ShowNotesCommand).Refresh();
         ((AsyncCommand)RefreshWorkspaceCommand).Refresh();
         ((AsyncCommand)SearchWorkspaceCommand).Refresh();
+        RefreshContactCommands();
     }
 
     private async Task LoadPeopleAsync()
@@ -3524,6 +3616,16 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private static string NormalizeEmail(string value) => value.Trim().ToLowerInvariant();
 
+    internal void ReportError(string message) => Error = message;
+
+    internal void ComposeTo(PersonEntry person)
+    {
+        if (!string.IsNullOrWhiteSpace(person.PrimaryEmail))
+        {
+            ComposeRequested?.Invoke(new ComposeRequest(To: person.PrimaryEmail));
+        }
+    }
+
     private async Task ToggleReadAsync()
     {
         var messages = ActionMessages();
@@ -3807,7 +3909,15 @@ public sealed class MainWindowViewModel : ViewModelBase
         var index = Messages.ToList().FindIndex(message => SameMessage(message, original));
         if (index >= 0)
         {
-            Messages[index] = updated;
+            _isReplacingSelectedMessage = wasSelected;
+            try
+            {
+                Messages[index] = updated;
+            }
+            finally
+            {
+                _isReplacingSelectedMessage = false;
+            }
         }
         if (wasSelected)
         {
@@ -3821,6 +3931,10 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void ReconcileMessages(IReadOnlyList<MailMessage> updated)
     {
+        updated = updated
+            .OrderByDescending(static message => message.ReceivedAt)
+            .ThenByDescending(static message => message.ProviderId, StringComparer.Ordinal)
+            .ToArray();
         var selected = SelectedMessage;
         var updatedKeys = updated.Select(MessageKey).ToHashSet(StringComparer.Ordinal);
         for (var index = Messages.Count - 1; index >= 0; index--)
@@ -3918,6 +4032,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             }
 
             Replace(Attachments, attachments);
+            RaisePropertyChanged(nameof(HasMultipleAttachments));
             ConversationThread.SetAttachments(message, attachments);
             RaisePropertyChanged(nameof(SelectedMessageBodyUri));
             RaisePropertyChanged(nameof(AttachmentSummary));
@@ -4799,6 +4914,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
 public sealed class MailFolderItem(MailFolder folder, string mailboxDisplayName) : ViewModelBase
 {
+    private bool _isSelected;
     public MailFolder Folder { get; private set; } = folder;
     public string MailboxDisplayName { get; private set; } = mailboxDisplayName;
     public string MailboxId => Folder.MailboxId;
@@ -4809,6 +4925,7 @@ public sealed class MailFolderItem(MailFolder folder, string mailboxDisplayName)
     public string? WellKnownName => Folder.WellKnownName;
     public string? ParentProviderId => Folder.ParentProviderId;
     public string CountText => UnreadCount > 0 ? UnreadCount.ToString("N0") : "";
+    public bool IsSelected { get => _isSelected; internal set => SetProperty(ref _isSelected, value); }
 
     internal bool Update(MailFolder folder, string mailboxDisplayName)
     {
@@ -4850,13 +4967,44 @@ public sealed record MailboxFolderGroup(Mailbox Mailbox, IReadOnlyList<MailFolde
     public string Color => AccountColors.For(Mailbox.Id);
 }
 
-public sealed record AccountSettingsItem(MailAccount Account, IReadOnlyList<Mailbox> SharedMailboxes)
+public sealed record AccountSettingsItem(MailAccount Account, IReadOnlyList<SharedMailboxSettingsItem> SharedMailboxes)
 {
     public string DisplayName => Account.DisplayName;
     public string EmailAddress => Account.EmailAddress;
     public bool HasSharedMailboxes => SharedMailboxes.Count > 0;
 }
 
+public sealed class SharedMailboxSettingsItem : ViewModelBase
+{
+    private readonly Func<string, Task> _changePermission;
+    private string _selectedPermission;
+
+    public SharedMailboxSettingsItem(Mailbox mailbox, Func<string, Task> changePermission)
+    {
+        Mailbox = mailbox;
+        _changePermission = changePermission;
+        _selectedPermission = mailbox.CanSendAs
+            ? "Send As"
+            : mailbox.CanSendOnBehalf ? "Send on behalf" : "Read only";
+    }
+
+    public Mailbox Mailbox { get; }
+    public string Address => Mailbox.Address;
+    public string DisplayName => Mailbox.DisplayName;
+    public string Color => AccountColors.For(Mailbox.Id);
+    public IReadOnlyList<string> PermissionModes { get; } = ["Read only", "Send As", "Send on behalf"];
+    public string SelectedPermission
+    {
+        get => _selectedPermission;
+        set
+        {
+            if (SetProperty(ref _selectedPermission, value))
+            {
+                _ = _changePermission(value);
+            }
+        }
+    }
+}
 public sealed record SettingsTabItem(string Name);
 
 public sealed record MailQuickActionOption(
@@ -5022,6 +5170,13 @@ public sealed record PersonEntry(
     DiscoveredPerson? DiscoveredPerson)
 {
     public bool IsSaved => SavedContact is not null;
+    public string PrimaryEmail => SavedContact?.EmailAddresses.FirstOrDefault()
+        ?? DiscoveredPerson?.EmailAddress
+        ?? "";
+    public string Color => AccountColors.For(
+        SavedContact?.AccountId
+        ?? DiscoveredPerson?.MailboxIds.FirstOrDefault()
+        ?? ProvenanceText);
     public string AvatarText => string.IsNullOrWhiteSpace(DisplayName)
         ? "?"
         : char.ToUpperInvariant(DisplayName.Trim()[0]).ToString();
@@ -5064,8 +5219,22 @@ public sealed record GlobalSearchResult(
     object? Value = null,
     bool StartsCategory = false,
     string AccountGroup = "All accounts",
-    bool StartsAccountGroup = false)
+    bool StartsAccountGroup = false,
+    DateTimeOffset? SortAt = null,
+    string Badge = "")
 {
+    public bool IsMail => Value is MailMessage;
+    public bool IsNotMail => !IsMail;
+    public string MailFrom => Value is MailMessage message
+        ? $"From: {message.SenderDisplayName} <{message.From.Address}>"
+        : "";
+    public string MailTo => Value is MailMessage message
+        ? $"To: {string.Join(", ", message.To.Select(static recipient => recipient.Address))}"
+        : "";
+    public string MailWhen => Value is MailMessage message
+        ? message.ReceivedAt.ToLocalTime().ToString("MMM d, yyyy · HH:mm")
+        : "";
+    public string MailboxColor => Value is MailMessage message ? message.MailboxColor : "Transparent";
     public string Glyph => Module switch
     {
         "Mail" => "✉",

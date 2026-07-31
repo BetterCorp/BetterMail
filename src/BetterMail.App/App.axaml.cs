@@ -3,6 +3,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using Avalonia.Platform;
+using Avalonia.Threading;
 using Avalonia.Styling;
 using BetterMail.Core;
 
@@ -68,9 +69,25 @@ public sealed partial class App : Application
         }
 
         MainWindow? mainWindow = null;
+        MainWindowViewModel? viewModel = null;
         _desktopNotificationService = DesktopNotificationServices.Create(
-            () => mainWindow?.TryGetPlatformHandle()?.Handle ?? 0);
-        var viewModel = new MainWindowViewModel(
+            () => mainWindow?.TryGetPlatformHandle()?.Handle ?? 0,
+            (mailboxId, folderId, messageId) => Dispatcher.UIThread.Post(async () =>
+            {
+                if (viewModel is not null)
+                {
+                    try
+                    {
+                        await viewModel.OpenNotificationAsync(mailboxId, folderId, messageId);
+                        mainWindow?.Activate();
+                    }
+                    catch (Exception exception)
+                    {
+                        viewModel.ReportError($"Notification could not be opened: {exception.Message}");
+                    }
+                }
+            }));
+        viewModel = new MainWindowViewModel(
             _store,
             dataDirectory,
             ApplyTheme,

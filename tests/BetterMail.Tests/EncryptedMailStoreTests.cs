@@ -102,6 +102,39 @@ public sealed class EncryptedMailStoreTests
     }
 
     [Fact]
+    public async Task DeduplicatesCorrespondentsAcrossSenderToAndCcOnInsertAndUpdate()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-correspondents-{Guid.NewGuid():N}");
+        var store = new EncryptedMailStore(
+            Path.Combine(directory, "mail.db"),
+            Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+        try
+        {
+            await store.InitializeAsync(cancellationToken);
+            var account = new MailAccount("microsoft365", "account", "tenant", "person@example.com", "Person", ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+            await store.SaveAccountAsync(account, cancellationToken);
+            await store.SaveMailboxAsync(mailbox, cancellationToken);
+            var message = Message(mailbox.Id, "duplicate", "Duplicate correspondent", "Body");
+            message = message with { To = [message.From], Cc = [message.From] };
+
+            await store.ApplySyncPageAsync("insert", new MailSyncPage([message], null, false), cancellationToken);
+            await store.ApplySyncPageAsync("update", new MailSyncPage([message with { IsRead = true }], null, false), cancellationToken);
+
+            Assert.Contains(await store.GetDiscoveredPeopleAsync("sender", cancellationToken: cancellationToken),
+                person => person.EmailAddress == message.From.Address);
+        }
+        finally
+        {
+            await store.DisposeAsync();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+    [Fact]
     public async Task StoresSearchesAndDeletesEncryptedMessages()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

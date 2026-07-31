@@ -515,6 +515,7 @@ public sealed class MainWindowViewModelTests
             Assert.All(viewModel.GlobalSearchResults, result => Assert.False(string.IsNullOrWhiteSpace(result.AccountGroup)));
             var mailResults = viewModel.GlobalSearchResults.Where(result => result.Category == "Mail").ToArray();
             Assert.Equal(2, mailResults.Length);
+            Assert.Equal(mailResults.OrderByDescending(result => result.SortAt), mailResults);
             var mailResult = Assert.Single(mailResults, result => result.AccountGroup.Contains(account.EmailAddress));
             Assert.Contains(account.EmailAddress, mailResult.AccountGroup);
             Assert.DoesNotContain(account.EmailAddress, mailResult.Subtitle);
@@ -647,10 +648,13 @@ public sealed class MainWindowViewModelTests
             await store.SaveFoldersAsync(mailbox.Id, [inbox], cancellationToken);
             await store.ApplySyncPageAsync(
                 "test",
-                new MailSyncPage([Message(mailbox.Id, "inbox", "Unread", "<b>Body</b>")], null, false),
+                new MailSyncPage([Message(mailbox.Id, "inbox", "Unread", "<b>Body</b>") with { HasAttachments = true }], null, false),
                 cancellationToken);
 
-            var provider = new RecordingProvider();
+            var provider = new RecordingProvider
+            {
+                AttachmentResults = [new MailAttachment("attachment", "file.txt", "text/plain", 4, false, null, "test"u8.ToArray())]
+            };
             var viewModel = new MainWindowViewModel(
                 store,
                 directory,
@@ -661,6 +665,14 @@ public sealed class MainWindowViewModelTests
                 TimeSpan.FromMilliseconds(60));
 
             await viewModel.InitializeAsync();
+            await WaitUntilAsync(() => viewModel.Attachments.Count == 1, cancellationToken);
+            viewModel.Messages.CollectionChanged += (_, args) =>
+            {
+                if (args.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Replace)
+                {
+                    viewModel.SelectedMessage = null;
+                }
+            };
             var bodyRefreshes = 0;
             viewModel.PropertyChanged += (_, args) =>
             {
@@ -673,6 +685,7 @@ public sealed class MainWindowViewModelTests
 
             Assert.True(provider.MarkedRead);
             Assert.True(viewModel.SelectedMessage?.IsRead);
+            Assert.Single(viewModel.Attachments);
             Assert.Equal(0, bodyRefreshes);
         }
         finally
@@ -849,12 +862,15 @@ public sealed class MainWindowViewModelTests
             await WaitUntilAsync(() => viewModel.CurrentFolderName == "Archive" && viewModel.SelectedMessage?.Body?.Contains("Archive body", StringComparison.Ordinal) == true, cancellationToken);
 
             Assert.Equal("Archive message", viewModel.SelectedMessage?.Subject);
+            Assert.True(archiveItem.IsSelected);
             var html = Decode(viewModel.SelectedMessageBodyUri);
             Assert.Contains("<b>Archive body</b>", html);
 
             viewModel.ShowUnifiedInboxCommand.Execute(null);
             await WaitUntilAsync(() => viewModel.CurrentFolderName == "Inbox" && viewModel.SelectedMessage?.Subject == "Inbox message", cancellationToken);
             Assert.Equal("Inbox message", viewModel.SelectedMessage?.Subject);
+            Assert.False(archiveItem.IsSelected);
+            Assert.True(viewModel.IsUnifiedInbox);
         }
         finally
         {
@@ -879,13 +895,16 @@ public sealed class MainWindowViewModelTests
             await store.InitializeAsync(cancellationToken);
             var account = new MailAccount("microsoft365", "account", "tenant", "person@example.com", "Person", ProviderCapabilities.Mail);
             var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
-            var inbox = new MailFolder(mailbox.Id, "inbox", "Inbox", 1, 1, "inbox");
+            var inbox = new MailFolder(mailbox.Id, "inbox", "Inbox", 2, 2, "inbox");
             await store.SaveAccountAsync(account, cancellationToken);
             await store.SaveMailboxAsync(mailbox, cancellationToken);
             await store.SaveFoldersAsync(mailbox.Id, [inbox], cancellationToken);
             await store.ApplySyncPageAsync(
                 "test",
-                new MailSyncPage([Message(mailbox.Id, "inbox", "Action message", "<b>Body</b>")], null, false),
+                new MailSyncPage([
+                    Message(mailbox.Id, "inbox", "Action message", "<b>Body</b>"),
+                    Message(mailbox.Id, "inbox", "Second action", "<b>Second</b>")
+                ], null, false),
                 cancellationToken);
 
             var provider = new RecordingProvider();
@@ -901,7 +920,10 @@ public sealed class MainWindowViewModelTests
             Assert.True(viewModel.IsMailActionRunning);
             Assert.Equal("Moving to Deleted Items...", viewModel.MailActionStatus);
             provider.MoveRelease.SetResult();
-            await WaitUntilAsync(() => provider.MarkedRead && provider.MoveDestination == "deleteditems" && viewModel.Messages.Count == 0, cancellationToken);
+            await WaitUntilAsync(() => provider.MarkedRead && provider.MoveDestination == "deleteditems" && viewModel.Messages.Count == 1 && !viewModel.IsMailActionRunning, cancellationToken);
+            Assert.True(viewModel.DeleteCommand.CanExecute(null));
+            viewModel.DeleteCommand.Execute(null);
+            await WaitUntilAsync(() => viewModel.Messages.Count == 0 && !viewModel.IsMailActionRunning, cancellationToken);
 
             Assert.False(viewModel.IsBusy);
             Assert.False(viewModel.IsMailActionRunning);
@@ -1356,6 +1378,50 @@ public sealed class MainWindowViewModelTests
         }
     }
 
+    [Fact]
+    public async Task AddsSharedMailboxToTheLiveFolderAndSettingsModels()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-shared-live-{Guid.NewGuid():N}");
+        var store = new EncryptedMailStore(
+            Path.Combine(directory, "mail.db"),
+            Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+        try
+        {
+            await store.InitializeAsync(cancellationToken);
+            var account = new MailAccount("microsoft365", "account", "tenant", "person@example.com", "Person", ProviderCapabilities.Mail);
+            await store.SaveAccountAsync(account, cancellationToken);
+            await store.SaveMailboxAsync(new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName), cancellationToken);
+            var provider = new RecordingProvider
+            {
+                FolderResults = [new MailFolder("account:team@example.com", "inbox", "Inbox", 1, 1, "inbox")],
+                SyncRelease = new(TaskCreationOptions.RunContinuationsAsynchronously)
+            };
+            var viewModel = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
+            await viewModel.InitializeAsync();
+
+            var adding = viewModel.AddSharedMailboxAsync(account, "team@example.com", "Send As");
+            await WaitUntilAsync(() => viewModel.FolderGroups.Any(group => group.Mailbox.Address == "team@example.com"), cancellationToken);
+            provider.SyncRelease.SetResult();
+            await adding;
+
+            var shared = Assert.Single(viewModel.Mailboxes, mailbox => mailbox.Address == "team@example.com");
+            Assert.True(shared.IsShared);
+            Assert.True(shared.CanSendAs);
+            var setting = Assert.Single(Assert.Single(viewModel.SettingsAccounts).SharedMailboxes);
+            setting.SelectedPermission = "Send on behalf";
+            await WaitUntilAsync(() => viewModel.Mailboxes.Single(mailbox => mailbox.Id == shared.Id).CanSendOnBehalf, cancellationToken);
+            Assert.False(viewModel.Mailboxes.Single(mailbox => mailbox.Id == shared.Id).CanSendAs);
+        }
+        finally
+        {
+            await store.DisposeAsync();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
     private static MailMessage Message(string mailboxId, string folderId, string subject, string body) => new(
         mailboxId, subject, null, null, folderId, subject,
         new MailAddress("Sender", "sender@example.com"), [], DateTimeOffset.UtcNow,
@@ -1373,7 +1439,7 @@ public sealed class MainWindowViewModelTests
         Assert.True(condition());
     }
 
-    private sealed class RecordingProvider : IMailProvider
+    private sealed class RecordingProvider : IMailProvider, ISharedMailboxProvider
     {
         public bool MarkedRead { get; private set; }
         public List<string> MarkedReadIds { get; } = [];
@@ -1384,21 +1450,34 @@ public sealed class MainWindowViewModelTests
         public IReadOnlyList<MailMessage> SearchResults { get; set; } = [];
         public TaskCompletionSource? SearchRelease { get; set; }
         public TaskCompletionSource? MoveRelease { get; set; }
+        public TaskCompletionSource? SyncRelease { get; set; }
+        public IReadOnlyList<MailFolder> FolderResults { get; set; } = [];
         public IReadOnlyList<MailAttachment> AttachmentResults { get; set; } = [];
 
+        public Task<Mailbox> ValidateSharedMailboxAsync(
+            MailAccount account,
+            string address,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new Mailbox(account.AccountId, address, address, IsShared: true));
         public Task<IReadOnlyList<MailFolder>> GetFoldersAsync(
             MailAccount account,
             Mailbox mailbox,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<MailFolder>>([]);
+            Task.FromResult(FolderResults);
 
-        public Task<MailSyncPage> SyncFolderAsync(
+        public async Task<MailSyncPage> SyncFolderAsync(
             MailAccount account,
             Mailbox mailbox,
             string folderId,
             string? cursor,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new MailSyncPage([], cursor, false));
+            CancellationToken cancellationToken = default)
+        {
+            if (SyncRelease is not null)
+            {
+                await SyncRelease.Task.WaitAsync(cancellationToken);
+            }
+            return new MailSyncPage([], cursor, false);
+        }
 
         public Task MarkReadAsync(
             MailAccount account,
@@ -1488,6 +1567,11 @@ public sealed class MainWindowViewModelTests
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        public Task<Mailbox> ValidateSharedMailboxAsync(
+            MailAccount account,
+            string address,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new Mailbox(account.AccountId, address, address, IsShared: true));
         public Task<IReadOnlyList<MailFolder>> GetFoldersAsync(
             MailAccount account, Mailbox mailbox, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<MailFolder>>([folder]);
@@ -1699,6 +1783,11 @@ public sealed class MainWindowViewModelTests
                 DateTimeOffset.UtcNow.AddMilliseconds(++_version),
                 $"etag-{_version}");
 
+        public Task<Mailbox> ValidateSharedMailboxAsync(
+            MailAccount account,
+            string address,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new Mailbox(account.AccountId, address, address, IsShared: true));
         public Task<IReadOnlyList<MailFolder>> GetFoldersAsync(
             MailAccount account, Mailbox mailbox, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<MailFolder>>([]);

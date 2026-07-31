@@ -2,7 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="BetterMail.App.RichHtmlEditor"
              x:Name="Root">
-  <Border BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1" CornerRadius="3">
+  <Border ClipToBounds="True" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1" CornerRadius="3">
     <Grid RowDefinitions="Auto,*,Auto">
       <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
                     BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1"

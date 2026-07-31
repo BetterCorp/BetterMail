@@ -25,6 +25,9 @@ public sealed class DesktopNotificationTests
         Assert.True(notification.IsSharedMailbox);
         Assert.Equal("Sender", notification.Sender);
         Assert.Equal("Quarterly report", notification.Subject);
+        Assert.Equal(context.Mailbox.Id, notification.MailboxId);
+        Assert.Equal(context.Folder.ProviderId, notification.FolderProviderId);
+        Assert.Equal(added.ProviderId, notification.MessageProviderId);
     }
 
     [Fact]

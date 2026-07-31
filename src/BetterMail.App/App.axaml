@@ -70,6 +70,11 @@
     <Style Selector="Button.folder:pointerover /template/ ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource BetterMailHoverBrush}" />
     </Style>
+    <Style Selector="Button.folder.selected">
+      <Setter Property="Background" Value="{DynamicResource BetterMailSelectionBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource BetterMailAccentBrush}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
     <Style Selector="Button.command">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />

@@ -167,12 +167,27 @@
                                 Command="{Binding $parent[Window].DataContext.OpenGlobalSearchResultCommand}"
                                 CommandParameter="{Binding}"
                                 AutomationProperties.Name="{Binding Title}">
-                          <Grid ColumnDefinitions="34,*" RowDefinitions="Auto,Auto" ColumnSpacing="10">
+                          <Grid>
+                          <Grid IsVisible="{Binding IsNotMail}" ColumnDefinitions="34,*" RowDefinitions="Auto,Auto" ColumnSpacing="10">
                             <Border Width="30" Height="30" CornerRadius="3" Background="{DynamicResource BetterMailSelectionBrush}" VerticalAlignment="Center">
                               <TextBlock Text="{Binding Glyph}" Foreground="{DynamicResource BetterMailAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Border>
                             <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                             <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Subtitle}" FontSize="11" Opacity="0.62" TextTrimming="CharacterEllipsis" />
+                          </Grid>
+                          <Grid IsVisible="{Binding IsMail}" ColumnDefinitions="4,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="10" RowSpacing="3">
+                            <Border Grid.RowSpan="4" Background="{Binding MailboxColor}" CornerRadius="2" />
+                            <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Column="2" Text="{Binding MailWhen}" FontSize="11" Opacity="0.68" />
+                            <Grid Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" ColumnDefinitions="*,*" ColumnSpacing="12">
+                              <TextBlock Text="{Binding MailFrom}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                              <TextBlock Grid.Column="1" Text="{Binding MailTo}" FontSize="11" Opacity="0.72" TextTrimming="CharacterEllipsis" />
+                            </Grid>
+                            <Border Grid.Row="2" Grid.Column="1" HorizontalAlignment="Left" Background="{DynamicResource BetterMailSelectionBrush}" Padding="6,2" CornerRadius="3">
+                              <TextBlock Text="{Binding Badge}" FontSize="10" Foreground="{DynamicResource BetterMailAccentBrush}" />
+                            </Border>
+                            <TextBlock Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding Subtitle}" FontSize="11" Opacity="0.62" TextTrimming="CharacterEllipsis" />
+                          </Grid>
                           </Grid>
                         </Button>
                       </StackPanel>
@@ -281,14 +296,14 @@
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
           <StackPanel Margin="4,0,4,8" Spacing="2">
             <TextBlock Text="FAVORITES" FontSize="11" FontWeight="SemiBold" Opacity="0.65" Margin="4,8,4,3" />
-            <Button Classes="folder" Command="{Binding ShowUnifiedInboxCommand}" Click="FolderSelectedClicked"
+            <Button Classes="folder" Classes.selected="{Binding IsUnifiedInbox}" Command="{Binding ShowUnifiedInboxCommand}" Click="FolderSelectedClicked"
                     AutomationProperties.Name="Unified Inbox" TabIndex="40">
               <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Text="Unified Inbox" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="1" Text="{Binding MessageCountText}" FontWeight="SemiBold" Foreground="#0F6CBD" Margin="6,0,1,0" VerticalAlignment="Center" />
               </Grid>
             </Button>
-            <Button Classes="folder"
+            <Button Classes="folder" Classes.selected="{Binding IsDraftsView}"
                     Command="{Binding ShowDraftsCommand}"
                     Click="FolderSelectedClicked"
                     AutomationProperties.Name="Open Drafts">
@@ -336,7 +351,7 @@
                       </TreeView.Styles>
                       <TreeView.ItemTemplate>
                         <TreeDataTemplate x:DataType="app:MailFolderNode" ItemsSource="{Binding Children}">
-                          <Button Classes="folder"
+                          <Button Classes="folder" Classes.selected="{Binding Item.IsSelected}"
                                   Command="{Binding $parent[Window].DataContext.SelectFolderCommand}"
                                   CommandParameter="{Binding Item}"
                                   Click="FolderSelectedClicked"
@@ -384,7 +399,7 @@
           </Grid>
         </Border>
 
-        <Grid Grid.Row="1" RowDefinitions="*,Auto">
+        <Grid Grid.Row="1">
           <ListBox x:Name="MessageList" ItemsSource="{Binding Messages}"
                    SelectedItem="{Binding SelectedMessage, Mode=TwoWay}"
                    SelectionMode="Multiple"
@@ -463,13 +478,16 @@
                       <MenuItem Header="Archive" Click="MessageArchiveClicked" AutomationProperties.Name="Archive message" />
                       <MenuItem Header="Delete" Click="MessageDeleteClicked" AutomationProperties.Name="Delete message" />
                       <MenuItem Header="Junk" Click="MessageJunkClicked" AutomationProperties.Name="Mark message as junk" />
+                      <MenuItem Header="Not junk" Click="MessageNotJunkClicked" AutomationProperties.Name="Mark message as not junk" />
+                      <MenuItem Header="Move to folder" SubmenuOpened="MoveMenuOpened" AutomationProperties.Name="Move message to folder" />
                       <MenuItem Header="Flag or clear flag" Click="MessageFlagClicked" AutomationProperties.Name="Toggle message flag" />
                       <MenuItem Header="Mark read or unread" Click="MessageReadClicked" AutomationProperties.Name="Toggle message read state" />
+                      <MenuItem Header="View message headers" Click="MessageHeadersClicked" AutomationProperties.Name="View message headers" />
                     </ContextMenu>
                   </Border.ContextMenu>
                   <Grid ClipToBounds="True">
-                    <Border Width="3" Background="#0F6CBD" IsVisible="{Binding IsUnread}" HorizontalAlignment="Left" />
-                    <Grid Margin="{Binding $parent[Window].DataContext.MessageRowMargin}" ColumnDefinitions="4,*,Auto" RowDefinitions="18,18,18" RowSpacing="1">
+                    <Border Width="4" Background="#0F6CBD" IsVisible="{Binding IsUnread}" HorizontalAlignment="Left" />
+                    <Grid Margin="{Binding $parent[Window].DataContext.MessageRowMargin}" ColumnDefinitions="5,*,Auto" RowDefinitions="18,18,18" RowSpacing="1">
 
                     <Grid Grid.Column="1" Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto">
                       <Border Width="6" Height="6" CornerRadius="3" Margin="0,0,6,0"
@@ -610,11 +628,13 @@
             </ListBox.ItemTemplate>
           </ListBox>
 
-          <Button Content="Load older messages"
-                  Grid.Row="1"
+          <Button x:Name="LoadOlderButton"
+                  Content="Load older messages"
                   Command="{Binding LoadMoreMessagesCommand}"
-                  IsVisible="{Binding HasMoreMessages}"
+                  IsVisible="False"
                   HorizontalAlignment="Center"
+                  VerticalAlignment="Bottom"
+                  ZIndex="4"
                   Margin="12"
                   Padding="14,6"
                   AutomationProperties.Name="Load older messages" />
@@ -674,7 +694,7 @@
     <Grid x:Name="ReadingPane"
           Grid.Row="2"
           Grid.Column="3"
-          RowDefinitions="Auto,Auto,Auto,*"
+          RowDefinitions="Auto,Auto,*"
           Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
       <Button x:Name="PhoneBack"
               Classes="command"
@@ -688,7 +708,11 @@
               ToolTip.Tip="Back to messages"
               AutomationProperties.Name="Back to messages" />
 
-      <Border Grid.Row="1"
+      <Border Grid.Row="2"
+              ZIndex="20"
+              HorizontalAlignment="Right"
+              VerticalAlignment="Top"
+              Margin="8"
               Padding="20,7"
               Background="#0A0F6CBD"
               BorderBrush="{DynamicResource BetterMailDividerBrush}"
@@ -704,9 +728,13 @@
         </Grid>
       </Border>
 
-      <Border Grid.Row="2" Padding="20,8" Background="#0A0F6CBD" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1" IsVisible="{Binding HasSelectedAttachments}">
+      <Border Grid.Row="1" Padding="20,8" Background="#0A0F6CBD" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1" IsVisible="{Binding HasSelectedAttachments}">
         <StackPanel Spacing="6">
-          <TextBlock Text="{Binding AttachmentSummary}" FontWeight="SemiBold" FontSize="12" />
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="{Binding AttachmentSummary}" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Classes="command" Content="Save all" IsVisible="{Binding HasMultipleAttachments}"
+                    Click="SaveAllAttachmentsClicked" AutomationProperties.Name="Save all attachments to a folder" />
+          </Grid>
           <ItemsControl ItemsSource="{Binding Attachments}">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate>
@@ -731,10 +759,10 @@
         </StackPanel>
       </Border>
 
-      <app:ConversationThreadView Grid.Row="3"
+      <app:ConversationThreadView Grid.Row="2"
                                   DataContext="{Binding ConversationThread}"
                                   IsVisible="{Binding ShowMessageBody}" />
-      <StackPanel Grid.Row="3"
+      <StackPanel Grid.Row="2"
                   IsVisible="{Binding HasNoSelectedMessage}"
                   HorizontalAlignment="Center"
                   VerticalAlignment="Center"
@@ -839,6 +867,7 @@
                   <Border Width="312" MinHeight="152" Margin="0,0,10,10" Padding="14"
                           BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1" CornerRadius="3">
                     <Grid RowDefinitions="Auto,*,Auto">
+                      <Border Grid.RowSpan="3" Width="4" Margin="-14,-14,0,-14" HorizontalAlignment="Left" Background="{Binding Color}" />
                       <Grid ColumnDefinitions="44,*" ColumnSpacing="11">
                         <Border Width="40" Height="40" CornerRadius="20" Background="{DynamicResource BetterMailSelectionBrush}">
                           <TextBlock Text="{Binding AvatarText}" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource BetterMailAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -852,17 +881,23 @@
                         </StackPanel>
                       </Grid>
                       <StackPanel Grid.Row="1" Margin="0,11,0,8" Spacing="3">
-                        <TextBlock Text="{Binding ProvenanceText, StringFormat='Account/mailbox: {0}'}" FontSize="11" Opacity="0.56" TextTrimming="CharacterEllipsis" />
+                        <Border Background="{Binding Color}" Padding="6,2" CornerRadius="3" HorizontalAlignment="Left">
+                          <TextBlock Text="{Binding ProvenanceText, StringFormat='Account/mailbox: {0}'}" FontSize="11" Foreground="White" TextTrimming="CharacterEllipsis" />
+                        </Border>
                         <TextBlock Text="{Binding ActivityText}" FontSize="11" Opacity="0.62" TextTrimming="CharacterEllipsis" />
                       </StackPanel>
-                      <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6" IsVisible="{Binding IsSaved}">
+                      <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
+                        <Button Classes="command" Content="Copy" Click="CopyContactEmailClicked" AutomationProperties.Name="Copy contact email" />
+                        <Button Classes="primary" Content="New mail" Click="ComposeContactClicked" AutomationProperties.Name="Start a mail to contact" />
                         <Button Classes="command"
                                 Content="Edit"
+                                IsVisible="{Binding IsSaved}"
                                 Command="{Binding $parent[Window].DataContext.EditContactCommand}"
                                 CommandParameter="{Binding}"
                                 AutomationProperties.Name="Edit contact" />
                         <Button Classes="command"
                                 Content="Delete"
+                                IsVisible="{Binding IsSaved}"
                                 Command="{Binding $parent[Window].DataContext.RequestDeleteContactCommand}"
                                 CommandParameter="{Binding}"
                                 AutomationProperties.Name="Delete contact" />

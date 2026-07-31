@@ -1715,36 +1715,49 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         );
         CREATE INDEX IF NOT EXISTS message_correspondents_lookup
             ON message_correspondents(email, contacted_at DESC);
-        CREATE TRIGGER IF NOT EXISTS message_correspondents_ai AFTER INSERT ON messages BEGIN
+        DROP TRIGGER IF EXISTS message_correspondents_ai;
+        DROP TRIGGER IF EXISTS message_correspondents_ad;
+        DROP TRIGGER IF EXISTS message_correspondents_au;
+        CREATE TRIGGER message_correspondents_ai AFTER INSERT ON messages BEGIN
             INSERT OR IGNORE INTO message_correspondents
-            SELECT new.rowid, new.mailbox_id, lower(trim(new.from_address)), trim(new.from_name), new.received_at
-            WHERE trim(new.from_address) <> '';
-            INSERT OR IGNORE INTO message_correspondents
-            SELECT new.rowid, new.mailbox_id, lower(trim(json_extract(value, '$.Address'))),
-                   trim(coalesce(json_extract(value, '$.Name'), '')), new.received_at
-            FROM json_each(new.recipients_json) WHERE trim(coalesce(json_extract(value, '$.Address'), '')) <> '';
-            INSERT OR IGNORE INTO message_correspondents
-            SELECT new.rowid, new.mailbox_id, lower(trim(json_extract(value, '$.Address'))),
-                   trim(coalesce(json_extract(value, '$.Name'), '')), new.received_at
-            FROM json_each(new.cc_recipients_json) WHERE trim(coalesce(json_extract(value, '$.Address'), '')) <> '';
+            SELECT new.rowid, new.mailbox_id, correspondent.email, correspondent.display_name, new.received_at
+            FROM (
+                SELECT lower(trim(new.from_address)) AS email, trim(new.from_name) AS display_name
+                WHERE trim(new.from_address) <> ''
+                UNION
+                SELECT lower(trim(json_extract(value, '$.Address'))),
+                       trim(coalesce(json_extract(value, '$.Name'), ''))
+                FROM json_each(new.recipients_json)
+                WHERE trim(coalesce(json_extract(value, '$.Address'), '')) <> ''
+                UNION
+                SELECT lower(trim(json_extract(value, '$.Address'))),
+                       trim(coalesce(json_extract(value, '$.Name'), ''))
+                FROM json_each(new.cc_recipients_json)
+                WHERE trim(coalesce(json_extract(value, '$.Address'), '')) <> ''
+            ) AS correspondent;
         END;
-        CREATE TRIGGER IF NOT EXISTS message_correspondents_ad AFTER DELETE ON messages BEGIN
+        CREATE TRIGGER message_correspondents_ad AFTER DELETE ON messages BEGIN
             DELETE FROM message_correspondents WHERE message_rowid = old.rowid;
         END;
-        CREATE TRIGGER IF NOT EXISTS message_correspondents_au
+        CREATE TRIGGER message_correspondents_au
         AFTER UPDATE OF mailbox_id, from_name, from_address, recipients_json, cc_recipients_json, received_at ON messages BEGIN
             DELETE FROM message_correspondents WHERE message_rowid = old.rowid;
             INSERT OR IGNORE INTO message_correspondents
-            SELECT new.rowid, new.mailbox_id, lower(trim(new.from_address)), trim(new.from_name), new.received_at
-            WHERE trim(new.from_address) <> '';
-            INSERT OR IGNORE INTO message_correspondents
-            SELECT new.rowid, new.mailbox_id, lower(trim(json_extract(value, '$.Address'))),
-                   trim(coalesce(json_extract(value, '$.Name'), '')), new.received_at
-            FROM json_each(new.recipients_json) WHERE trim(coalesce(json_extract(value, '$.Address'), '')) <> '';
-            INSERT OR IGNORE INTO message_correspondents
-            SELECT new.rowid, new.mailbox_id, lower(trim(json_extract(value, '$.Address'))),
-                   trim(coalesce(json_extract(value, '$.Name'), '')), new.received_at
-            FROM json_each(new.cc_recipients_json) WHERE trim(coalesce(json_extract(value, '$.Address'), '')) <> '';
+            SELECT new.rowid, new.mailbox_id, correspondent.email, correspondent.display_name, new.received_at
+            FROM (
+                SELECT lower(trim(new.from_address)) AS email, trim(new.from_name) AS display_name
+                WHERE trim(new.from_address) <> ''
+                UNION
+                SELECT lower(trim(json_extract(value, '$.Address'))),
+                       trim(coalesce(json_extract(value, '$.Name'), ''))
+                FROM json_each(new.recipients_json)
+                WHERE trim(coalesce(json_extract(value, '$.Address'), '')) <> ''
+                UNION
+                SELECT lower(trim(json_extract(value, '$.Address'))),
+                       trim(coalesce(json_extract(value, '$.Name'), ''))
+                FROM json_each(new.cc_recipients_json)
+                WHERE trim(coalesce(json_extract(value, '$.Address'), '')) <> ''
+            ) AS correspondent;
         END;
         CREATE TABLE IF NOT EXISTS sync_cursors(
             mailbox_id TEXT PRIMARY KEY,
