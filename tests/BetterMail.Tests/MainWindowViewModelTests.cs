@@ -769,6 +769,7 @@ public sealed class MainWindowViewModelTests
             Assert.True(provider.MarkedRead);
             Assert.True(viewModel.SelectedMessage?.IsRead);
             Assert.Same(viewModel.Messages.Single(), viewModel.SelectedMessage);
+            Assert.True(viewModel.DeleteCommand.CanExecute(null));
             Assert.Single(viewModel.Attachments);
             Assert.Equal(0, bodyRefreshes);
         }

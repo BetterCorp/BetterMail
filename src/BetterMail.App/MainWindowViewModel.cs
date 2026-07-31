@@ -3705,6 +3705,10 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private IReadOnlyList<MailMessage> ActionMessages()
     {
+        if (SelectedMessages.Count <= 1)
+        {
+            return SelectedMessage is null ? [] : [SelectedMessage];
+        }
         var selectedKeys = SelectedMessages.Select(MessageKey).ToHashSet(StringComparer.Ordinal);
         var current = Messages.Where(message => selectedKeys.Contains(MessageKey(message))).ToArray();
         return current.Length > 0
