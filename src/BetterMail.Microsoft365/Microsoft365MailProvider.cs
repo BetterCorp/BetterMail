@@ -295,6 +295,20 @@ public sealed class Microsoft365MailProvider(
         return attachments;
     }
 
+    public async Task<MailAttachment?> GetAttachmentAsync(
+        MailAccount account,
+        Mailbox mailbox,
+        string messageId,
+        string attachmentId,
+        CancellationToken cancellationToken = default)
+    {
+        using var document = await GetJsonAsync(
+            account,
+            AttachmentItemEndpoint(account, mailbox, messageId, attachmentId),
+            cancellationToken).ConfigureAwait(false);
+        return MapAttachment(document.RootElement);
+    }
+
     public async Task SendAsync(
         MailAccount account,
         Mailbox mailbox,
@@ -814,7 +828,14 @@ public sealed class Microsoft365MailProvider(
         statusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout;
 
     internal static string AttachmentEndpoint(MailAccount account, Mailbox mailbox, string messageId) =>
-        $"{MailboxPath(account, mailbox)}/messages/{Uri.EscapeDataString(messageId)}/attachments?$top=100";
+        $"{MailboxPath(account, mailbox)}/messages/{Uri.EscapeDataString(messageId)}/attachments?$select=id,name,contentType,size,isInline&$top=100";
+
+    internal static string AttachmentItemEndpoint(
+        MailAccount account,
+        Mailbox mailbox,
+        string messageId,
+        string attachmentId) =>
+        $"{MailboxPath(account, mailbox)}/messages/{Uri.EscapeDataString(messageId)}/attachments/{Uri.EscapeDataString(attachmentId)}";
 
     internal static string MailboxPath(MailAccount account, Mailbox mailbox)
     {

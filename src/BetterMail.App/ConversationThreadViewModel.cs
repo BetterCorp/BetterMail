@@ -15,10 +15,10 @@ public sealed record ConversationActionRequest(ConversationAction Action, MailMe
 
 public sealed class ConversationThreadViewModel : ViewModelBase
 {
-    private const int RenderedMessageCacheLimit = 128;
     private readonly MailContentRenderer _renderer;
     private readonly Action<ConversationActionRequest>? _action;
     private readonly Action<MailMessage>? _selectionChanged;
+    private readonly Func<MailMessage, Task<MailMessage?>>? _loadMessage;
     private readonly Func<MailMessage, string> _location;
     private ConversationThreadItem? _selectedThread;
     private ConversationMessageItem? _selectedMessage;
@@ -28,11 +28,13 @@ public sealed class ConversationThreadViewModel : ViewModelBase
         MailContentRenderer? renderer = null,
         Action<ConversationActionRequest>? action = null,
         Action<MailMessage>? selectionChanged = null,
+        Func<MailMessage, Task<MailMessage?>>? loadMessage = null,
         Func<MailMessage, string>? location = null)
     {
         _renderer = renderer ?? new MailContentRenderer();
         _action = action;
         _selectionChanged = selectionChanged;
+        _loadMessage = loadMessage;
         _location = location ?? (message => message.FolderId);
         ToggleMessageCommand = new AsyncCommand<ConversationMessageItem>(ToggleMessageAsync);
         AllowRemoteContentCommand = new AsyncCommand<ConversationMessageItem>(AllowRemoteContentAsync);
@@ -89,6 +91,14 @@ public sealed class ConversationThreadViewModel : ViewModelBase
     public void Reconcile(IEnumerable<MailMessage> messages, MailMessage? selectedMessage = null)
     {
         var projections = ConversationThread.Project(messages);
+        var activeMessages = projections
+            .SelectMany(static thread => thread.Messages)
+            .Select(static item => ConversationThread.MessageIdentity(item.Message))
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var identity in _messageCache.Keys.Where(identity => !activeMessages.Contains(identity)).ToArray())
+        {
+            _messageCache.Remove(identity);
+        }
         var existing = Threads.ToDictionary(thread => thread.Identity, StringComparer.Ordinal);
         var reconciled = new List<ConversationThreadItem>(projections.Count);
         foreach (var projection in projections)
@@ -123,11 +133,6 @@ public sealed class ConversationThreadViewModel : ViewModelBase
             return cached;
         }
 
-        // ponytail: bounded click-history cache; use a real LRU only if 128 rendered messages proves insufficient.
-        if (_messageCache.Count >= RenderedMessageCacheLimit)
-        {
-            _messageCache.Remove(_messageCache.Keys.First());
-        }
         var item = new ConversationMessageItem(identity, message, _renderer, _location);
         _messageCache.Add(identity, item);
         return item;
@@ -154,10 +159,21 @@ public sealed class ConversationThreadViewModel : ViewModelBase
             ?.SetAttachments(attachments);
     }
 
-    private Task SelectMessageAsync(ConversationMessageItem item)
+    private async Task SelectMessageAsync(ConversationMessageItem item)
     {
         Select(item);
-        return Task.CompletedTask;
+        if (_loadMessage is null || item.Message.Body is not null)
+        {
+            return;
+        }
+        var hydrated = await _loadMessage(item.Message);
+        if (hydrated is null || SelectedMessage?.Identity != item.Identity || SelectedThread is null)
+        {
+            return;
+        }
+        Reconcile(
+            SelectedThread.Messages.Select(current => current.Identity == item.Identity ? hydrated : current.Message),
+            hydrated);
     }
 
     private void Select(ConversationMessageItem? item)
@@ -178,8 +194,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
     {
         // Thread headers already reference locally cached messages. Selecting one must
         // never reselect the mail-list row or start provider work.
-        Select(item);
-        return Task.CompletedTask;
+        return SelectMessageAsync(item);
     }
 
     private static Task AllowRemoteContentAsync(ConversationMessageItem item)
@@ -282,7 +297,7 @@ public sealed class ConversationMessageItem : ViewModelBase
     private bool _isSelected;
     private bool _allowRemoteContent;
     private IReadOnlyList<MailAttachment> _attachments = [];
-    private Uri _bodyUri;
+    private string _bodyHtml;
     private bool _hasBlockedRemoteContent;
     private bool _renderRequested;
     private int _renderVersion;
@@ -297,7 +312,7 @@ public sealed class ConversationMessageItem : ViewModelBase
         _message = message;
         _renderer = renderer;
         _location = location;
-        _bodyUri = renderer.Render("Loading message…", false);
+        _bodyHtml = renderer.RenderDocument("Loading message…", false);
     }
 
     public string Identity { get; }
@@ -308,12 +323,12 @@ public sealed class ConversationMessageItem : ViewModelBase
     public string ReceivedText => _message.ReceivedAt.ToLocalTime().ToString("ddd, MMM d, yyyy HH:mm");
     public string Location => _location(_message);
     public string Preview => _message.Preview;
-    public Uri BodyUri
+    public string BodyHtml
     {
         get
         {
             EnsureRendered();
-            return _bodyUri;
+            return _bodyHtml;
         }
     }
     public bool HasBlockedRemoteContent
@@ -342,7 +357,7 @@ public sealed class ConversationMessageItem : ViewModelBase
             _allowRemoteContent = false;
             _attachments = [];
             _renderRequested = false;
-            _bodyUri = _renderer.Render("Loading message…", false);
+            _bodyHtml = _renderer.RenderDocument("Loading message…", false);
         }
         RaisePropertyChanged(nameof(Message));
         RaisePropertyChanged(nameof(Sender));
@@ -353,7 +368,7 @@ public sealed class ConversationMessageItem : ViewModelBase
         RaisePropertyChanged(nameof(Preview));
         if (bodyChanged)
         {
-            RaisePropertyChanged(nameof(BodyUri));
+            RaisePropertyChanged(nameof(BodyHtml));
             RaisePropertyChanged(nameof(HasBlockedRemoteContent));
         }
     }
@@ -383,8 +398,8 @@ public sealed class ConversationMessageItem : ViewModelBase
     public void RefreshTheme()
     {
         _renderRequested = false;
-        _bodyUri = _renderer.Render("Loading message…", false);
-        RaisePropertyChanged(nameof(BodyUri));
+        _bodyHtml = _renderer.RenderDocument("Loading message…", false);
+        RaisePropertyChanged(nameof(BodyHtml));
         RaisePropertyChanged(nameof(HasBlockedRemoteContent));
     }
 
@@ -408,38 +423,38 @@ public sealed class ConversationMessageItem : ViewModelBase
         IReadOnlyList<MailAttachment> attachments,
         bool allowRemoteContent)
     {
-        (Uri BodyUri, bool HasBlockedRemoteContent) rendered;
+        (string BodyHtml, bool HasBlockedRemoteContent) rendered;
         try
         {
             rendered = await Task.Run(() => Render(message, attachments, allowRemoteContent));
         }
         catch
         {
-            rendered = (_renderer.Render(message.Preview, false), false);
+            rendered = (_renderer.RenderDocument(message.Preview, false), false);
         }
         ApplyRenderedBody(version, rendered);
     }
 
-    private (Uri BodyUri, bool HasBlockedRemoteContent) Render(
+    private (string BodyHtml, bool HasBlockedRemoteContent) Render(
         MailMessage message,
         IReadOnlyList<MailAttachment> attachments,
         bool allowRemoteContent)
     {
         var hasHtmlBody = message.IsHtml && message.Body is not null;
         return (
-            _renderer.Render(message.Body ?? message.Preview, hasHtmlBody, attachments, allowRemoteContent),
+            _renderer.RenderDocument(message.Body ?? message.Preview, hasHtmlBody, attachments, allowRemoteContent),
             !allowRemoteContent && _renderer.HasRemoteImages(message.Body, hasHtmlBody));
     }
 
-    private void ApplyRenderedBody(int version, (Uri BodyUri, bool HasBlockedRemoteContent) rendered)
+    private void ApplyRenderedBody(int version, (string BodyHtml, bool HasBlockedRemoteContent) rendered)
     {
         if (version != _renderVersion)
         {
             return;
         }
-        _bodyUri = rendered.BodyUri;
+        _bodyHtml = rendered.BodyHtml;
         _hasBlockedRemoteContent = rendered.HasBlockedRemoteContent;
-        RaisePropertyChanged(nameof(BodyUri));
+        RaisePropertyChanged(nameof(BodyHtml));
         RaisePropertyChanged(nameof(HasBlockedRemoteContent));
     }
 }

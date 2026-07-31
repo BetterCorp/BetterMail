@@ -94,17 +94,20 @@ public sealed class Microsoft365MailProviderTests
     }
 
     [Fact]
-    public void ListsAttachmentDerivedPropertiesWithoutInvalidBaseSelect()
+    public void ListsOnlyBaseAttachmentMetadataBeforeContentIsRequested()
     {
         var account = Account();
         var primary = new BetterMail.Core.Mailbox(account.AccountId, account.EmailAddress, "Primary");
         var shared = new BetterMail.Core.Mailbox(account.AccountId, "shared+ops@example.com", "Shared", IsShared: true);
 
-        Assert.Equal("me/messages/message%2Fid/attachments?$top=100",
+        Assert.Equal("me/messages/message%2Fid/attachments?$select=id,name,contentType,size,isInline&$top=100",
             Microsoft365MailProvider.AttachmentEndpoint(account, primary, "message/id"));
-        Assert.Equal("users/shared%2Bops%40example.com/messages/message%2Fid/attachments?$top=100",
+        Assert.Equal("users/shared%2Bops%40example.com/messages/message%2Fid/attachments?$select=id,name,contentType,size,isInline&$top=100",
             Microsoft365MailProvider.AttachmentEndpoint(account, shared, "message/id"));
-        Assert.DoesNotContain("$select", Microsoft365MailProvider.AttachmentEndpoint(account, primary, "message/id"));
+        Assert.Contains("$select=id,name,contentType,size,isInline", Microsoft365MailProvider.AttachmentEndpoint(account, primary, "message/id"));
+        Assert.Equal(
+            "users/shared%2Bops%40example.com/messages/message%2Fid/attachments/attachment%2Fid",
+            Microsoft365MailProvider.AttachmentItemEndpoint(account, shared, "message/id", "attachment/id"));
     }
 
     [Fact]

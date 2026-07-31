@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
@@ -26,6 +27,7 @@ public sealed partial class MainWindow : Window
     private WindowSessionStore? _windowSessions;
     private readonly Dictionary<PreviewWindowSession, Window> _previewWindows = [];
     private bool _isClosing;
+    private bool _preservingMessageSelection;
 
     public MainWindow()
     {
@@ -231,7 +233,46 @@ public sealed partial class MainWindow : Window
 
     private void MessageSelectionChanged(object? sender, SelectionChangedEventArgs args)
     {
+        if (_preservingMessageSelection)
+        {
+            return;
+        }
         _viewModel?.SetSelectedMessages(MessageList.SelectedItems?.OfType<MailMessage>() ?? []);
+    }
+
+    private void MessagesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs args)
+    {
+        if (_viewModel is null || args.Action != NotifyCollectionChangedAction.Replace ||
+            args.OldItems is null || args.NewItems is null || MessageList.SelectedItems is not { } selectedItems)
+        {
+            return;
+        }
+        for (var index = 0; index < Math.Min(args.OldItems.Count, args.NewItems.Count); index++)
+        {
+            if (args.OldItems[index] is not MailMessage oldMessage ||
+                args.NewItems[index] is not MailMessage newMessage ||
+                (_viewModel.SelectedMessage is null ||
+                 _viewModel.SelectedMessage.MailboxId != oldMessage.MailboxId ||
+                 _viewModel.SelectedMessage.ProviderId != oldMessage.ProviderId) &&
+                !_viewModel.SelectedMessages.Any(message =>
+                    message.MailboxId == oldMessage.MailboxId && message.ProviderId == oldMessage.ProviderId))
+            {
+                continue;
+            }
+            _preservingMessageSelection = true;
+            try
+            {
+                if (!selectedItems.Contains(newMessage))
+                {
+                    selectedItems.Add(newMessage);
+                }
+                selectedItems.Remove(oldMessage);
+            }
+            finally
+            {
+                _preservingMessageSelection = false;
+            }
+        }
     }
 
     private void MessageListScrollChanged(object? sender, ScrollChangedEventArgs args) =>
@@ -438,6 +479,12 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
+        var message = _viewModel.SelectedMessage;
+        var attachments = _viewModel.Attachments.ToArray();
+        if (message is null)
+        {
+            return;
+        }
         try
         {
             var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
@@ -452,7 +499,7 @@ public sealed partial class MainWindow : Window
             }
 
             var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var attachment in _viewModel.Attachments.Where(static attachment => attachment.ContentBytes is not null))
+            foreach (var attachment in attachments)
             {
                 var name = UniqueAttachmentName(attachment.Name, usedNames);
                 var file = await folder.CreateFileAsync(name);
@@ -462,7 +509,7 @@ public sealed partial class MainWindow : Window
                 }
                 await using var stream = await file.OpenWriteAsync();
                 stream.SetLength(0);
-                await stream.WriteAsync(attachment.ContentBytes!);
+                await _viewModel.DownloadAttachmentAsync(message, attachment, stream);
             }
         }
         catch (Exception exception)
@@ -534,13 +581,19 @@ public sealed partial class MainWindow : Window
 
     private void ShowPreviewWindow(PreviewWindowSession session, CachedMailPreview preview)
     {
+        var viewModel = _viewModel;
+        if (viewModel is null)
+        {
+            return;
+        }
         if (_previewWindows.TryGetValue(session, out var existing))
         {
             existing.Activate();
             return;
         }
 
-        var previewViewModel = new ConversationThreadViewModel();
+        var previewViewModel = new ConversationThreadViewModel(
+            loadMessage: message => viewModel.GetCachedMessageAsync(message));
         previewViewModel.Reconcile(preview.Messages, preview.Selected);
         var window = new Window
         {
@@ -690,6 +743,7 @@ public sealed partial class MainWindow : Window
             _viewModel.SearchFocusRequested -= FocusMailSearch;
             _viewModel.HeadersRequested -= OpenHeaders;
             _viewModel.PropertyChanged -= ViewModelPropertyChanged;
+            _viewModel.Messages.CollectionChanged -= MessagesCollectionChanged;
         }
 
         _viewModel = viewModel;
@@ -701,6 +755,7 @@ public sealed partial class MainWindow : Window
             _viewModel.SearchFocusRequested += FocusMailSearch;
             _viewModel.HeadersRequested += OpenHeaders;
             _viewModel.PropertyChanged += ViewModelPropertyChanged;
+            _viewModel.Messages.CollectionChanged += MessagesCollectionChanged;
         }
         UpdateMailPanes();
         UpdateLoadOlderVisibility();
@@ -760,18 +815,22 @@ public sealed partial class MainWindow : Window
     private void OpenHeaders(MailHeadersDocument document) =>
         new MailHeadersWindow(document).Show(this);
 
-    private void PreviewAttachmentClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private async void PreviewAttachmentClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        if (sender is not Button { CommandParameter: MailAttachment attachment })
+        if (_viewModel is null || sender is not Button { CommandParameter: MailAttachment attachment })
         {
             return;
         }
-
+        var hydrated = await _viewModel.LoadAttachmentContentAsync(attachment);
+        if (hydrated is null)
+        {
+            return;
+        }
         new FilePreviewWindow(
-            attachment.Name,
-            attachment.ContentType,
-            attachment.Size,
-            attachment.ContentBytes).Show(this);
+            hydrated.Name,
+            hydrated.ContentType,
+            hydrated.Size,
+            hydrated.ContentBytes).Show(this);
     }
 
 }

@@ -685,6 +685,34 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task LoadsAttachmentContentOnlyWhenRequested()
+    {
+        var account = new MailAccount("microsoft365", "account", "tenant", "person@example.com", "Person", ProviderCapabilities.Mail);
+        var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+        var metadata = new MailAttachment("attachment", "large.zip", "application/zip", 16 * 1024 * 1024, false, null, null);
+        var provider = new RecordingProvider
+        {
+            AttachmentResults = [metadata],
+            HydratedAttachmentResult = metadata with { ContentBytes = [1, 2, 3] }
+        };
+        var viewModel = new MainWindowViewModel(null, "data", _ => { }, _ => { }, null, provider);
+        viewModel.Accounts.Add(account);
+        viewModel.Mailboxes.Add(mailbox);
+        viewModel.SelectedMessage = Message(mailbox.Id, "inbox", "Attachment", "Body") with
+        {
+            HasAttachments = true
+        };
+
+        await WaitUntilAsync(() => viewModel.Attachments.Count == 1, TestContext.Current.CancellationToken);
+
+        Assert.Null(viewModel.Attachments[0].ContentBytes);
+        Assert.Equal(0, provider.GetAttachmentCalls);
+        var hydrated = await viewModel.LoadAttachmentContentAsync(metadata, TestContext.Current.CancellationToken);
+        Assert.Equal([1, 2, 3], hydrated?.ContentBytes);
+        Assert.Equal(1, provider.GetAttachmentCalls);
+    }
+
+    [Fact]
     public async Task MarksSelectedUnreadMessageAsReadAfterDelay()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -740,6 +768,7 @@ public sealed class MainWindowViewModelTests
 
             Assert.True(provider.MarkedRead);
             Assert.True(viewModel.SelectedMessage?.IsRead);
+            Assert.Same(viewModel.Messages.Single(), viewModel.SelectedMessage);
             Assert.Single(viewModel.Attachments);
             Assert.Equal(0, bodyRefreshes);
         }
@@ -794,12 +823,12 @@ public sealed class MainWindowViewModelTests
                 cancellationToken);
             var conversationMessage = viewModel.ConversationThread.SelectedMessage!;
             await WaitUntilAsync(
-                () => Decode(conversationMessage.BodyUri).Contains("Stable body", StringComparison.Ordinal),
+                () => conversationMessage.BodyHtml.Contains("Stable body", StringComparison.Ordinal),
                 cancellationToken);
             var bodyRefreshes = 0;
             conversationMessage.PropertyChanged += (_, args) =>
             {
-                if (args.PropertyName == nameof(ConversationMessageItem.BodyUri))
+                if (args.PropertyName == nameof(ConversationMessageItem.BodyHtml))
                 {
                     bodyRefreshes++;
                 }
@@ -1509,6 +1538,8 @@ public sealed class MainWindowViewModelTests
         public TaskCompletionSource? SyncRelease { get; set; }
         public IReadOnlyList<MailFolder> FolderResults { get; set; } = [];
         public IReadOnlyList<MailAttachment> AttachmentResults { get; set; } = [];
+        public MailAttachment? HydratedAttachmentResult { get; set; }
+        public int GetAttachmentCalls { get; private set; }
 
         public Task<Mailbox> ValidateSharedMailboxAsync(
             MailAccount account,
@@ -1606,6 +1637,18 @@ public sealed class MainWindowViewModelTests
             string messageId,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(AttachmentResults);
+
+        public Task<MailAttachment?> GetAttachmentAsync(
+            MailAccount account,
+            Mailbox mailbox,
+            string messageId,
+            string attachmentId,
+            CancellationToken cancellationToken = default)
+        {
+            GetAttachmentCalls++;
+            return Task.FromResult(HydratedAttachmentResult ??
+                AttachmentResults.FirstOrDefault(attachment => attachment.ProviderId == attachmentId));
+        }
 
         public Task SendAsync(
             MailAccount account,

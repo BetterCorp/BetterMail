@@ -123,6 +123,8 @@ public sealed class MainWindowXamlTests
         var calendarXaml = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "BetterMail.App", "CalendarWorkspaceView.axaml"));
         var appSource = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "BetterMail.App", "App.axaml.cs"));
         var startupSource = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "BetterMail.App", "StartupWindow.cs"));
+        var mainWindowSource = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "BetterMail.App", "MainWindow.axaml.cs"));
+        var conversationSource = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "BetterMail.App", "ConversationThreadView.axaml.cs"));
 
         Assert.DoesNotContain("ConnectCommand", folderPane);
         Assert.DoesNotContain("Add shared mailbox", folderPane);
@@ -193,6 +195,10 @@ public sealed class MainWindowXamlTests
         Assert.DoesNotContain("DataContext=" + (char)34 + "{Binding CalendarWorkspace}" + (char)34, xaml);
         Assert.DoesNotContain("<NativeWebView", xaml);
         Assert.Equal(1, Count(conversationXaml, "<NativeWebView"));
+        Assert.DoesNotContain("Source={Binding", conversationXaml);
+        Assert.Contains("MessageWebView.NavigateToString", conversationSource);
+        Assert.Contains("MessagesCollectionChanged", mainWindowSource);
+        Assert.Contains("_preservingMessageSelection", mainWindowSource);
         Assert.Contains("Classes.selected=" + (char)34 + "{Binding IsSelected}" + (char)34, conversationXaml);
         Assert.Contains(BindingAttribute("IsVisible", "IsGenericWorkspaceModule"), xaml);
         Assert.Contains("x:Name=" + (char)34 + "SettingsSurface" + (char)34 + " Grid.Row=" + (char)34 + "0" + (char)34 + " Grid.RowSpan=" + (char)34 + "3" + (char)34, xaml);

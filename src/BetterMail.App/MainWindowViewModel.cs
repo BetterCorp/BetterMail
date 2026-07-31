@@ -9,6 +9,7 @@ namespace BetterMail.App;
 
 public sealed class MainWindowViewModel : ViewModelBase
 {
+    private const long InlineAttachmentLimitBytes = 10L * 1024 * 1024;
     private static readonly string[] SyncFrames = ["◴", "◷", "◶", "◵"];
     private static readonly IReadOnlyDictionary<string, string> Accents = new Dictionary<string, string>
     {
@@ -226,6 +227,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         ConversationThread = new ConversationThreadViewModel(
             _renderer,
             HandleConversationAction,
+            loadMessage: message => GetCachedMessageAsync(message),
             location: MailLocation);
         SearchAccountFilters.Add(new SearchAccountFilter("All accounts", null));
         SearchFolderFilters.Add(new SearchFolderFilter("All mail folders", null, null));
@@ -520,9 +522,21 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         var thread = BetterMail.Core.ConversationThread.ThreadIdentity(selected);
-        IReadOnlyList<MailMessage> messages = await _store.GetThreadMessagesAsync(thread, cancellationToken);
-        return new CachedMailPreview(selected, messages.Count == 0 ? [selected] : messages);
+        var messages = (await _store.GetThreadMessagesAsync(thread, cancellationToken))
+            .Select(message => SameMessage(message, selected) ? selected : message)
+            .ToList();
+        if (messages.All(message => !SameMessage(message, selected)))
+        {
+            messages.Add(selected);
+        }
+        return new CachedMailPreview(selected, messages);
     }
+
+    internal Task<MailMessage?> GetCachedMessageAsync(
+        MailMessage message,
+        CancellationToken cancellationToken = default) =>
+        _store?.GetMessageAsync(message.MailboxId, message.ProviderId, cancellationToken) ??
+        Task.FromResult<MailMessage?>(message);
 
     public bool HasSelectedMessage => SelectedMessage is not null;
     public bool HasBlockedRemoteContent => HasSelectedMessage && !_allowRemoteContent && _renderer.HasRemoteImages(
@@ -3798,7 +3812,10 @@ public sealed class MainWindowViewModel : ViewModelBase
                 }
                 var updated = message with { IsFlagged = isFlagged };
                 await _provider.SetFlaggedAsync(account, mailbox, message.ProviderId, isFlagged);
-                await _store.ApplySyncPageAsync($"manual:{mailbox.Id}", new MailSyncPage([updated], null, false));
+                await _store.UpdateMessageStateAsync(
+                    message.MailboxId,
+                    message.ProviderId,
+                    isFlagged: isFlagged);
                 ApplyMessageUpdate(message, updated);
             }
 
@@ -3917,10 +3934,11 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         var updated = message with { IsRead = isRead };
         await _provider.MarkReadAsync(account, mailbox, message.ProviderId, updated.IsRead, cancellationToken);
-        await _store.ApplySyncPageAsync(
-            $"manual:{mailbox.Id}",
-            new MailSyncPage([updated], null, false),
-            cancellationToken);
+        await _store.UpdateMessageStateAsync(
+            message.MailboxId,
+            message.ProviderId,
+            isRead: isRead,
+            cancellationToken: cancellationToken);
         ApplyMessageUpdate(message, updated);
     }
 
@@ -4032,6 +4050,16 @@ public sealed class MainWindowViewModel : ViewModelBase
                 mailbox,
                 message.ProviderId,
                 cancellationToken);
+            if (hasCidImages)
+            {
+                attachments = await HydrateAttachmentsAsync(
+                    account,
+                    mailbox,
+                    message.ProviderId,
+                    attachments,
+                    static attachment => attachment.IsInline && attachment.Size <= InlineAttachmentLimitBytes,
+                    cancellationToken);
+            }
             if (!IsCurrentMessage(message))
             {
                 return;
@@ -4061,6 +4089,67 @@ public sealed class MainWindowViewModel : ViewModelBase
                 IsLoadingAttachments = false;
             }
         }
+    }
+
+    internal async Task<MailAttachment?> LoadAttachmentContentAsync(
+        MailAttachment attachment,
+        CancellationToken cancellationToken = default)
+    {
+        if (attachment.ContentBytes is not null)
+        {
+            return attachment;
+        }
+        var message = SelectedMessage;
+        if (message is null || _provider is null ||
+            !TryGetMessageContext(message, out var account, out var mailbox))
+        {
+            return null;
+        }
+        try
+        {
+            return await _provider.GetAttachmentAsync(
+                account, mailbox, message.ProviderId, attachment.ProviderId, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Error = $"Attachment could not be loaded: {exception.Message}";
+            return null;
+        }
+    }
+
+    internal async Task DownloadAttachmentAsync(
+        MailMessage message,
+        MailAttachment attachment,
+        Stream destination,
+        CancellationToken cancellationToken = default)
+    {
+        if (_provider is null || !TryGetMessageContext(message, out var account, out var mailbox))
+        {
+            throw new InvalidOperationException("The selected message account is unavailable.");
+        }
+        await _provider.DownloadAttachmentAsync(
+            account, mailbox, message.ProviderId, attachment, destination, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<MailAttachment>> HydrateAttachmentsAsync(
+        MailAccount account,
+        Mailbox mailbox,
+        string messageId,
+        IReadOnlyList<MailAttachment> attachments,
+        Func<MailAttachment, bool> shouldHydrate,
+        CancellationToken cancellationToken)
+    {
+        var hydrated = attachments.ToArray();
+        for (var index = 0; index < hydrated.Length; index++)
+        {
+            if (hydrated[index].ContentBytes is not null || !shouldHydrate(hydrated[index]))
+            {
+                continue;
+            }
+            hydrated[index] = await _provider!.GetAttachmentAsync(
+                account, mailbox, messageId, hydrated[index].ProviderId, cancellationToken) ?? hydrated[index];
+        }
+        return hydrated;
     }
 
     private Task AllowRemoteContentAsync()
@@ -4717,10 +4806,6 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             return [];
         }
-        if (IsCurrentMessage(message) && Attachments.Count > 0)
-        {
-            return Attachments.ToArray();
-        }
         if (_provider is null || !TryGetMessageContext(message, out var account, out var mailbox))
         {
             Error = "Original message pictures could not be loaded.";
@@ -4728,7 +4813,18 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
         try
         {
-            return await _provider.GetAttachmentsAsync(account, mailbox, message.ProviderId);
+            var attachments = IsCurrentMessage(message) && Attachments.Count > 0
+                ? Attachments.ToArray()
+                : await _provider.GetAttachmentsAsync(account, mailbox, message.ProviderId);
+            return await HydrateAttachmentsAsync(
+                account,
+                mailbox,
+                message.ProviderId,
+                attachments,
+                attachment =>
+                    (hasCidImages && attachment.IsInline && attachment.Size <= InlineAttachmentLimitBytes) ||
+                    includeFiles && !attachment.IsInline,
+                CancellationToken.None);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -4874,26 +4970,29 @@ public sealed class MainWindowViewModel : ViewModelBase
             var messages = (await _store.GetThreadMessagesAsync(
                     BetterMail.Core.ConversationThread.ThreadIdentity(selected), cancellationToken))
                 .ToList();
+            var hydrated = selected.Body is null
+                ? await _store.GetMessageAsync(selected.MailboxId, selected.ProviderId, cancellationToken)
+                : selected;
             if (selectionVersion != _selectionVersion || !IsCurrentMessage(selected))
             {
                 return;
             }
-            var hydrated = messages.FirstOrDefault(message => SameMessage(message, selected));
             if (hydrated is not null)
             {
-                if (selected.Body is not null && hydrated.Body is null)
+                var hydratedIndex = messages.FindIndex(message => SameMessage(message, selected));
+                if (hydratedIndex >= 0)
                 {
-                    hydrated = hydrated with { Body = selected.Body };
+                    messages[hydratedIndex] = hydrated;
+                }
+                else
+                {
+                    messages.Add(hydrated);
                 }
                 if (!selected.HasSameContent(hydrated))
                 {
+                    ApplyMessageUpdate(selected, hydrated);
                     selected = hydrated;
-                    SelectedMessage = hydrated;
                 }
-            }
-            else
-            {
-                messages.Add(selected);
             }
             ConversationThread.Reconcile(messages, selected);
             ConversationThread.SetAttachments(selected, Attachments.ToArray());

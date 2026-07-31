@@ -391,6 +391,16 @@ public sealed class EncryptedMailStoreTests
                 .Intersect(second.Messages.Select(static message => message.ProviderId)));
 
             Assert.Contains("platypus", (await store.GetMessageAsync(mailbox.Id, "old", cancellationToken))!.Body);
+            var thread = await store.GetThreadMessagesAsync(
+                ConversationThread.ThreadIdentity(first.Messages[0]), cancellationToken);
+            Assert.Equal(3, thread.Count);
+            Assert.All(thread, static message => Assert.Null(message.Body));
+            await store.UpdateMessageStateAsync(
+                mailbox.Id, "new-a", isRead: true, isFlagged: true, cancellationToken: cancellationToken);
+            var stateOnlyUpdate = (await store.GetMessageAsync(mailbox.Id, "new-a", cancellationToken))!;
+            Assert.True(stateOnlyUpdate.IsRead);
+            Assert.True(stateOnlyUpdate.IsFlagged);
+            Assert.Equal("Current searchable body", stateOnlyUpdate.Body);
             var search = Assert.Single(await store.SearchAsync("platypus", cancellationToken: cancellationToken));
             Assert.Null(search.Body);
 

@@ -1,4 +1,3 @@
-using System.Text;
 using BetterMail.App;
 using BetterMail.Core;
 
@@ -61,11 +60,11 @@ public sealed class ConversationThreadTests
         Assert.False(middleItem.IsExpanded);
         Assert.True(thread.Messages[2].IsExpanded);
         await WaitUntilAsync(() => oldItem.HasBlockedRemoteContent && middleItem.HasBlockedRemoteContent);
-        Assert.Equal(1, Count(Decode(oldItem.BodyUri), "Regards"));
+        Assert.Equal(1, Count(Decode(oldItem.BodyHtml), "Regards"));
 
         viewModel.AllowRemoteContentCommand.Execute(oldItem);
-        await WaitUntilAsync(() => Decode(oldItem.BodyUri).Contains("https://images.example/old.png", StringComparison.Ordinal));
-        Assert.Contains("https://images.example/old.png", Decode(oldItem.BodyUri));
+        await WaitUntilAsync(() => Decode(oldItem.BodyHtml).Contains("https://images.example/old.png", StringComparison.Ordinal));
+        Assert.Contains("https://images.example/old.png", Decode(oldItem.BodyHtml));
         Assert.True(middleItem.HasBlockedRemoteContent);
 
         var updatedOld = old with { IsRead = true, Preview = "Updated preview" };
@@ -74,7 +73,7 @@ public sealed class ConversationThreadTests
         Assert.Same(thread, viewModel.SelectedThread);
         Assert.Same(oldItem, viewModel.SelectedMessage);
         Assert.True(oldItem.Message.IsRead);
-        Assert.Contains("https://images.example/old.png", Decode(oldItem.BodyUri));
+        Assert.Contains("https://images.example/old.png", Decode(oldItem.BodyHtml));
 
         viewModel.ToggleMessageCommand.Execute(middleItem);
         Assert.Same(middleItem, viewModel.SelectedMessage);
@@ -101,8 +100,8 @@ public sealed class ConversationThreadTests
         viewModel.AllowRemoteContentCommand.Execute(firstItem);
         viewModel.AllowRemoteContentCommand.Execute(secondItem);
         await WaitUntilAsync(() =>
-            Decode(firstItem.BodyUri).Contains("https://images.example/first.png", StringComparison.Ordinal) &&
-            Decode(secondItem.BodyUri).Contains("https://images.example/second.png", StringComparison.Ordinal));
+            Decode(firstItem.BodyHtml).Contains("https://images.example/first.png", StringComparison.Ordinal) &&
+            Decode(secondItem.BodyHtml).Contains("https://images.example/second.png", StringComparison.Ordinal));
 
         viewModel.Reconcile(
             [first with { Body = "<img src='https://images.example/changed.png' alt='Changed'>" }, second],
@@ -110,8 +109,8 @@ public sealed class ConversationThreadTests
 
         await WaitUntilAsync(() => firstItem.HasBlockedRemoteContent);
         Assert.False(secondItem.HasBlockedRemoteContent);
-        Assert.DoesNotContain("https://images.example/changed.png", Decode(firstItem.BodyUri));
-        Assert.Contains("https://images.example/second.png", Decode(secondItem.BodyUri));
+        Assert.DoesNotContain("https://images.example/changed.png", Decode(firstItem.BodyHtml));
+        Assert.Contains("https://images.example/second.png", Decode(secondItem.BodyHtml));
     }
 
     [Fact]
@@ -127,26 +126,27 @@ public sealed class ConversationThreadTests
             message,
             [new MailAttachment("attachment", "logo.png", "image/png", 3, true, "logo@example", [1, 2, 3])]);
 
-        await WaitUntilAsync(() => Decode(viewModel.SelectedMessage!.BodyUri)
+        await WaitUntilAsync(() => Decode(viewModel.SelectedMessage!.BodyHtml)
             .Contains("data:image/png;base64,AQID", StringComparison.Ordinal));
-        Assert.Contains("data:image/png;base64,AQID", Decode(viewModel.SelectedMessage!.BodyUri));
+        Assert.Contains("data:image/png;base64,AQID", Decode(viewModel.SelectedMessage!.BodyHtml));
     }
 
     [Fact]
-    public async Task ReusesRenderedMessageWhenReturningToAThread()
+    public async Task EvictsRenderedMessageWhenLeavingAThread()
     {
         var viewModel = new ConversationThreadViewModel();
         var first = Message("mailbox", "first", "thread-one", null, 1, "<p>cached-marker</p>");
         var second = Message("mailbox", "second", "thread-two", null, 2, "<p>second</p>");
         viewModel.Reconcile([first], first);
         var cached = viewModel.SelectedMessage!;
-        await WaitUntilAsync(() => Decode(cached.BodyUri).Contains("cached-marker", StringComparison.Ordinal));
+        await WaitUntilAsync(() => Decode(cached.BodyHtml).Contains("cached-marker", StringComparison.Ordinal));
 
         viewModel.Reconcile([second], second);
         viewModel.Reconcile([first], first);
 
-        Assert.Same(cached, viewModel.SelectedMessage);
-        Assert.Contains("cached-marker", Decode(viewModel.SelectedMessage!.BodyUri));
+        Assert.NotSame(cached, viewModel.SelectedMessage);
+        await WaitUntilAsync(() => Decode(viewModel.SelectedMessage!.BodyHtml)
+            .Contains("cached-marker", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -178,12 +178,31 @@ public sealed class ConversationThreadTests
         viewModel.Reconcile([message], message);
 
         for (var attempt = 0; attempt < 100 &&
-             !Decode(viewModel.SelectedMessage!.BodyUri).Contains("rendered-marker", StringComparison.Ordinal);
+             !Decode(viewModel.SelectedMessage!.BodyHtml).Contains("rendered-marker", StringComparison.Ordinal);
              attempt++)
         {
             await Task.Delay(10, TestContext.Current.CancellationToken);
         }
-        Assert.Contains("rendered-marker", Decode(viewModel.SelectedMessage!.BodyUri));
+        Assert.Contains("rendered-marker", Decode(viewModel.SelectedMessage!.BodyHtml));
+    }
+
+    [Fact]
+    public async Task LoadsAMetadataOnlyBodyWhenTheThreadMessageIsSelected()
+    {
+        var hydrated = Message("mailbox", "message", "thread", null, 1, "<p>full-body-marker</p>");
+        var metadata = hydrated with { Body = null };
+        var loads = 0;
+        var viewModel = new ConversationThreadViewModel(loadMessage: message =>
+        {
+            loads++;
+            return Task.FromResult<MailMessage?>(hydrated);
+        });
+        viewModel.Reconcile([metadata], metadata);
+
+        viewModel.SelectMessageCommand.Execute(viewModel.SelectedMessage);
+
+        await WaitUntilAsync(() => viewModel.SelectedMessage!.BodyHtml.Contains("full-body-marker", StringComparison.Ordinal));
+        Assert.Equal(1, loads);
     }
 
     [Fact]
@@ -219,8 +238,7 @@ public sealed class ConversationThreadTests
             [],
             null);
 
-    private static string Decode(Uri uri) => Encoding.UTF8.GetString(
-        Convert.FromBase64String(uri.OriginalString.Split(',')[1]));
+    private static string Decode(string html) => html;
 
     private static int Count(string source, string value) =>
         source.Split(value, StringSplitOptions.None).Length - 1;

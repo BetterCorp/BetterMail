@@ -521,9 +521,40 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         QueryMessagesAsync(
             "WHERE EXISTS (SELECT 1 FROM message_threads thread WHERE thread.mailbox_id = messages.mailbox_id AND thread.provider_id = messages.provider_id AND thread.thread_id = $thread)",
             1000,
-            true,
+            false,
             cancellationToken,
             ("$thread", threadId));
+
+    public Task UpdateMessageStateAsync(
+        string mailboxId,
+        string providerMessageId,
+        bool? isRead = null,
+        bool? isFlagged = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (isRead is null && isFlagged is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        return WithLockAsync(async connection =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE messages SET
+                    is_read = CASE WHEN $hasRead = 1 THEN $isRead ELSE is_read END,
+                    is_flagged = CASE WHEN $hasFlagged = 1 THEN $isFlagged ELSE is_flagged END
+                WHERE mailbox_id = $mailbox AND provider_id = $provider;
+                """;
+            command.Parameters.AddWithValue("$hasRead", isRead is null ? 0 : 1);
+            command.Parameters.AddWithValue("$isRead", isRead == true ? 1 : 0);
+            command.Parameters.AddWithValue("$hasFlagged", isFlagged is null ? 0 : 1);
+            command.Parameters.AddWithValue("$isFlagged", isFlagged == true ? 1 : 0);
+            command.Parameters.AddWithValue("$mailbox", mailboxId);
+            command.Parameters.AddWithValue("$provider", providerMessageId);
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+    }
 
     public Task<IReadOnlyList<DiscoveredPerson>> GetDiscoveredPeopleAsync(
         string query = "",

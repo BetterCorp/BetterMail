@@ -74,6 +74,19 @@ public sealed class MailContentRenderer
     {
         lock (_sanitizer)
         {
+            var document = RenderCore(content, isHtml, attachments, allowRemoteContent);
+            return new Uri($"data:text/html;base64,{Convert.ToBase64String(Encoding.UTF8.GetBytes(document))}");
+        }
+    }
+
+    public string RenderDocument(
+        string? content,
+        bool isHtml,
+        IReadOnlyList<MailAttachment>? attachments = null,
+        bool allowRemoteContent = false)
+    {
+        lock (_sanitizer)
+        {
             return RenderCore(content, isHtml, attachments, allowRemoteContent);
         }
     }
@@ -162,7 +175,7 @@ public sealed class MailContentRenderer
         }
     }
 
-    private Uri RenderCore(
+    private string RenderCore(
         string? content,
         bool isHtml,
         IReadOnlyList<MailAttachment>? attachments = null,
@@ -217,7 +230,7 @@ public sealed class MailContentRenderer
               <body>{{body}}</body>
             </html>
             """;
-        return new Uri($"data:text/html;base64,{Convert.ToBase64String(Encoding.UTF8.GetBytes(document))}");
+        return document;
     }
 
     private const string DarkContentOverrides =

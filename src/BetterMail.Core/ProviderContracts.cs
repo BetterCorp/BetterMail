@@ -82,6 +82,33 @@ public interface IMailProvider
         string messageId,
         CancellationToken cancellationToken = default);
 
+    async Task<MailAttachment?> GetAttachmentAsync(
+        MailAccount account,
+        Mailbox mailbox,
+        string messageId,
+        string attachmentId,
+        CancellationToken cancellationToken = default) =>
+        (await GetAttachmentsAsync(account, mailbox, messageId, cancellationToken))
+            .FirstOrDefault(attachment => attachment.ProviderId == attachmentId);
+
+    async Task DownloadAttachmentAsync(
+        MailAccount account,
+        Mailbox mailbox,
+        string messageId,
+        MailAttachment attachment,
+        Stream destination,
+        CancellationToken cancellationToken = default)
+    {
+        var hydrated = attachment.ContentBytes is not null
+            ? attachment
+            : await GetAttachmentAsync(account, mailbox, messageId, attachment.ProviderId, cancellationToken);
+        if (hydrated?.ContentBytes is null)
+        {
+            throw new InvalidOperationException("The attachment content is unavailable.");
+        }
+        await destination.WriteAsync(hydrated.ContentBytes, cancellationToken);
+    }
+
     Task SendAsync(
         MailAccount account,
         Mailbox mailbox,
