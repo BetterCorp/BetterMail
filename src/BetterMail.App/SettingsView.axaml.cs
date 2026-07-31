@@ -13,23 +13,7 @@ public sealed partial class SettingsView : UserControl
     {
         InitializeComponent();
         SizeChanged += (_, e) => ApplyResponsiveLayout(e.NewSize.Width);
-        LayoutUpdated += (_, _) => UpdateSignatureEditorVisibility();
         ApplyResponsiveLayout(Bounds.Width);
-    }
-
-    private void SignatureScrollChanged(object? sender, ScrollChangedEventArgs e) =>
-        UpdateSignatureEditorVisibility();
-
-    private void UpdateSignatureEditorVisibility()
-    {
-        var transform = SignatureHtmlEditor.TransformToVisual(SignatureScroll);
-        if (transform is null || SignatureHtmlEditor.Bounds.Height == 0)
-        {
-            return;
-        }
-        var top = transform.Value.Transform(new Point()).Y;
-        SignatureHtmlEditor.SetNativeEditorVisible(top >= 0 &&
-            top + SignatureHtmlEditor.Bounds.Height <= SignatureScroll.Viewport.Height);
     }
 
     private void ApplyResponsiveLayout(double width)

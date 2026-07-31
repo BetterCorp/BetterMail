@@ -120,14 +120,28 @@ public sealed class Microsoft365WorkspaceProvider(
             cancellationToken);
     }
 
-    public async Task<IReadOnlyList<ContactInfo>> SearchContactsAsync(
-        MailAccount account, string query, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<ContactInfo>> SearchContactsAsync(
+        MailAccount account, string query, CancellationToken cancellationToken = default) =>
+        SearchContactsAsync(account, ownerAddress: null, query, cancellationToken);
+
+    public Task<IReadOnlyList<ContactInfo>> SearchSharedContactsAsync(
+        MailAccount account,
+        string mailboxAddress,
+        string query,
+        CancellationToken cancellationToken = default) =>
+        SearchContactsAsync(account, mailboxAddress, query, cancellationToken);
+
+    private async Task<IReadOnlyList<ContactInfo>> SearchContactsAsync(
+        MailAccount account,
+        string? ownerAddress,
+        string query,
+        CancellationToken cancellationToken)
     {
         var contacts = await GetPagedAsync(
             account,
-            "me/contacts?$select=id,displayName,emailAddresses&$top=250",
+            $"{ContactEndpoint(account, account.AccountId, ownerAddress: ownerAddress)}?$select=id,displayName,emailAddresses&$top=250",
             ContactScopes,
-            item => MapContact(item, account.AccountId),
+            item => MapContact(item, account.AccountId, ownerAddress),
             cancellationToken);
         return contacts
             .Where(contact => string.IsNullOrWhiteSpace(query) ||
@@ -144,11 +158,11 @@ public sealed class Microsoft365WorkspaceProvider(
         using var document = await SendJsonForResponseAsync(
             account,
             HttpMethod.Post,
-            ContactEndpoint(account, draft.AccountId),
+            ContactEndpoint(account, draft.AccountId, ownerAddress: draft.OwnerAddress),
             BuildContactPayload(account, draft),
             ContactScopes,
             cancellationToken);
-        return MapContact(document.RootElement, account.AccountId);
+        return MapContact(document.RootElement, account.AccountId, draft.OwnerAddress);
     }
 
     public async Task<ContactInfo> UpdateContactAsync(
@@ -160,11 +174,11 @@ public sealed class Microsoft365WorkspaceProvider(
         using var document = await SendJsonForResponseAsync(
             account,
             HttpMethod.Patch,
-            ContactEndpoint(account, draft.AccountId, contactId),
+            ContactEndpoint(account, draft.AccountId, contactId, draft.OwnerAddress),
             BuildContactPayload(account, draft),
             ContactScopes,
             cancellationToken);
-        return MapContact(document.RootElement, account.AccountId);
+        return MapContact(document.RootElement, account.AccountId, draft.OwnerAddress);
     }
 
     public Task DeleteContactAsync(
@@ -173,7 +187,7 @@ public sealed class Microsoft365WorkspaceProvider(
         CancellationToken cancellationToken = default) =>
         DeleteAsync(
             account,
-            ContactEndpoint(account, contact.AccountId, contact.ProviderId),
+            ContactEndpoint(account, contact.AccountId, contact.ProviderId, contact.OwnerAddress),
             ContactScopes,
             cancellationToken);
 
@@ -712,22 +726,30 @@ public sealed class Microsoft365WorkspaceProvider(
     }
 
     internal static string ContactEndpoint(
-        MailAccount account, string? ownerAccountId, string? contactId = null)
+        MailAccount account,
+        string? ownerAccountId,
+        string? contactId = null,
+        string? ownerAddress = null)
     {
         EnsureOwnedBy(account, ownerAccountId);
         if (contactId is not null && string.IsNullOrWhiteSpace(contactId))
         {
             throw new ArgumentException("A contact identifier is required.", nameof(contactId));
         }
+        if (ownerAddress is not null && !System.Net.Mail.MailAddress.TryCreate(ownerAddress, out _))
+        {
+            throw new ArgumentException("A valid contact owner address is required.", nameof(ownerAddress));
+        }
 
+        var owner = ownerAddress is null ? "me" : $"users/{Uri.EscapeDataString(ownerAddress)}";
         return contactId is null
-            ? "me/contacts"
-            : $"me/contacts/{Uri.EscapeDataString(contactId)}";
+            ? $"{owner}/contacts"
+            : $"{owner}/contacts/{Uri.EscapeDataString(contactId)}";
     }
 
     internal static object BuildContactPayload(MailAccount account, ContactDraft draft)
     {
-        _ = ContactEndpoint(account, draft.AccountId);
+        _ = ContactEndpoint(account, draft.AccountId, ownerAddress: draft.OwnerAddress);
         if (string.IsNullOrWhiteSpace(draft.DisplayName) && draft.EmailAddresses.Count == 0)
         {
             throw new ArgumentException("A contact needs a name or email address.", nameof(draft));
@@ -746,14 +768,15 @@ public sealed class Microsoft365WorkspaceProvider(
         };
     }
 
-    internal static ContactInfo MapContact(JsonElement item, string accountId) => new(
+    internal static ContactInfo MapContact(JsonElement item, string accountId, string? ownerAddress = null) => new(
         RequiredString(item, "id"),
         OptionalString(item, "displayName") ?? "(no name)",
         item.TryGetProperty("emailAddresses", out var addresses)
             ? addresses.EnumerateArray().Select(address => OptionalString(address, "address") ?? "")
                 .Where(static address => address.Length > 0).ToArray()
             : [],
-        accountId);
+        accountId,
+        ownerAddress);
 
     internal static string TaskEndpoint(
         MailAccount account,

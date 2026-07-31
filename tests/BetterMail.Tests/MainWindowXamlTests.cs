@@ -13,6 +13,7 @@ public sealed class MainWindowXamlTests
         var settings = File.ReadAllText(Path.Combine(root, "src", "BetterMail.App", "SettingsView.axaml"));
         var appInfoSource = File.ReadAllText(Path.Combine(root, "src", "BetterMail.App", "AppInfo.cs"));
         var richEditorSource = File.ReadAllText(Path.Combine(root, "src", "BetterMail.App", "RichHtmlEditor.axaml.cs"));
+        var settingsSource = File.ReadAllText(Path.Combine(root, "src", "BetterMail.App", "SettingsView.axaml.cs"));
 
         Assert.Contains("<app:SettingsView", xaml);
         Assert.Contains("/Assets/BetterMail.png", settings);
@@ -39,6 +40,7 @@ public sealed class MainWindowXamlTests
         Assert.Contains("content:attr(data-placeholder)", richEditorSource);
         Assert.DoesNotContain("content:{{JsonSerializer.Serialize(Placeholder)}}", richEditorSource);
         Assert.Contains("ClipToBounds=" + (char)34 + "True" + (char)34, settings);
+        Assert.DoesNotContain("SetNativeEditorVisible", settingsSource + richEditorSource);
         Assert.Contains("IsVisible=" + (char)34 + "{Binding HasUnsavedSignatureChanges}" + (char)34, settings);
         Assert.Contains("Command=" + (char)34 + "{Binding ConfirmDeleteSignatureCommand}" + (char)34, settings);
         Assert.Contains("Command=" + (char)34 + "{Binding CancelDeleteSignatureCommand}" + (char)34, settings);
@@ -150,7 +152,7 @@ public sealed class MainWindowXamlTests
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding GlobalSearchResults}" + (char)34, xaml);
         Assert.Contains("KeyDown=" + (char)34 + "GlobalSearchKeyDown" + (char)34, xaml);
         Assert.Contains("IsVisible=" + (char)34 + "{Binding StartsCategory}" + (char)34, xaml);
-        Assert.Contains("SelectedItem=" + (char)34 + "{Binding SelectedMessage, Mode=TwoWay}" + (char)34, xaml);
+        Assert.Contains("SelectedItem=" + (char)34 + "{Binding SelectedMessage, Mode=OneWay}" + (char)34, xaml);
         Assert.Contains("ShowDraftsCommand", folderPane);
         Assert.DoesNotContain("<Expander Header=" + (char)34 + "{Binding DraftCountText}", folderPane);
         Assert.Contains("QuickActionClicked", xaml);
@@ -199,6 +201,10 @@ public sealed class MainWindowXamlTests
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding Drafts}" + (char)34, xaml);
         Assert.Contains("Height=" + (char)34 + "{Binding $parent[Window].DataContext.MessageRowHeight}" + (char)34, xaml);
         Assert.Contains("x:Name=" + (char)34 + "PeopleCards" + (char)34, xaml);
+        Assert.Contains("ItemsSource=" + (char)34 + "{Binding ContactOwners}" + (char)34, xaml);
+        Assert.Contains("Click=" + (char)34 + "CopyContactTextClicked" + (char)34, xaml);
+        Assert.Contains("Click=" + (char)34 + "ViewContactMailClicked" + (char)34, xaml);
+        Assert.DoesNotContain("CopyContactEmailClicked", xaml);
         Assert.Contains("AutomationProperties.Name=" + (char)34 + "Copy error" + (char)34, xaml);
         Assert.Contains("AutomationProperties.Name=" + (char)34 + "Close error" + (char)34, xaml);
         Assert.Contains("desktop.MainWindow = startupWindow", appSource);
@@ -256,7 +262,9 @@ public sealed class MainWindowXamlTests
         Assert.Contains("Load blocked pictures for the selected message", conversationXaml);
         Assert.Contains("PreviewAttachmentClicked", xaml);
         Assert.Contains("&#x1F4CE;", xaml);
-        Assert.Contains("IsVisible=" + (char)34 + "{Binding IsMailActionRunning}" + (char)34, xaml);
+        Assert.Contains("IsVisible=" + (char)34 + "{Binding IsMailActionRunning}" + (char)34, commandBar);
+        Assert.DoesNotContain("IsVisible=" + (char)34 + "{Binding IsMailActionRunning}" + (char)34,
+            Between(xaml, "<!-- Reading pane -->", "<!-- Microsoft 365 workspace modules. -->"));
         Assert.Contains("Text=" + (char)34 + "{Binding MailActionStatus}" + (char)34, xaml);
         Assert.DoesNotContain("Text=" + (char)34 + "⌕" + (char)34, xaml);
     }

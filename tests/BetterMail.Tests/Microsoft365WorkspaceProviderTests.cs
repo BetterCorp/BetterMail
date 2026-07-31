@@ -120,6 +120,11 @@ public sealed class Microsoft365WorkspaceProviderTests
         Assert.Single(payload.GetProperty("emailAddresses").EnumerateArray());
         Assert.Equal("me/contacts/contact%2Fid",
             Microsoft365WorkspaceProvider.ContactEndpoint(Account, Account.AccountId, "contact/id"));
+        Assert.Equal("users/shared%40example.com/contacts/contact%2Fid",
+            Microsoft365WorkspaceProvider.ContactEndpoint(
+                Account, Account.AccountId, "contact/id", "shared@example.com"));
+        _ = Microsoft365WorkspaceProvider.BuildContactPayload(
+            Account, draft with { OwnerAddress = "shared@example.com" });
         Assert.Throws<InvalidOperationException>(() =>
             Microsoft365WorkspaceProvider.BuildContactPayload(
                 Account, draft with { AccountId = "another-account" }));
@@ -134,6 +139,7 @@ public sealed class Microsoft365WorkspaceProviderTests
         var contact = Microsoft365WorkspaceProvider.MapContact(document.RootElement, Account.AccountId);
 
         Assert.Equal(Account.AccountId, contact.AccountId);
+        Assert.Null(contact.OwnerAddress);
         Assert.Equal("adele@example.com", Assert.Single(contact.EmailAddresses));
     }
 

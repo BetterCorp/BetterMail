@@ -463,6 +463,61 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task IncludesSharedMailboxesInMailAndContactSelectors()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-shared-selectors-{Guid.NewGuid():N}");
+        var store = new EncryptedMailStore(
+            Path.Combine(directory, "mail.db"),
+            Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+        try
+        {
+            await store.InitializeAsync(cancellationToken);
+            var account = new MailAccount(
+                "microsoft365", "account", "tenant", "person@example.com", "Person",
+                ProviderCapabilities.Mail | ProviderCapabilities.Contacts);
+            var primary = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+            var shared = new Mailbox(account.AccountId, "shared@example.com", "Shared", IsShared: true);
+            await store.SaveAccountAsync(account, cancellationToken);
+            await store.SaveMailboxAsync(primary, cancellationToken);
+            await store.SaveMailboxAsync(shared, cancellationToken);
+            await store.ApplySyncPageAsync(
+                "test",
+                new MailSyncPage([
+                    Message(primary.Id, "inbox", "Planning primary", "Primary"),
+                    Message(shared.Id, "inbox", "Planning shared", "Shared")
+                ], null, false),
+                cancellationToken);
+
+            var viewModel = new MainWindowViewModel(
+                store, directory, _ => { }, _ => { }, null,
+                new RecordingProvider(), workspaceProvider: new FakeWorkspaceProvider());
+            await viewModel.InitializeAsync();
+
+            var sharedFilter = Assert.Single(viewModel.SearchAccountFilters, filter => filter.MailboxId == shared.Id);
+            Assert.Contains(viewModel.ContactOwners, owner => owner.Mailbox.Id == shared.Id);
+
+            viewModel.SelectedSearchScope = "Mail";
+            viewModel.SelectedSearchAccountFilter = sharedFilter;
+            viewModel.SearchText = "Planning";
+            viewModel.SearchCommand.Execute(null);
+            await WaitUntilAsync(
+                () => !viewModel.IsGlobalSearchRunning && viewModel.GlobalSearchResults.Count > 0,
+                cancellationToken);
+            Assert.All(
+                viewModel.GlobalSearchResults.Where(result => result.Category == "Mail"),
+                result => Assert.Equal(shared.Id, Assert.IsType<MailMessage>(result.Value).MailboxId));
+        }
+        finally
+        {
+            await store.DisposeAsync();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+    [Fact]
     public async Task GlobalSearchStreamsEveryWorkspaceCategoryWithoutBusyOverlay()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -670,7 +725,7 @@ public sealed class MainWindowViewModelTests
             {
                 if (args.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Replace)
                 {
-                    viewModel.SelectedMessage = null;
+                    viewModel.SetSelectedMessages([]);
                 }
             };
             var bodyRefreshes = 0;
@@ -755,7 +810,7 @@ public sealed class MainWindowViewModelTests
                 if (args.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Replace &&
                     args.OldItems?.OfType<MailMessage>().Any(message => message.ProviderId == "message") == true)
                 {
-                    viewModel.SelectedMessage = null;
+                    viewModel.SetSelectedMessages([]);
                     transientSelectionClears += viewModel.SelectedMessage is null ? 1 : 0;
                 }
             };
@@ -1330,6 +1385,7 @@ public sealed class MainWindowViewModelTests
                 () => viewModel.People.Count == 2 && viewModel.HasPeopleErrors,
                 cancellationToken);
 
+            Assert.Equal(viewModel.People.OrderBy(person => person.DisplayName, StringComparer.OrdinalIgnoreCase), viewModel.People);
             var saved = Assert.Single(viewModel.People, static person => person.IsSaved);
             var discovered = Assert.Single(viewModel.People, static person => !person.IsSaved);
             Assert.Equal("K", saved.AvatarText);

@@ -11,7 +11,7 @@
     <Style Selector="Border.threadMessage.selected">
       <Setter Property="Background" Value="{DynamicResource BetterMailSelectionBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BetterMailAccentBrush}" />
-      <Setter Property="BorderThickness" Value="4,1,1,1" />
+      <Setter Property="BorderThickness" Value="4,1,1,3" />
     </Style>
   </UserControl.Styles>
 

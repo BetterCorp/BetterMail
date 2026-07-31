@@ -289,7 +289,8 @@ public sealed record ContactInfo(
     string ProviderId,
     string DisplayName,
     IReadOnlyList<string> EmailAddresses,
-    string? AccountId = null)
+    string? AccountId = null,
+    string? OwnerAddress = null)
 {
     public string EmailText => string.Join(", ", EmailAddresses);
 }
@@ -297,7 +298,8 @@ public sealed record ContactInfo(
 public sealed record ContactDraft(
     string AccountId,
     string DisplayName,
-    IReadOnlyList<string> EmailAddresses);
+    IReadOnlyList<string> EmailAddresses,
+    string? OwnerAddress = null);
 
 public sealed record DiscoveredPerson(
     string EmailAddress,

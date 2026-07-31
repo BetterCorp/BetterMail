@@ -234,55 +234,65 @@
             BorderThickness="0,0,0,1"
             IsVisible="{Binding ShowMailSurface}"
             Padding="8,6">
-      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="3">
-        <StackPanel Orientation="Horizontal" Spacing="3">
-          <Button x:Name="FolderToggle" Classes="command" Content="☰ Folders" Click="FolderToggleClicked" IsVisible="False" AutomationProperties.Name="Show folders" />
-          <Button Classes="primary" Content="＋ New mail" Command="{Binding ComposeCommand}" AutomationProperties.Name="New mail" />
-        </StackPanel>
-        <Border Grid.Column="1" Width="1" Height="24" Background="{DynamicResource BetterMailDividerBrush}" Margin="6,3" />
-        <StackPanel x:Name="InlineMailActions" Grid.Column="2" Orientation="Horizontal" Spacing="3">
-          <Button Classes="command" Content="Reply all" Command="{Binding ReplyAllCommand}" AutomationProperties.Name="Reply all to selected message" />
-          <Button Classes="command" Content="↩ Reply" Command="{Binding ReplyCommand}" AutomationProperties.Name="Reply to selected message" />
-          <Button Classes="command" Content="↪ Forward" Command="{Binding ForwardCommand}" AutomationProperties.Name="Forward selected message" />
-          <Button Classes="command" Content="Archive" Command="{Binding ArchiveCommand}" AutomationProperties.Name="Archive selected message" AutomationProperties.HelpText="Keyboard shortcut Backspace" />
-          <Button Classes="command" Content="Delete" Command="{Binding DeleteCommand}" AutomationProperties.Name="Delete selected message" />
-          <Button Classes="command" Content="Move" AutomationProperties.Name="Move selected messages">
+      <Grid>
+        <Grid ColumnDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="3" IsVisible="{Binding !IsMailActionRunning}">
+          <StackPanel Orientation="Horizontal" Spacing="3">
+            <Button x:Name="FolderToggle" Classes="command" Content="☰ Folders" Click="FolderToggleClicked" IsVisible="False" AutomationProperties.Name="Show folders" />
+            <Button Classes="primary" Content="＋ New mail" Command="{Binding ComposeCommand}" AutomationProperties.Name="New mail" />
+          </StackPanel>
+          <Border Grid.Column="1" Width="1" Height="24" Background="{DynamicResource BetterMailDividerBrush}" Margin="6,3" />
+          <StackPanel x:Name="InlineMailActions" Grid.Column="2" Orientation="Horizontal" Spacing="3">
+            <Button Classes="command" Content="Reply all" Command="{Binding ReplyAllCommand}" AutomationProperties.Name="Reply all to selected message" />
+            <Button Classes="command" Content="↩ Reply" Command="{Binding ReplyCommand}" AutomationProperties.Name="Reply to selected message" />
+            <Button Classes="command" Content="↪ Forward" Command="{Binding ForwardCommand}" AutomationProperties.Name="Forward selected message" />
+            <Button Classes="command" Content="Archive" Command="{Binding ArchiveCommand}" AutomationProperties.Name="Archive selected message" AutomationProperties.HelpText="Keyboard shortcut Backspace" />
+            <Button Classes="command" Content="Delete" Command="{Binding DeleteCommand}" AutomationProperties.Name="Delete selected message" />
+            <Button Classes="command" Content="Move" AutomationProperties.Name="Move selected messages">
+              <Button.Flyout>
+                <Flyout><ScrollViewer MaxHeight="420" MinWidth="230"><ItemsControl ItemsSource="{Binding Folders}"><ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="app:MailFolderItem"><Button Classes="command" Content="{Binding DisplayName}" HorizontalContentAlignment="Left" Command="{Binding $parent[Window].DataContext.MoveToFolderCommand}" CommandParameter="{Binding}" /></DataTemplate>
+                </ItemsControl.ItemTemplate></ItemsControl></ScrollViewer></Flyout>
+              </Button.Flyout>
+            </Button>
+          </StackPanel>
+          <Button Grid.Column="3"
+                  Classes="command"
+                  Content="More ⌄"
+                  AutomationProperties.Name="More mail actions"
+                  ToolTip.Tip="More mail actions">
             <Button.Flyout>
-              <Flyout><ScrollViewer MaxHeight="420" MinWidth="230"><ItemsControl ItemsSource="{Binding Folders}"><ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="app:MailFolderItem"><Button Classes="command" Content="{Binding DisplayName}" HorizontalContentAlignment="Left" Command="{Binding $parent[Window].DataContext.MoveToFolderCommand}" CommandParameter="{Binding}" /></DataTemplate>
-              </ItemsControl.ItemTemplate></ItemsControl></ScrollViewer></Flyout>
+              <Flyout Placement="BottomEdgeAlignedRight">
+                <StackPanel MinWidth="190">
+                  <Button Classes="command" Content="Reply all" HorizontalContentAlignment="Left" Click="MessageReplyAllClicked" AutomationProperties.Name="Reply all to selected message" />
+                  <Button Classes="command" Content="Reply" HorizontalContentAlignment="Left" Click="MessageReplyClicked" AutomationProperties.Name="Reply to selected message" />
+                  <Button Classes="command" Content="Forward" HorizontalContentAlignment="Left" Click="MessageForwardClicked" AutomationProperties.Name="Forward selected message" />
+                  <Button Classes="command" Content="Archive" HorizontalContentAlignment="Left" Click="MessageArchiveClicked" AutomationProperties.Name="Archive selected message" AutomationProperties.HelpText="Keyboard shortcut Backspace" />
+                  <Button Classes="command" Content="Delete" HorizontalContentAlignment="Left" Click="MessageDeleteClicked" AutomationProperties.Name="Delete selected message" />
+                  <Button Classes="command" Content="Move to folder" HorizontalContentAlignment="Left">
+                    <Button.Flyout>
+                      <Flyout><ScrollViewer MaxHeight="420" MinWidth="230"><ItemsControl ItemsSource="{Binding Folders}"><ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="app:MailFolderItem"><Button Classes="command" Content="{Binding DisplayName}" HorizontalContentAlignment="Left" Command="{Binding $parent[Window].DataContext.MoveToFolderCommand}" CommandParameter="{Binding}" /></DataTemplate>
+                      </ItemsControl.ItemTemplate></ItemsControl></ScrollViewer></Flyout>
+                    </Button.Flyout>
+                  </Button>
+                  <Border Height="1" Background="{DynamicResource BetterMailDividerBrush}" Margin="4" />
+                  <Button Classes="command" Content="Junk" HorizontalContentAlignment="Left" Click="MessageJunkClicked" AutomationProperties.Name="Mark selected message as junk" />
+                  <Button Classes="command" Content="{Binding ToggleFlagText}" HorizontalContentAlignment="Left" Click="MessageFlagClicked" AutomationProperties.Name="{Binding ToggleFlagText}" />
+                  <Button Classes="command" Content="{Binding ToggleReadText}" HorizontalContentAlignment="Left" Click="MessageReadClicked" AutomationProperties.Name="{Binding ToggleReadText}" />
+                  <Button Classes="command" Content="View headers" HorizontalContentAlignment="Left" Command="{Binding ViewHeadersCommand}" AutomationProperties.Name="View internet message headers" />
+                </StackPanel>
+              </Flyout>
             </Button.Flyout>
           </Button>
+        </Grid>
+        <StackPanel IsVisible="{Binding IsMailActionRunning}"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Spacing="10">
+          <ProgressBar Width="96" Height="3" IsIndeterminate="True" VerticalAlignment="Center" />
+          <TextBlock Text="{Binding MailActionStatus}" FontWeight="SemiBold" VerticalAlignment="Center" />
         </StackPanel>
-        <Button Grid.Column="3"
-                Classes="command"
-                Content="More ⌄"
-                AutomationProperties.Name="More mail actions"
-                ToolTip.Tip="More mail actions">
-          <Button.Flyout>
-            <Flyout Placement="BottomEdgeAlignedRight">
-              <StackPanel MinWidth="190">
-                <Button Classes="command" Content="Reply all" HorizontalContentAlignment="Left" Click="MessageReplyAllClicked" AutomationProperties.Name="Reply all to selected message" />
-                <Button Classes="command" Content="Reply" HorizontalContentAlignment="Left" Click="MessageReplyClicked" AutomationProperties.Name="Reply to selected message" />
-                <Button Classes="command" Content="Forward" HorizontalContentAlignment="Left" Click="MessageForwardClicked" AutomationProperties.Name="Forward selected message" />
-                <Button Classes="command" Content="Archive" HorizontalContentAlignment="Left" Click="MessageArchiveClicked" AutomationProperties.Name="Archive selected message" AutomationProperties.HelpText="Keyboard shortcut Backspace" />
-                <Button Classes="command" Content="Delete" HorizontalContentAlignment="Left" Click="MessageDeleteClicked" AutomationProperties.Name="Delete selected message" />
-                <Button Classes="command" Content="Move to folder" HorizontalContentAlignment="Left">
-                  <Button.Flyout>
-                    <Flyout><ScrollViewer MaxHeight="420" MinWidth="230"><ItemsControl ItemsSource="{Binding Folders}"><ItemsControl.ItemTemplate>
-                      <DataTemplate x:DataType="app:MailFolderItem"><Button Classes="command" Content="{Binding DisplayName}" HorizontalContentAlignment="Left" Command="{Binding $parent[Window].DataContext.MoveToFolderCommand}" CommandParameter="{Binding}" /></DataTemplate>
-                    </ItemsControl.ItemTemplate></ItemsControl></ScrollViewer></Flyout>
-                  </Button.Flyout>
-                </Button>
-                <Border Height="1" Background="{DynamicResource BetterMailDividerBrush}" Margin="4" />
-                <Button Classes="command" Content="Junk" HorizontalContentAlignment="Left" Click="MessageJunkClicked" AutomationProperties.Name="Mark selected message as junk" />
-                <Button Classes="command" Content="{Binding ToggleFlagText}" HorizontalContentAlignment="Left" Click="MessageFlagClicked" AutomationProperties.Name="{Binding ToggleFlagText}" />
-                <Button Classes="command" Content="{Binding ToggleReadText}" HorizontalContentAlignment="Left" Click="MessageReadClicked" AutomationProperties.Name="{Binding ToggleReadText}" />
-                <Button Classes="command" Content="View headers" HorizontalContentAlignment="Left" Command="{Binding ViewHeadersCommand}" AutomationProperties.Name="View internet message headers" />
-              </StackPanel>
-            </Flyout>
-          </Button.Flyout>
-        </Button>
       </Grid>
     </Border>
 
@@ -401,7 +411,7 @@
 
         <Grid Grid.Row="1">
           <ListBox x:Name="MessageList" ItemsSource="{Binding Messages}"
-                   SelectedItem="{Binding SelectedMessage, Mode=TwoWay}"
+                   SelectedItem="{Binding SelectedMessage, Mode=OneWay}"
                    SelectionMode="Multiple"
                    IsVisible="{Binding IsMessageListView}"
                    Background="Transparent"
@@ -708,26 +718,6 @@
               ToolTip.Tip="Back to messages"
               AutomationProperties.Name="Back to messages" />
 
-      <Border Grid.Row="2"
-              ZIndex="20"
-              HorizontalAlignment="Right"
-              VerticalAlignment="Top"
-              Margin="8"
-              Padding="20,7"
-              Background="#0A0F6CBD"
-              BorderBrush="{DynamicResource BetterMailDividerBrush}"
-              BorderThickness="0,0,0,1"
-              IsVisible="{Binding IsMailActionRunning}">
-        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
-          <ProgressBar Width="72" Height="3" IsIndeterminate="True" VerticalAlignment="Center" />
-          <TextBlock Grid.Column="1"
-                     Text="{Binding MailActionStatus}"
-                     FontSize="12"
-                     FontWeight="SemiBold"
-                     VerticalAlignment="Center" />
-        </Grid>
-      </Border>
-
       <Border Grid.Row="1" Padding="20,8" Background="#0A0F6CBD" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1" IsVisible="{Binding HasSelectedAttachments}">
         <StackPanel Spacing="6">
           <Grid ColumnDefinitions="*,Auto">
@@ -873,8 +863,18 @@
                           <TextBlock Text="{Binding AvatarText}" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource BetterMailAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <StackPanel Grid.Column="1" Spacing="2">
-                          <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="15" TextTrimming="CharacterEllipsis" />
-                          <TextBlock Text="{Binding EmailText}" Opacity="0.72" TextTrimming="CharacterEllipsis" />
+                          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="4">
+                            <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="15" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" Classes="command" Content="&#x29C9;" Padding="3,0"
+                                    CommandParameter="{Binding DisplayName}" Click="CopyContactTextClicked"
+                                    ToolTip.Tip="Copy name" AutomationProperties.Name="Copy contact name" />
+                          </Grid>
+                          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="4">
+                            <TextBlock Text="{Binding EmailText}" Opacity="0.72" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" Classes="command" Content="&#x29C9;" Padding="3,0"
+                                    CommandParameter="{Binding EmailText}" Click="CopyContactTextClicked"
+                                    ToolTip.Tip="Copy email" AutomationProperties.Name="Copy contact email" />
+                          </Grid>
                           <Border Background="{DynamicResource SystemControlBackgroundBaseLowBrush}" Padding="5,1" CornerRadius="2">
                             <TextBlock Text="{Binding KindText}" FontSize="10" Opacity="0.72" HorizontalAlignment="Left" />
                           </Border>
@@ -886,11 +886,14 @@
                         </Border>
                         <TextBlock Text="{Binding ActivityText}" FontSize="11" Opacity="0.62" TextTrimming="CharacterEllipsis" />
                       </StackPanel>
-                      <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
-                        <Button Classes="command" Content="Copy" Click="CopyContactEmailClicked" AutomationProperties.Name="Copy contact email" />
-                        <Button Classes="primary" Content="New mail" Click="ComposeContactClicked" AutomationProperties.Name="Start a mail to contact" />
+                      <WrapPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Classes="command" Content="View mail" Margin="0,0,5,0" Click="ViewContactMailClicked"
+                                AutomationProperties.Name="View all mail involving contact" />
+                        <Button Classes="primary" Content="New mail" Margin="0,0,5,0" Click="ComposeContactClicked"
+                                AutomationProperties.Name="Start a mail to contact" />
                         <Button Classes="command"
                                 Content="Edit"
+                                Margin="0,0,5,0"
                                 IsVisible="{Binding IsSaved}"
                                 Command="{Binding $parent[Window].DataContext.EditContactCommand}"
                                 CommandParameter="{Binding}"
@@ -901,7 +904,7 @@
                                 Command="{Binding $parent[Window].DataContext.RequestDeleteContactCommand}"
                                 CommandParameter="{Binding}"
                                 AutomationProperties.Name="Delete contact" />
-                      </StackPanel>
+                      </WrapPanel>
                     </Grid>
                   </Border>
                 </DataTemplate>
@@ -927,9 +930,15 @@
                   </Grid>
                   <StackPanel Spacing="8" IsVisible="{Binding IsContactEditorOpen}">
                     <TextBlock Text="Account" FontWeight="SemiBold" />
-                    <ComboBox ItemsSource="{Binding Accounts}" SelectedItem="{Binding SelectedContactAccount}"
-                              DisplayMemberBinding="{Binding EmailAddress}" IsEnabled="{Binding IsCreatingContact}"
-                              AutomationProperties.Name="Contact account" />
+                    <ComboBox ItemsSource="{Binding ContactOwners}" SelectedItem="{Binding SelectedContactOwner}"
+                              IsEnabled="{Binding IsCreatingContact}"
+                              AutomationProperties.Name="Contact account or shared mailbox">
+                      <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="app:ContactOwnerOption">
+                          <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+                        </DataTemplate>
+                      </ComboBox.ItemTemplate>
+                    </ComboBox>
                     <TextBlock Text="Name" FontWeight="SemiBold" />
                     <TextBox Text="{Binding ContactName}" PlaceholderText="Display name" AutomationProperties.Name="Contact display name" />
                     <TextBlock Text="Email addresses" FontWeight="SemiBold" />

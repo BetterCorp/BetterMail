@@ -402,13 +402,17 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void CopyContactEmailClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    private async void CopyContactTextClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
     {
-        if (sender is Button { DataContext: PersonEntry person } &&
+        if (sender is Button { CommandParameter: string text } button &&
             TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard &&
-            !string.IsNullOrWhiteSpace(person.PrimaryEmail))
+            !string.IsNullOrWhiteSpace(text))
         {
-            await clipboard.SetValueAsync(DataFormat.Text, person.PrimaryEmail);
+            await clipboard.SetValueAsync(DataFormat.Text, text);
+            var content = button.Content;
+            button.Content = "✓";
+            await Task.Delay(1200);
+            button.Content = content;
         }
     }
 
@@ -417,6 +421,14 @@ public sealed partial class MainWindow : Window
         if (sender is Button { DataContext: PersonEntry person })
         {
             _viewModel?.ComposeTo(person);
+        }
+    }
+
+    private void ViewContactMailClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (sender is Button { DataContext: PersonEntry person })
+        {
+            _viewModel?.ViewMailFor(person);
         }
     }
 

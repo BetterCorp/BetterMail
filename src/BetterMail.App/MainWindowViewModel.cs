@@ -112,7 +112,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _configuringMailQuickActions;
     private PersonEntry? _editingContact;
     private PersonEntry? _pendingDeleteContact;
-    private MailAccount? _selectedContactAccount;
+    private ContactOwnerOption? _selectedContactOwner;
     private bool _isContactEditorOpen;
     private string _contactName = "";
     private string _contactEmails = "";
@@ -120,7 +120,6 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _isContactActionRunning;
     private bool _isLoadingMailStatistics;
     private int _errorVersion;
-    private bool _isReplacingSelectedMessage;
     private MailPageCursor? _messagePageCursor;
     private IReadOnlyList<MailFolderKey> _messagePageFolders = [];
     private bool _isLoadingMoreMessages;
@@ -220,7 +219,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         EditContactCommand = new AsyncCommand<PersonEntry>(EditContactAsync);
         NewContactCommand = new AsyncCommand(OpenNewContactAsync, () => Accounts.Count > 0 && !_isContactActionRunning);
         RequestDeleteContactCommand = new AsyncCommand<PersonEntry>(RequestDeleteContactAsync);
-        SaveContactCommand = new AsyncCommand(SaveContactAsync, () => IsContactEditorOpen && SelectedContactAccount is not null && !_isContactActionRunning);
+        SaveContactCommand = new AsyncCommand(SaveContactAsync, () => IsContactEditorOpen && SelectedContactOwner is not null && !_isContactActionRunning);
         CancelEditContactCommand = new AsyncCommand(CancelEditContactAsync);
         ConfirmDeleteContactCommand = new AsyncCommand(ConfirmDeleteContactAsync, () => _pendingDeleteContact?.SavedContact is not null && !_isContactActionRunning);
         CancelDeleteContactCommand = new AsyncCommand(CancelDeleteContactAsync);
@@ -293,6 +292,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ObservableCollection<SettingsTabItem> SettingsTabs { get; } = [];
     public IReadOnlyList<SignatureTemplate> SignatureTemplates { get; } = SignatureCatalog.Templates;
     public ObservableCollection<ContactInfo> Contacts { get; } = [];
+    public ObservableCollection<ContactOwnerOption> ContactOwners { get; } = [];
     public ObservableCollection<PersonEntry> People { get; } = [];
     public IReadOnlyList<string> ThemeModes { get; } = ["System", "Light", "Dark"];
     public IReadOnlyList<string> AccentNames { get; } = Accents.Keys.ToArray();
@@ -421,11 +421,6 @@ public sealed class MainWindowViewModel : ViewModelBase
         get => _selectedMessage;
         set
         {
-            if (value is null && _isReplacingSelectedMessage && _selectedMessage is not null)
-            {
-                return;
-            }
-
             var isMetadataUpdate = SameMessage(_selectedMessage, value);
             if (SetProperty(ref _selectedMessage, value))
             {
@@ -614,12 +609,12 @@ public sealed class MainWindowViewModel : ViewModelBase
     public bool IsConfirmingContactDelete => _pendingDeleteContact is not null;
     public bool IsContactPaneOpen => IsContactEditorOpen || IsConfirmingContactDelete;
     public string ContactEditorTitle => IsCreatingContact ? "New contact" : "Edit contact";
-    public MailAccount? SelectedContactAccount
+    public ContactOwnerOption? SelectedContactOwner
     {
-        get => _selectedContactAccount;
+        get => _selectedContactOwner;
         set
         {
-            if (SetProperty(ref _selectedContactAccount, value))
+            if (SetProperty(ref _selectedContactOwner, value))
             {
                 ((AsyncCommand)SaveContactCommand).Refresh();
             }
@@ -2221,8 +2216,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 
     private bool MailboxMatchesSearchFilters(Mailbox mailbox) =>
-        (SelectedSearchAccountFilter?.AccountId is null ||
-            SelectedSearchAccountFilter.AccountId == mailbox.AccountId) &&
+        (SelectedSearchAccountFilter?.MailboxId is { } mailboxId
+            ? mailbox.Id == mailboxId
+            : SelectedSearchAccountFilter?.AccountId is null ||
+                SelectedSearchAccountFilter.AccountId == mailbox.AccountId) &&
         (!IsMailSearchScope || SelectedSearchFolderFilter?.MailboxId is null ||
             SelectedSearchFolderFilter.MailboxId == mailbox.Id);
 
@@ -2551,7 +2548,8 @@ public sealed class MainWindowViewModel : ViewModelBase
             return false;
         }
         var mailbox = Mailboxes.FirstOrDefault(candidate => candidate.Id == message.MailboxId);
-        if (SelectedSearchAccountFilter?.AccountId is { } accountId && mailbox?.AccountId != accountId)
+        if ((SelectedSearchAccountFilter?.MailboxId is { } mailboxId && message.MailboxId != mailboxId) ||
+            (SelectedSearchAccountFilter is { MailboxId: null, AccountId: { } accountId } && mailbox?.AccountId != accountId))
         {
             return false;
         }
@@ -2640,13 +2638,18 @@ public sealed class MainWindowViewModel : ViewModelBase
     private void RebuildSearchFilters()
     {
         var accountId = SelectedSearchAccountFilter?.AccountId;
+        var mailboxId = SelectedSearchAccountFilter?.MailboxId;
         var folderId = SelectedSearchFolderFilter?.FolderId;
         var folderMailboxId = SelectedSearchFolderFilter?.MailboxId;
         Replace(SearchAccountFilters,
         [
             new SearchAccountFilter("All accounts", null),
             .. Accounts.Select(account => new SearchAccountFilter(
-                $"{account.DisplayName} - {account.EmailAddress}", account.AccountId))
+                $"{account.DisplayName} - {account.EmailAddress}", account.AccountId)),
+            .. Mailboxes.Where(static mailbox => mailbox.IsShared)
+                .OrderBy(static mailbox => mailbox.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .Select(mailbox => new SearchAccountFilter(
+                    $"Shared: {mailbox.DisplayName} - {mailbox.Address}", mailbox.AccountId, mailbox.Id))
         ]);
         Replace(SearchFolderFilters,
         [
@@ -2656,7 +2659,8 @@ public sealed class MainWindowViewModel : ViewModelBase
                 .Select(folder => new SearchFolderFilter(
                     MailFolderFilterName(folder), folder.MailboxId, folder.ProviderId))
         ]);
-        _selectedSearchAccountFilter = SearchAccountFilters.FirstOrDefault(filter => filter.AccountId == accountId)
+        _selectedSearchAccountFilter = SearchAccountFilters.FirstOrDefault(filter =>
+                filter.AccountId == accountId && filter.MailboxId == mailboxId)
             ?? SearchAccountFilters[0];
         _selectedSearchFolderFilter = SearchFolderFilters.FirstOrDefault(filter =>
             filter.MailboxId == folderMailboxId && filter.FolderId == folderId) ?? SearchFolderFilters[0];
@@ -3334,33 +3338,36 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        var results = await Task.WhenAll(Accounts.ToArray().Select(async account =>
+        var results = await Task.WhenAll(ContactOwners.ToArray().Select(async owner =>
         {
             try
             {
-                var contacts = await _workspaceProvider.SearchContactsAsync(account, ModuleSearchText);
+                var contacts = owner.Mailbox.IsShared
+                    ? await _workspaceProvider.SearchSharedContactsAsync(
+                        owner.Account, owner.Mailbox.Address, ModuleSearchText)
+                    : await _workspaceProvider.SearchContactsAsync(owner.Account, ModuleSearchText);
                 if (_store is not null)
                 {
                     if (string.IsNullOrWhiteSpace(ModuleSearchText))
                     {
                         await _store.ReplaceWorkspaceItemsAsync(
-                            "contact", account.AccountId, "all", contacts,
+                            "contact", owner.CacheId, "all", contacts,
                             static item => item.ProviderId,
                             static item => $"{item.DisplayName} {string.Join(' ', item.EmailAddresses)}");
                     }
                     else
                     {
                         await _store.UpsertWorkspaceItemsAsync(
-                            "contact", account.AccountId, "all", contacts,
+                            "contact", owner.CacheId, "all", contacts,
                             static item => item.ProviderId,
                             static item => $"{item.DisplayName} {string.Join(' ', item.EmailAddresses)}");
                     }
                 }
-                return new AccountContactResult(account, contacts, null);
+                return new AccountContactResult(owner, contacts, null);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                return new AccountContactResult(account, [], exception.Message);
+                return new AccountContactResult(owner, [], exception.Message);
             }
         }));
         var saved = results.SelectMany(static result => result.Contacts).ToArray();
@@ -3377,12 +3384,14 @@ public sealed class MainWindowViewModel : ViewModelBase
             .Select(NormalizeEmail)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var people = saved
-            .GroupBy(contact => $"{contact.AccountId}\n{contact.ProviderId}", StringComparer.Ordinal)
+            .GroupBy(contact => $"{contact.AccountId}\n{contact.OwnerAddress}\n{contact.ProviderId}", StringComparer.Ordinal)
             .Select(group =>
             {
                 var contact = group.First();
-                var account = Accounts.FirstOrDefault(candidate => candidate.AccountId == contact.AccountId);
-                return PersonEntry.Saved(contact, account?.EmailAddress ?? "Unknown account");
+                var owner = ContactOwners.FirstOrDefault(candidate =>
+                    candidate.Account.AccountId == contact.AccountId &&
+                    candidate.OwnerAddress == contact.OwnerAddress);
+                return PersonEntry.Saved(contact, owner?.DisplayName ?? "Unknown account");
             })
             .Concat(discovered
                 .Where(person => !ownAddresses.Contains(NormalizeEmail(person.EmailAddress)) &&
@@ -3400,16 +3409,15 @@ public sealed class MainWindowViewModel : ViewModelBase
                             return $"{mailbox.DisplayName} ({account?.EmailAddress ?? mailbox.Address})";
                         })
                         .Distinct(StringComparer.OrdinalIgnoreCase)))))
-            .OrderByDescending(static person => person.IsSaved)
-            .ThenByDescending(static person => person.Frequency)
-            .ThenBy(static person => person.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static person => person.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static person => person.PrimaryEmail, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         Replace(People, people);
 
         PeopleErrorText = string.Join(Environment.NewLine, results
             .Where(static result => result.Error is not null)
             .Select(result =>
-                $"{result.Account.EmailAddress}: {result.Error} Open Settings > Accounts and re-authenticate if access expired."));
+                $"{result.Owner.DisplayName}: {result.Error} Open Settings > Accounts and re-authenticate if access expired."));
         RaisePropertyChanged(nameof(IsWorkspaceEmpty));
     }
 
@@ -3465,7 +3473,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
         _editingContact = person;
         _pendingDeleteContact = null;
-        SelectedContactAccount = Accounts.FirstOrDefault(account => account.AccountId == person.SavedContact.AccountId);
+        SelectedContactOwner = ContactOwners.FirstOrDefault(owner =>
+            owner.Account.AccountId == person.SavedContact.AccountId &&
+            owner.OwnerAddress == person.SavedContact.OwnerAddress);
         ContactName = person.SavedContact.DisplayName;
         ContactEmails = string.Join("; ", person.SavedContact.EmailAddresses);
         IsContactEditorOpen = true;
@@ -3480,7 +3490,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         _editingContact = null;
         _pendingDeleteContact = null;
-        SelectedContactAccount = Accounts.FirstOrDefault();
+        SelectedContactOwner = ContactOwners.FirstOrDefault();
         ContactName = "";
         ContactEmails = "";
         IsContactEditorOpen = true;
@@ -3507,8 +3517,9 @@ public sealed class MainWindowViewModel : ViewModelBase
     private async Task SaveContactAsync()
     {
         var contact = _editingContact?.SavedContact;
-        var account = SelectedContactAccount;
-        if (!IsContactEditorOpen || account is null || _workspaceProvider is null || _isContactActionRunning)
+        var owner = SelectedContactOwner;
+        var account = owner?.Account;
+        if (!IsContactEditorOpen || owner is null || account is null || _workspaceProvider is null || _isContactActionRunning)
         {
             return;
         }
@@ -3525,7 +3536,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             {
                 throw new InvalidOperationException("Add at least one email address.");
             }
-            var draft = new ContactDraft(account.AccountId, ContactName.Trim(), addresses);
+            var draft = new ContactDraft(account.AccountId, ContactName.Trim(), addresses, owner.OwnerAddress);
             if (contact is null)
             {
                 await _workspaceProvider.CreateContactAsync(account, draft);
@@ -3541,7 +3552,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            PeopleErrorText = $"{account.EmailAddress}: contact could not be saved: {exception.Message}";
+            PeopleErrorText = $"{owner.DisplayName}: contact could not be saved: {exception.Message}";
         }
         finally
         {
@@ -3624,6 +3635,17 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             ComposeRequested?.Invoke(new ComposeRequest(To: person.PrimaryEmail));
         }
+    }
+
+    internal void ViewMailFor(PersonEntry person)
+    {
+        if (string.IsNullOrWhiteSpace(person.PrimaryEmail))
+        {
+            return;
+        }
+        SelectedSearchScope = "Mail";
+        SearchText = person.PrimaryEmail;
+        SearchCommand.Execute(null);
     }
 
     private async Task ToggleReadAsync()
@@ -3909,15 +3931,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         var index = Messages.ToList().FindIndex(message => SameMessage(message, original));
         if (index >= 0)
         {
-            _isReplacingSelectedMessage = wasSelected;
-            try
-            {
-                Messages[index] = updated;
-            }
-            finally
-            {
-                _isReplacingSelectedMessage = false;
-            }
+            Messages[index] = updated;
         }
         if (wasSelected)
         {
@@ -3973,15 +3987,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             if (!Messages[index].HasSameContent(message))
             {
                 var wasSelected = SameMessage(selected, message);
-                _isReplacingSelectedMessage = wasSelected;
-                try
-                {
-                    Messages[index] = message;
-                }
-                finally
-                {
-                    _isReplacingSelectedMessage = false;
-                }
+                Messages[index] = message;
                 if (wasSelected)
                 {
                     SelectedMessage = message;
@@ -4238,6 +4244,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void RebuildSenderSettings()
     {
+        RebuildContactOwners();
         var senders = (
             from mailbox in Mailboxes
             join account in Accounts on mailbox.AccountId equals account.AccountId
@@ -4267,6 +4274,20 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             RaiseSenderPreferencesChanged();
         }
+    }
+
+    private void RebuildContactOwners()
+    {
+        var selectedMailboxId = SelectedContactOwner?.Mailbox.Id;
+        Replace(ContactOwners,
+            from mailbox in Mailboxes
+            join account in Accounts on mailbox.AccountId equals account.AccountId
+            where mailbox.IsShared || mailbox.Address.Equals(account.EmailAddress, StringComparison.OrdinalIgnoreCase)
+            orderby mailbox.IsShared, mailbox.DisplayName
+            select new ContactOwnerOption(account, mailbox));
+        SelectedContactOwner = ContactOwners.FirstOrDefault(owner => owner.Mailbox.Id == selectedMailboxId)
+            ?? ContactOwners.FirstOrDefault();
+        RefreshContactCommands();
     }
 
     private void OnSenderSignatureChanged(SenderSettingsItem item)
@@ -5174,7 +5195,8 @@ public sealed record PersonEntry(
         ?? DiscoveredPerson?.EmailAddress
         ?? "";
     public string Color => AccountColors.For(
-        SavedContact?.AccountId
+        SavedContact?.OwnerAddress
+        ?? SavedContact?.AccountId
         ?? DiscoveredPerson?.MailboxIds.FirstOrDefault()
         ?? ProvenanceText);
     public string AvatarText => string.IsNullOrWhiteSpace(DisplayName)
@@ -5202,8 +5224,17 @@ public sealed record PersonEntry(
         person);
 }
 
+public sealed record ContactOwnerOption(MailAccount Account, Mailbox Mailbox)
+{
+    public string DisplayName => Mailbox.IsShared
+        ? $"{Mailbox.DisplayName} - {Mailbox.Address} (shared)"
+        : $"{Account.DisplayName} - {Account.EmailAddress}";
+    public string CacheId => Mailbox.IsShared ? Mailbox.Id : Account.AccountId;
+    public string? OwnerAddress => Mailbox.IsShared ? Mailbox.Address : null;
+}
+
 internal sealed record AccountContactResult(
-    MailAccount Account,
+    ContactOwnerOption Owner,
     IReadOnlyList<ContactInfo> Contacts,
     string? Error);
 
@@ -5247,5 +5278,5 @@ public sealed record GlobalSearchResult(
     };
 }
 
-public sealed record SearchAccountFilter(string DisplayName, string? AccountId);
+public sealed record SearchAccountFilter(string DisplayName, string? AccountId, string? MailboxId = null);
 public sealed record SearchFolderFilter(string DisplayName, string? MailboxId, string? FolderId);

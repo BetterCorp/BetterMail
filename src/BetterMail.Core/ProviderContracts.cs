@@ -183,6 +183,14 @@ public interface IContactsProvider
 {
     Task<IReadOnlyList<ContactInfo>> SearchContactsAsync(MailAccount account, string query, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<ContactInfo>> SearchSharedContactsAsync(
+        MailAccount account,
+        string mailboxAddress,
+        string query,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<IReadOnlyList<ContactInfo>>(
+            new NotSupportedException("This provider does not support shared contacts."));
+
     Task<ContactInfo> CreateContactAsync(
         MailAccount account,
         ContactDraft draft,

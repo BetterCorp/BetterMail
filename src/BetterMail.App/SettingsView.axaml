@@ -147,7 +147,7 @@
         </StackPanel>
       </ScrollViewer>
 
-      <ScrollViewer x:Name="SignatureScroll" IsVisible="{Binding ShowSignatureSettings}" ClipToBounds="True" ScrollChanged="SignatureScrollChanged">
+      <ScrollViewer x:Name="SignatureScroll" IsVisible="{Binding ShowSignatureSettings}" ClipToBounds="True">
         <StackPanel MaxWidth="1120" HorizontalAlignment="Stretch" Spacing="18">
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel>
@@ -385,15 +385,15 @@
                         <TextBlock Text="{Binding EmailAddress}" Opacity="0.62" TextTrimming="CharacterEllipsis" />
                       </StackPanel>
                       <WrapPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                        <Button Content="Re-authenticate" Background="#0F6CBD" Foreground="White"
+                        <Button Content="Re-authenticate" Background="#0F6CBD" Foreground="White" Margin="0,0,5,5"
                                 Command="{Binding $parent[UserControl].DataContext.ReauthenticateAccountCommand}"
                                 CommandParameter="{Binding Account}"
                                 AutomationProperties.Name="{Binding EmailAddress, StringFormat='Re-authenticate {0}'}" />
-                        <Button Content="Add shared mailbox" Background="#107C10" Foreground="White"
+                        <Button Content="Add shared mailbox" Background="#107C10" Foreground="White" Margin="0,0,5,5"
                                 Command="{Binding $parent[UserControl].DataContext.AddSharedMailboxForAccountCommand}"
                                 CommandParameter="{Binding Account}"
                                 AutomationProperties.Name="{Binding EmailAddress, StringFormat='Add shared mailbox for {0}'}" />
-                        <Button Content="Remove" Background="#D9493D" Foreground="White"
+                        <Button Content="Remove" Background="#D9493D" Foreground="White" Margin="0,0,0,5"
                                 Command="{Binding $parent[UserControl].DataContext.RequestRemoveAccountCommand}"
                                 CommandParameter="{Binding Account}"
                                 AutomationProperties.Name="{Binding EmailAddress, StringFormat='Remove {0}'}" />
