@@ -462,7 +462,7 @@ public sealed partial class MainWindow : Window
     internal static string UniqueAttachmentName(string name, HashSet<string> usedNames)
     {
         var clean = string.Concat((string.IsNullOrWhiteSpace(name) ? "attachment" : name)
-            .Select(character => Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
+            .Select(character => character < ' ' || "<>:\"/\\|?*".Contains(character) ? '_' : character));
         var stem = Path.GetFileNameWithoutExtension(clean);
         var extension = Path.GetExtension(clean);
         var candidate = clean;
