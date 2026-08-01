@@ -440,6 +440,9 @@ public sealed class MainWindowViewModelTests
             var viewModel = new MainWindowViewModel(
                 store, directory, _ => { }, _ => { }, null, provider, TimeSpan.FromMilliseconds(80));
             await viewModel.InitializeAsync();
+            await WaitUntilAsync(
+                () => viewModel.SelectedMessage?.Body is not null,
+                cancellationToken);
             var oldSelection = viewModel.SelectedMessage!;
             var newSelection = viewModel.Messages.Single(message => message.ProviderId != oldSelection.ProviderId);
             viewModel.SelectedMessage = newSelection;
