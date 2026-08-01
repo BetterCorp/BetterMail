@@ -9,6 +9,19 @@ namespace BetterMail.Tests;
 public sealed class Microsoft365MailProviderTests
 {
     [Fact]
+    public void PreservesTheGraphReceivedInstantForDeviceLocalDisplay()
+    {
+        using var document = JsonDocument.Parse(
+            """{"id":"one","from":{},"toRecipients":[],"ccRecipients":[],"receivedDateTime":"2026-08-01T07:02:00Z","parentFolderId":"inbox"}""");
+        var mailbox = new BetterMail.Core.Mailbox("account", "person@example.com", "Person");
+
+        var message = Microsoft365MailProvider.MapMessage(mailbox, document.RootElement);
+
+        Assert.Equal(new DateTimeOffset(2026, 8, 1, 7, 2, 0, TimeSpan.Zero), message.ReceivedAt);
+        Assert.Equal(message.ReceivedAt.ToLocalTime(), message.LocalReceivedAt);
+    }
+
+    [Fact]
     public void HydratesSparseDeltaMessages()
     {
         using var sparse = JsonDocument.Parse("""{"id":"one","isRead":true}""");

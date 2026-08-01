@@ -132,7 +132,7 @@
                     </Style>
                   </ListBox.Styles>
                   <ListBox.ItemTemplate>
-                    <DataTemplate x:DataType="app:GlobalSearchResult">
+                    <DataTemplate x:DataType="app:GlobalSearchResult" x:CompileBindings="True">
                       <StackPanel>
                         <TextBlock Text="{Binding Category}"
                                    IsVisible="{Binding StartsCategory}"
@@ -153,7 +153,7 @@
                                   Classes="command"
                                   Padding="5,2"
                                   MinHeight="0"
-                                  Command="{Binding $parent[Window].DataContext.OpenGlobalSearchGroupCommand}"
+                                  Command="{ReflectionBinding $parent[Window].DataContext.OpenGlobalSearchGroupCommand}"
                                   CommandParameter="{Binding}"
                                   AutomationProperties.Name="{Binding Category, StringFormat='View {0} results for this account'}">
                             <StackPanel Orientation="Horizontal" Spacing="4">
@@ -164,7 +164,7 @@
                         </Grid>
                         <Button Classes="searchResult"
                                 HorizontalContentAlignment="Stretch"
-                                Command="{Binding $parent[Window].DataContext.OpenGlobalSearchResultCommand}"
+                                Command="{ReflectionBinding $parent[Window].DataContext.OpenGlobalSearchResultCommand}"
                                 CommandParameter="{Binding}"
                                 AutomationProperties.Name="{Binding Title}">
                           <Grid>
@@ -457,6 +457,9 @@
                 <Setter Property="IsHitTestVisible" Value="True" />
                 <Setter Property="RenderTransform" Value="translate(0px, 0px)" />
               </Style>
+              <Style Selector="TextBlock.mailRowTitle.unread">
+                <Setter Property="FontWeight" Value="SemiBold" />
+              </Style>
               <Style Selector="Border.quickActions Button.command">
                 <Setter Property="MinWidth" Value="0" />
                 <Setter Property="MinHeight" Value="0" />
@@ -472,8 +475,8 @@
               </Style>
             </ListBox.Styles>
             <ListBox.ItemTemplate>
-              <DataTemplate x:DataType="core:MailMessage">
-                <Border Height="{Binding $parent[Window].DataContext.MessageRowHeight}"
+              <DataTemplate x:DataType="core:MailMessage" x:CompileBindings="True">
+                <Border Height="{ReflectionBinding $parent[Window].DataContext.MessageRowHeight}"
                         BorderBrush="{DynamicResource BetterMailDividerBrush}"
                         BorderThickness="0,0,0,1"
                         DoubleTapped="MessageRowDoubleTapped"
@@ -497,27 +500,23 @@
                   </Border.ContextMenu>
                   <Grid ClipToBounds="True">
                     <Border Width="4" Background="#0F6CBD" IsVisible="{Binding IsUnread}" HorizontalAlignment="Left" />
-                    <Grid Margin="{Binding $parent[Window].DataContext.MessageRowMargin}" ColumnDefinitions="5,*,Auto" RowDefinitions="18,18,18" RowSpacing="1">
+                    <Grid Margin="{ReflectionBinding $parent[Window].DataContext.MessageRowMargin}" ColumnDefinitions="5,*,Auto" RowDefinitions="18,18,18" RowSpacing="1">
 
                     <Grid Grid.Column="1" Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto">
                       <Border Width="6" Height="6" CornerRadius="3" Margin="0,0,6,0"
                               Background="{Binding MailboxColor}"
                               VerticalAlignment="Center"
-                              IsVisible="{Binding $parent[Window].DataContext.IsUnifiedInbox}" />
-                      <Grid Grid.Column="1">
-                        <TextBlock Text="{Binding SenderDisplayName}" FontWeight="SemiBold" IsVisible="{Binding IsUnread}" TextTrimming="CharacterEllipsis" />
-                        <TextBlock Text="{Binding SenderDisplayName}" IsVisible="{Binding IsRead}" TextTrimming="CharacterEllipsis" />
-                      </Grid>
+                              IsVisible="{ReflectionBinding $parent[Window].DataContext.IsUnifiedInbox}" />
+                      <TextBlock Grid.Column="1" Classes="mailRowTitle" Classes.unread="{Binding IsUnread}"
+                                 Text="{Binding SenderDisplayName}" TextTrimming="CharacterEllipsis" />
                       <TextBlock Grid.Column="2" Margin="8,0,0,0"
-                                 Text="{Binding ReceivedAt, StringFormat='{}{0:MMM d, HH:mm}'}"
+                                 Text="{Binding LocalReceivedAt, StringFormat='{}{0:MMM d, HH:mm}'}"
                                  FontSize="11" Opacity="0.62" />
                     </Grid>
 
                     <Grid Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" ColumnDefinitions="*,Auto,Auto">
-                      <Grid>
-                        <TextBlock Text="{Binding Subject}" FontWeight="SemiBold" IsVisible="{Binding IsUnread}" TextTrimming="CharacterEllipsis" />
-                        <TextBlock Text="{Binding Subject}" IsVisible="{Binding IsRead}" TextTrimming="CharacterEllipsis" />
-                      </Grid>
+                      <TextBlock Classes="mailRowTitle" Classes.unread="{Binding IsUnread}"
+                                 Text="{Binding Subject}" TextTrimming="CharacterEllipsis" />
                       <TextBlock Grid.Column="1" Text="&#x1F4CE;" FontFamily="Segoe UI Symbol"
                                  IsVisible="{Binding HasAttachments}" Margin="7,0,0,0" Opacity="0.65"
                                  ToolTip.Tip="Has attachments" />
@@ -533,7 +532,7 @@
                     </Grid>
                     </Grid>
                     <Border Classes="quickActions"
-                            IsVisible="{Binding $parent[Window].DataContext.HasMailQuickActions}"
+                            IsVisible="{ReflectionBinding $parent[Window].DataContext.HasMailQuickActions}"
                             HorizontalAlignment="Right"
                             VerticalAlignment="Stretch"
                             ZIndex="2">
@@ -543,13 +542,13 @@
                           <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.18" />
                         </Transitions>
                       </Border.Transitions>
-                      <ItemsControl ItemsSource="{Binding $parent[Window].DataContext.MailQuickActions}">
+                      <ItemsControl ItemsSource="{ReflectionBinding $parent[Window].DataContext.MailQuickActions}">
                         <ItemsControl.ItemsPanel>
                           <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                           <DataTemplate x:DataType="app:MailQuickActionOption">
-                            <Grid Width="40" Height="{Binding $parent[Window].DataContext.MessageRowHeight}">
+                            <Grid Width="40" Height="{ReflectionBinding $parent[Window].DataContext.MessageRowHeight}">
                               <Button Classes="command"
                                       Content="{Binding Icon}"
                                       FontFamily="Segoe UI Symbol"
@@ -570,13 +569,13 @@
                                 <Button.Flyout>
                                   <Flyout>
                                     <ScrollViewer MaxHeight="420" MinWidth="230">
-                                      <ItemsControl ItemsSource="{Binding $parent[Window].DataContext.Folders}">
+                                      <ItemsControl ItemsSource="{ReflectionBinding $parent[Window].DataContext.Folders}">
                                         <ItemsControl.ItemTemplate>
                                           <DataTemplate x:DataType="app:MailFolderItem">
                                             <Button Classes="command"
                                                     Content="{Binding DisplayName}"
                                                     HorizontalContentAlignment="Left"
-                                                    Command="{Binding $parent[Window].DataContext.MoveToFolderCommand}"
+                                                    Command="{ReflectionBinding $parent[Window].DataContext.MoveToFolderCommand}"
                                                     CommandParameter="{Binding}" />
                                           </DataTemplate>
                                         </ItemsControl.ItemTemplate>
@@ -605,11 +604,11 @@
                                         <Button.Flyout>
                                           <Flyout>
                                             <ScrollViewer MaxHeight="420" MinWidth="230">
-                                              <ItemsControl ItemsSource="{Binding $parent[Window].DataContext.Folders}">
+                                              <ItemsControl ItemsSource="{ReflectionBinding $parent[Window].DataContext.Folders}">
                                                 <ItemsControl.ItemTemplate>
                                                   <DataTemplate x:DataType="app:MailFolderItem">
                                                     <Button Classes="command" Content="{Binding DisplayName}" HorizontalContentAlignment="Left"
-                                                            Command="{Binding $parent[Window].DataContext.MoveToFolderCommand}" CommandParameter="{Binding}" />
+                                                            Command="{ReflectionBinding $parent[Window].DataContext.MoveToFolderCommand}" CommandParameter="{Binding}" />
                                                   </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                               </ItemsControl>
@@ -619,10 +618,10 @@
                                       </Button>
                                       <Border Height="1" Background="{DynamicResource BetterMailDividerBrush}" Margin="4" />
                                       <Button Classes="command" Content="Junk" HorizontalContentAlignment="Left" Click="MessageJunkClicked" />
-                                      <Button Classes="command" Content="{Binding $parent[Window].DataContext.ToggleFlagText}" HorizontalContentAlignment="Left" Click="MessageFlagClicked" />
-                                      <Button Classes="command" Content="{Binding $parent[Window].DataContext.ToggleReadText}" HorizontalContentAlignment="Left" Click="MessageReadClicked" />
+                                      <Button Classes="command" Content="{ReflectionBinding $parent[Window].DataContext.ToggleFlagText}" HorizontalContentAlignment="Left" Click="MessageFlagClicked" />
+                                      <Button Classes="command" Content="{ReflectionBinding $parent[Window].DataContext.ToggleReadText}" HorizontalContentAlignment="Left" Click="MessageReadClicked" />
                                       <Button Classes="command" Content="View headers" HorizontalContentAlignment="Left"
-                                              Command="{Binding $parent[Window].DataContext.ViewHeadersCommand}" />
+                                              Command="{ReflectionBinding $parent[Window].DataContext.ViewHeadersCommand}" />
                                     </StackPanel>
                                   </Flyout>
                                 </Button.Flyout>
@@ -679,7 +678,7 @@
                         AutomationProperties.Name="{Binding DisplaySubject, StringFormat='Open draft {0}'}">
                   <Grid ColumnDefinitions="*,Auto" RowDefinitions="18,18,18" RowSpacing="1">
                     <TextBlock Text="Draft" FontWeight="SemiBold" Foreground="{DynamicResource BetterMailAccentBrush}" />
-                    <TextBlock Grid.Column="1" Text="{Binding UpdatedAt, StringFormat='{}{0:MMM d, HH:mm}'}" FontSize="11" Opacity="0.62" />
+                    <TextBlock Grid.Column="1" Text="{Binding LocalUpdatedAt, StringFormat='{}{0:MMM d, HH:mm}'}" FontSize="11" Opacity="0.62" />
                     <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding DisplaySubject}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                     <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding To, StringFormat='To: {0}'}" FontSize="11" Opacity="0.62" TextTrimming="CharacterEllipsis" Margin="0,1,0,1" VerticalAlignment="Center" />
                   </Grid>
@@ -845,16 +844,26 @@
                     Grid.Row="1" IsVisible="{Binding HasPeopleErrors}">
               <TextBlock Text="{Binding PeopleErrorText}" TextWrapping="Wrap" Foreground="#B3261E" />
             </Border>
-            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-              <ItemsControl x:Name="PeopleCards"
-                            ItemsSource="{Binding People}"
-                            AutomationProperties.Name="People across linked accounts">
-                <ItemsControl.ItemsPanel>
-                  <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="app:PersonEntry">
-                  <Border Width="312" MinHeight="152" Margin="0,0,10,10" Padding="14"
+            <ListBox x:Name="PeopleCards" Grid.Row="2"
+                     ItemsSource="{Binding People}"
+                     Background="Transparent" BorderThickness="0"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     AutomationProperties.Name="People across linked accounts">
+              <ListBox.ItemsPanel>
+                <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
+              </ListBox.ItemsPanel>
+              <ListBox.Styles>
+                <Style Selector="ListBoxItem">
+                  <Setter Property="Padding" Value="0" />
+                  <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                </Style>
+                <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                  <Setter Property="Background" Value="Transparent" />
+                </Style>
+              </ListBox.Styles>
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="app:PersonEntry" x:CompileBindings="True">
+                  <Border MinHeight="152" Margin="0,0,10,10" Padding="14"
                           BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1" CornerRadius="3">
                     <Grid RowDefinitions="Auto,*,Auto">
                       <Border Grid.RowSpan="3" Width="4" Margin="-14,-14,0,-14" HorizontalAlignment="Left" Background="{Binding Color}" />
@@ -895,22 +904,21 @@
                                 Content="Edit"
                                 Margin="0,0,5,0"
                                 IsVisible="{Binding IsSaved}"
-                                Command="{Binding $parent[Window].DataContext.EditContactCommand}"
+                                Command="{ReflectionBinding $parent[Window].DataContext.EditContactCommand}"
                                 CommandParameter="{Binding}"
                                 AutomationProperties.Name="Edit contact" />
                         <Button Classes="command"
                                 Content="Delete"
                                 IsVisible="{Binding IsSaved}"
-                                Command="{Binding $parent[Window].DataContext.RequestDeleteContactCommand}"
+                                Command="{ReflectionBinding $parent[Window].DataContext.RequestDeleteContactCommand}"
                                 CommandParameter="{Binding}"
                                 AutomationProperties.Name="Delete contact" />
                       </WrapPanel>
                     </Grid>
                   </Border>
                 </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-            </ScrollViewer>
+              </ListBox.ItemTemplate>
+            </ListBox>
             <Grid Grid.RowSpan="3" IsVisible="{Binding IsContactPaneOpen}" ZIndex="20">
               <Button Background="#99000000" BorderThickness="0" CornerRadius="0"
                       Command="{Binding CancelEditContactCommand}"

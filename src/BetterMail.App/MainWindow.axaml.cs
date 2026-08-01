@@ -217,6 +217,10 @@ public sealed partial class MainWindow : Window
 
     private void FolderSelectedClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
     {
+        foreach (var tree in FolderPane.GetVisualDescendants().OfType<TreeView>())
+        {
+            tree.SelectedItem = null;
+        }
         _showFolders = false;
         _showPhoneMessage = false;
         UpdateMailPanes();

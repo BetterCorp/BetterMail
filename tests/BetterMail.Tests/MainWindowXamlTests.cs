@@ -162,8 +162,8 @@ public sealed class MainWindowXamlTests
         Assert.Contains("IsVisible=" + (char)34 + "{Binding IsSending}" + (char)34, composeXaml);
         Assert.Contains("Click=" + (char)34 + "CopyErrorClicked" + (char)34, composeXaml);
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding MailQuickActionSlots}" + (char)34, settingsXaml);
-        Assert.Contains("ItemsSource=" + (char)34 + "{Binding $parent[Window].DataContext.MailQuickActions}" + (char)34, xaml);
-        Assert.Contains("IsVisible=" + (char)34 + "{Binding $parent[Window].DataContext.IsUnifiedInbox}" + (char)34, xaml);
+        Assert.Contains("ItemsSource=" + (char)34 + "{ReflectionBinding $parent[Window].DataContext.MailQuickActions}" + (char)34, xaml);
+        Assert.Contains("IsVisible=" + (char)34 + "{ReflectionBinding $parent[Window].DataContext.IsUnifiedInbox}" + (char)34, xaml);
         Assert.Contains("Border.quickActions Button.command", xaml);
         Assert.Contains("TransformOperationsTransition", xaml);
         Assert.Contains("BetterMailQuickActionShadow", xaml);
@@ -182,6 +182,10 @@ public sealed class MainWindowXamlTests
         Assert.Contains("TreeViewItem:pointerover /template/ ContentPresenter", folderPane);
         Assert.Contains("<Setter Property=" + (char)34 + "BorderThickness" + (char)34 + " Value=" + (char)34 + "0" + (char)34 + " />", folderPane);
         Assert.Contains("<TreeView", folderPane);
+        Assert.Contains("tree.SelectedItem = null;", mainWindowSource);
+        Assert.Contains("LocalReceivedAt", xaml);
+        Assert.Contains("VirtualizingStackPanel", xaml);
+        Assert.Contains("core:MailMessage" + (char)34 + " x:CompileBindings=" + (char)34 + "True", xaml);
         Assert.Equal(1, Count(xaml, "<app:CalendarWorkspaceView"));
         Assert.DoesNotContain(BindingAttribute("ItemsSource", "CalendarEvents"), xaml);
         Assert.Equal(1, Count(xaml, "<app:NotesWorkspaceView"));
@@ -205,7 +209,7 @@ public sealed class MainWindowXamlTests
         Assert.Contains("x:Name=" + (char)34 + "FullAppLoader" + (char)34, xaml);
         Assert.Contains(BindingAttribute("IsVisible", "ShowFullScreenLoader"), xaml);
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding Drafts}" + (char)34, xaml);
-        Assert.Contains("Height=" + (char)34 + "{Binding $parent[Window].DataContext.MessageRowHeight}" + (char)34, xaml);
+        Assert.Contains("Height=" + (char)34 + "{ReflectionBinding $parent[Window].DataContext.MessageRowHeight}" + (char)34, xaml);
         Assert.Contains("x:Name=" + (char)34 + "PeopleCards" + (char)34, xaml);
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding ContactOwners}" + (char)34, xaml);
         Assert.Contains("Click=" + (char)34 + "CopyContactTextClicked" + (char)34, xaml);

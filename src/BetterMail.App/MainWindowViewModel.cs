@@ -3426,7 +3426,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             .OrderBy(static person => person.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(static person => person.PrimaryEmail, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        Replace(People, people);
+        CollectionUpdates.Reconcile(People, people, static person => person.Identity);
 
         PeopleErrorText = string.Join(Environment.NewLine, results
             .Where(static result => result.Error is not null)
@@ -5294,6 +5294,9 @@ public sealed record PersonEntry(
     DiscoveredPerson? DiscoveredPerson)
 {
     public bool IsSaved => SavedContact is not null;
+    public string Identity => SavedContact is { } contact
+        ? $"saved\n{contact.AccountId}\n{contact.OwnerAddress}\n{contact.ProviderId}"
+        : $"discovered\n{PrimaryEmail}";
     public string PrimaryEmail => SavedContact?.EmailAddresses.FirstOrDefault()
         ?? DiscoveredPerson?.EmailAddress
         ?? "";

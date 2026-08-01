@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
@@ -22,6 +23,51 @@ public abstract class ViewModelBase : INotifyPropertyChanged
 
     protected void RaisePropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+}
+
+internal static class CollectionUpdates
+{
+    public static void Reconcile<T, TKey>(
+        ObservableCollection<T> target,
+        IEnumerable<T> values,
+        Func<T, TKey> keySelector)
+        where TKey : notnull
+    {
+        // ponytail: O(n²) on wholesale reorders; index keys if these lists routinely exceed a few thousand items.
+        var desired = values as IReadOnlyList<T> ?? values.ToArray();
+        for (var index = 0; index < desired.Count; index++)
+        {
+            var match = -1;
+            for (var candidate = index; candidate < target.Count; candidate++)
+            {
+                if (EqualityComparer<TKey>.Default.Equals(
+                        keySelector(target[candidate]),
+                        keySelector(desired[index])))
+                {
+                    match = candidate;
+                    break;
+                }
+            }
+
+            if (match < 0)
+            {
+                target.Insert(index, desired[index]);
+                continue;
+            }
+            if (match != index)
+            {
+                target.Move(match, index);
+            }
+            if (!EqualityComparer<T>.Default.Equals(target[index], desired[index]))
+            {
+                target[index] = desired[index];
+            }
+        }
+        while (target.Count > desired.Count)
+        {
+            target.RemoveAt(target.Count - 1);
+        }
+    }
 }
 
 public sealed class AsyncCommand(Func<Task> execute, Func<bool>? canExecute = null) : ICommand

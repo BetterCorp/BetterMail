@@ -149,9 +149,9 @@
                    Classes="workspaceList" IsVisible="{Binding IsListView}"
                    AutomationProperties.Name="Selected directory contents" TabIndex="330">
             <ListBox.ItemTemplate>
-              <DataTemplate x:DataType="app:DriveItemEntry">
+              <DataTemplate x:DataType="app:DriveItemEntry" x:CompileBindings="True">
                 <Button Classes="workspaceItem" Padding="8,6"
-                        Command="{Binding $parent[UserControl].DataContext.OpenItemCommand}"
+                        Command="{ReflectionBinding $parent[UserControl].DataContext.OpenItemCommand}"
                         CommandParameter="{Binding}"
                         AutomationProperties.Name="{Binding Item.Name}">
                   <Grid ColumnDefinitions="Auto,3*,*,Auto" ColumnSpacing="8">
@@ -174,10 +174,10 @@
               </ItemsPanelTemplate>
             </ListBox.ItemsPanel>
             <ListBox.ItemTemplate>
-              <DataTemplate x:DataType="app:DriveItemEntry">
+              <DataTemplate x:DataType="app:DriveItemEntry" x:CompileBindings="True">
                 <Button Classes="workspaceItem" Width="160" Height="108" Margin="5" Padding="10"
                         HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
-                        Command="{Binding $parent[UserControl].DataContext.OpenItemCommand}"
+                        Command="{ReflectionBinding $parent[UserControl].DataContext.OpenItemCommand}"
                         CommandParameter="{Binding}"
                         AutomationProperties.Name="{Binding Item.Name}">
                   <StackPanel Spacing="7">
@@ -199,7 +199,7 @@
           <ListBox Grid.Row="1" ItemsSource="{Binding SearchResults}" SelectedItem="{Binding SelectedSearchResult}" Classes="workspaceList"
                    AutomationProperties.Name="Cross-account drive search results" TabIndex="340">
             <ListBox.ItemTemplate>
-              <DataTemplate x:DataType="app:DriveSearchResult">
+              <DataTemplate x:DataType="app:DriveSearchResult" x:CompileBindings="True">
                 <Grid ColumnDefinitions="3*,Auto" Margin="10,7">
                   <StackPanel>
                     <TextBlock Text="{Binding File.Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />

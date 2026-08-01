@@ -102,6 +102,7 @@ public sealed record MailMessage(
     IReadOnlyList<MailAddress>? Cc = null)
 {
     public bool IsUnread => !IsRead;
+    public DateTimeOffset LocalReceivedAt => ReceivedAt.ToLocalTime();
     public string MailboxColor => AccountColors.For(MailboxId);
     public string SenderDisplayName => string.IsNullOrWhiteSpace(From.Name) ? From.Address : From.Name;
     public bool HasSameContent(MailMessage? other) =>
@@ -191,6 +192,7 @@ public sealed record LocalDraft(
     string? ProviderETag = null)
 {
     public string DisplaySubject => string.IsNullOrWhiteSpace(Subject) ? "(no subject)" : Subject;
+    public DateTimeOffset LocalUpdatedAt => UpdatedAt.ToLocalTime();
 }
 
 public sealed record CalendarInfo(

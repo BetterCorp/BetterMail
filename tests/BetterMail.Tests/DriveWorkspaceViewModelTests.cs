@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using BetterMail.App;
 using BetterMail.Core;
 
@@ -5,6 +7,25 @@ namespace BetterMail.Tests;
 
 public sealed class DriveWorkspaceViewModelTests
 {
+    [Fact]
+    public void KeyedUpdatesAvoidCollectionResetsAndPreserveUnchangedItems()
+    {
+        var first = new ReconcileItem("first", "old");
+        var second = new ReconcileItem("second", "same");
+        var target = new ObservableCollection<ReconcileItem>([first, second]);
+        var actions = new List<NotifyCollectionChangedAction>();
+        target.CollectionChanged += (_, args) => actions.Add(args.Action);
+
+        CollectionUpdates.Reconcile(target,
+            [second, new ReconcileItem("first", "updated"), new ReconcileItem("third", "new")],
+            static item => item.Id);
+
+        Assert.Equal(["second", "first", "third"], target.Select(static item => item.Id));
+        Assert.Same(second, target[0]);
+        Assert.Equal("updated", target[1].Value);
+        Assert.DoesNotContain(NotifyCollectionChangedAction.Reset, actions);
+    }
+
     [Fact]
     public void SearchFilePathIncludesTheFullNormalizedOneDrivePath()
     {
@@ -141,6 +162,8 @@ public sealed class DriveWorkspaceViewModelTests
     [InlineData(560, false)]
     public void DriveLayoutUsesOnePaneAtPhoneBreakpoint(double width, bool expected) =>
         Assert.Equal(expected, DriveWorkspaceView.IsPhoneWidth(width));
+
+    private sealed record ReconcileItem(string Id, string Value);
 
     private static MailAccount Account(string id, string email) => new(
         "microsoft365",

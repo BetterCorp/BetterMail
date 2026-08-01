@@ -292,7 +292,7 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         }
         await LoadNodeAsync(node, force: false, cancellationToken);
         SelectedDirectory = node;
-        Replace(CurrentItems, Entries(node));
+        CollectionUpdates.Reconcile(CurrentItems, Entries(node), static entry => entry.Identity);
         SelectedItem = null;
         SelectedSearchResult = null;
         IsSearchMode = false;
@@ -420,7 +420,7 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         await LoadNodeAsync(node, force: true, cancellationToken);
         if (ReferenceEquals(node, SelectedDirectory))
         {
-            Replace(CurrentItems, Entries(node));
+            CollectionUpdates.Reconcile(CurrentItems, Entries(node), static entry => entry.Identity);
             SelectedItem = null;
         }
     }
@@ -445,12 +445,13 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
                 var cached = await _store.SearchWorkspaceItemsAsync<CloudFile>(
                     "drive-file", SearchQuery.Trim(), 200,
                     SelectedAccountFilter?.Account?.AccountId);
-                Replace(SearchResults, cached
+                CollectionUpdates.Reconcile(SearchResults, cached
                     .Select(file => (File: file, Account: accounts.FirstOrDefault(
                         candidate => candidate.AccountId == file.AccountId)))
                     .Where(static item => item.Account is not null)
                     .Select(static item => new DriveSearchResult(item.Account!, item.File))
-                    .OrderBy(static result => result.File.Name, StringComparer.OrdinalIgnoreCase));
+                    .OrderBy(static result => result.File.Name, StringComparer.OrdinalIgnoreCase),
+                    static result => result.Identity);
                 IsSearchMode = true;
             }
             var batches = await Task.WhenAll(accounts.Select(async candidate =>
@@ -482,8 +483,9 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
                 .ToArray();
             if (online.Length > 0 || SearchResults.Count == 0)
             {
-                Replace(SearchResults, online.OrderBy(
-                    static result => result.File.Name, StringComparer.OrdinalIgnoreCase));
+                CollectionUpdates.Reconcile(SearchResults, online.OrderBy(
+                    static result => result.File.Name, StringComparer.OrdinalIgnoreCase),
+                    static result => result.Identity);
             }
             SelectedSearchResult = null;
             IsSearchMode = true;
@@ -832,12 +834,14 @@ public sealed class DriveTreeNode : ViewModelBase
 
 public sealed record DriveItemEntry(MailAccount Account, CloudDriveItem Item)
 {
+    public string Identity => $"{Account.ProviderId}\n{Account.AccountId}\n{Item.ProviderId}";
     public string TypeText => Item.IsFolder ? "Folder" : Item.ContentType ?? "File";
     public string Glyph => Item.IsFolder ? "\uE8B7" : "\uE8A5";
 }
 
 public sealed record DriveSearchResult(MailAccount Account, CloudFile File)
 {
+    public string Identity => $"{Account.ProviderId}\n{Account.AccountId}\n{File.ProviderId}";
     public string SourceText => $"{ProviderName(Account.ProviderId)} · {Account.EmailAddress} · {File.Path}";
     private static string ProviderName(string providerId) =>
         providerId.Equals("microsoft365", StringComparison.OrdinalIgnoreCase) ? "OneDrive" : providerId;
