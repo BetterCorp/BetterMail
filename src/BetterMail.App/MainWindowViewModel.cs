@@ -492,11 +492,18 @@ public sealed class MainWindowViewModel : ViewModelBase
         Attachments,
         _allowRemoteContent);
 
-    public void SetSelectedMessages(IEnumerable<MailMessage> messages)
+    public void SetSelectedMessages(IEnumerable<MailMessage> messages, MailMessage? primary = null)
     {
         var selected = messages.DistinctBy(MessageKey).ToArray();
         Replace(SelectedMessages, selected);
-        if (selected.Length > 0 && !selected.Any(message => SameMessage(message, SelectedMessage)))
+        var selectedPrimary = primary is null
+            ? null
+            : selected.FirstOrDefault(message => SameMessage(message, primary));
+        if (selectedPrimary is not null && !SameMessage(selectedPrimary, SelectedMessage))
+        {
+            SelectedMessage = selectedPrimary;
+        }
+        else if (selected.Length > 0 && !selected.Any(message => SameMessage(message, SelectedMessage)))
         {
             SelectedMessage = selected[^1];
         }
@@ -3817,13 +3824,12 @@ public sealed class MainWindowViewModel : ViewModelBase
                 {
                     continue;
                 }
-                var updated = message with { IsFlagged = isFlagged };
                 await _provider.SetFlaggedAsync(account, mailbox, message.ProviderId, isFlagged);
                 await _store.UpdateMessageStateAsync(
                     message.MailboxId,
                     message.ProviderId,
                     isFlagged: isFlagged);
-                ApplyMessageUpdate(message, updated);
+                ApplyMessageStateUpdate(message, isFlagged: isFlagged);
             }
 
             Status = isFlagged ? "Message flagged" : "Flag cleared";
@@ -3939,14 +3945,25 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        var updated = message with { IsRead = isRead };
-        await _provider.MarkReadAsync(account, mailbox, message.ProviderId, updated.IsRead, cancellationToken);
+        await _provider.MarkReadAsync(account, mailbox, message.ProviderId, isRead, cancellationToken);
         await _store.UpdateMessageStateAsync(
             message.MailboxId,
             message.ProviderId,
             isRead: isRead,
             cancellationToken: cancellationToken);
-        ApplyMessageUpdate(message, updated);
+        ApplyMessageStateUpdate(message, isRead: isRead);
+    }
+
+    private void ApplyMessageStateUpdate(MailMessage message, bool? isRead = null, bool? isFlagged = null)
+    {
+        var current = IsCurrentMessage(message)
+            ? SelectedMessage!
+            : Messages.FirstOrDefault(candidate => SameMessage(candidate, message)) ?? message;
+        ApplyMessageUpdate(current, current with
+        {
+            IsRead = isRead ?? current.IsRead,
+            IsFlagged = isFlagged ?? current.IsFlagged
+        });
     }
 
     private void ApplyMessageUpdate(MailMessage original, MailMessage updated)
@@ -4979,12 +4996,22 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
         try
         {
-            var messages = (await _store.GetThreadMessagesAsync(
-                    BetterMail.Core.ConversationThread.ThreadIdentity(selected), cancellationToken))
-                .ToList();
             var hydrated = selected.Body is null
                 ? await _store.GetMessageAsync(selected.MailboxId, selected.ProviderId, cancellationToken)
                 : selected;
+            if (selectionVersion != _selectionVersion || !IsCurrentMessage(selected))
+            {
+                return;
+            }
+            if (hydrated is not null && !selected.HasSameContent(hydrated))
+            {
+                ApplyMessageUpdate(selected, hydrated);
+                selected = hydrated;
+            }
+
+            var messages = (await _store.GetThreadMessagesAsync(
+                    BetterMail.Core.ConversationThread.ThreadIdentity(selected), cancellationToken))
+                .ToList();
             if (selectionVersion != _selectionVersion || !IsCurrentMessage(selected))
             {
                 return;
@@ -4999,11 +5026,6 @@ public sealed class MainWindowViewModel : ViewModelBase
                 else
                 {
                     messages.Add(hydrated);
-                }
-                if (!selected.HasSameContent(hydrated))
-                {
-                    ApplyMessageUpdate(selected, hydrated);
-                    selected = hydrated;
                 }
             }
             ConversationThread.Reconcile(messages, selected);

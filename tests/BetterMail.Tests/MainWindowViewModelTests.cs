@@ -447,6 +447,19 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void NewlyAddedMailSelectionBecomesPrimaryImmediately()
+    {
+        var viewModel = new MainWindowViewModel(null, "data", _ => { }, _ => { }, null);
+        var first = Message("mailbox", "inbox", "First", "First body") with { ProviderId = "first" };
+        var second = Message("mailbox", "inbox", "Second", "Second body") with { ProviderId = "second" };
+        viewModel.SelectedMessage = first;
+
+        viewModel.SetSelectedMessages([first, second], second);
+
+        Assert.Same(second, viewModel.SelectedMessage);
+    }
+
+    [Fact]
     public async Task RapidSelectionCancelsTheOldReadDelayAndKeepsTheNewSelection()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -787,10 +800,14 @@ public sealed class MainWindowViewModelTests
                 _ => { },
                 null,
                 provider,
-                TimeSpan.FromMilliseconds(60));
+                TimeSpan.FromMilliseconds(250));
 
             await viewModel.InitializeAsync();
             await WaitUntilAsync(() => viewModel.Attachments.Count == 1, cancellationToken);
+            await WaitUntilAsync(() => viewModel.SelectedMessage?.Body == "<b>Body</b>", cancellationToken);
+            await WaitUntilAsync(
+                () => viewModel.ConversationThread.SelectedMessage?.BodyHtml.Contains("Body", StringComparison.Ordinal) == true,
+                cancellationToken);
             viewModel.Messages.CollectionChanged += (_, args) =>
             {
                 if (args.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Replace)
@@ -810,6 +827,8 @@ public sealed class MainWindowViewModelTests
 
             Assert.True(provider.MarkedRead);
             Assert.True(viewModel.SelectedMessage?.IsRead);
+            Assert.Equal("<b>Body</b>", viewModel.SelectedMessage?.Body);
+            Assert.Contains("Body", viewModel.ConversationThread.SelectedMessage!.BodyHtml);
             Assert.Same(viewModel.Messages.Single(), viewModel.SelectedMessage);
             Assert.True(viewModel.DeleteCommand.CanExecute(null));
             Assert.Single(viewModel.Attachments);

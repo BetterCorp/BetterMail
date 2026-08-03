@@ -371,6 +371,10 @@ public sealed class ConversationMessageItem : ViewModelBase
 
     public void Update(MailMessage message)
     {
+        if (_message.Body is not null && message.Body is null)
+        {
+            message = message with { Body = _message.Body };
+        }
         if (_message.HasSameContent(message))
         {
             return;
@@ -382,9 +386,8 @@ public sealed class ConversationMessageItem : ViewModelBase
         if (bodyChanged)
         {
             _allowRemoteContent = false;
-            _attachments = [];
             _renderRequested = false;
-            _bodyHtml = _renderer.RenderDocument("Loading message…", false);
+            _renderVersion++;
         }
         RaisePropertyChanged(nameof(Message));
         RaisePropertyChanged(nameof(Sender));

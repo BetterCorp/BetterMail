@@ -241,7 +241,9 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
-        _viewModel?.SetSelectedMessages(MessageList.SelectedItems?.OfType<MailMessage>() ?? []);
+        _viewModel?.SetSelectedMessages(
+            MessageList.SelectedItems?.OfType<MailMessage>() ?? [],
+            args.AddedItems.OfType<MailMessage>().LastOrDefault());
     }
 
     private void MessagesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs args)
@@ -727,7 +729,7 @@ public sealed partial class MainWindow : Window
             selectedItems.Clear();
             selectedItems.Add(message);
         }
-        _viewModel.SetSelectedMessages(selectedItems.OfType<MailMessage>());
+        _viewModel.SetSelectedMessages(selectedItems.OfType<MailMessage>(), message);
     }
 
     private static void Execute(ICommand? command)

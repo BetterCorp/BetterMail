@@ -150,7 +150,7 @@ public sealed class ConversationThreadTests
     }
 
     [Fact]
-    public void MetadataSyncDoesNotRebuildTheOpenConversation()
+    public void MetadataSyncDoesNotRebuildOrClearTheOpenConversation()
     {
         var viewModel = new ConversationThreadViewModel();
         var message = Message("mailbox", "message", "thread", null, 1, "<p>body</p>");
@@ -161,8 +161,10 @@ public sealed class ConversationThreadTests
         viewModel.Threads.CollectionChanged += (_, _) => threadChanges++;
         thread.Messages.CollectionChanged += (_, _) => messageChanges++;
 
-        viewModel.Reconcile([message with { IsRead = true }], message with { IsRead = true });
+        var metadataUpdate = message with { IsRead = true, Body = null };
+        viewModel.Reconcile([metadataUpdate], metadataUpdate);
 
+        Assert.Equal(message.Body, viewModel.SelectedMessage?.Message.Body);
         Assert.Equal(0, threadChanges);
         Assert.Equal(0, messageChanges);
         Assert.Same(thread, viewModel.SelectedThread);
