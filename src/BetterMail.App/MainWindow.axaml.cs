@@ -563,6 +563,21 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    internal async Task OpenNotificationAsync(
+        string mailboxId,
+        string folderProviderId,
+        string messageProviderId)
+    {
+        if (_viewModel is null)
+        {
+            return;
+        }
+        var preview = await _viewModel.OpenNotificationAsync(mailboxId, folderProviderId, messageProviderId);
+        if (preview is not null)
+        {
+            ShowPreviewWindow(new(mailboxId, messageProviderId), preview);
+        }
+    }
     public async Task RestorePreviewWindowsAsync(CancellationToken cancellationToken = default)
     {
         if (_viewModel is null || _windowSessions is null)
@@ -597,8 +612,10 @@ public sealed partial class MainWindow : Window
         }
 
         var previewViewModel = new ConversationThreadViewModel(
-            loadMessage: message => viewModel.GetCachedMessageAsync(message));
+            loadMessage: message => viewModel.GetCachedMessageAsync(message),
+            openDraft: viewModel.OpenLocalDraftAsync);
         previewViewModel.Reconcile(preview.Messages, preview.Selected);
+        previewViewModel.ReconcileDrafts(preview.Drafts);
         var window = new Window
         {
             Title = preview.Selected.Subject,
@@ -619,7 +636,7 @@ public sealed partial class MainWindow : Window
             }
         };
         window.Closed += (_, _) => _previewWindows.Remove(session);
-        window.Show(this);
+        window.Show();
         _windowSessions?.Save(_previewWindows.Keys);
     }
 

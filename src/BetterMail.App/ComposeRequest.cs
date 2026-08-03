@@ -21,7 +21,8 @@ public sealed record ComposeRequest(
     string? MailboxId = null,
     IReadOnlyList<DraftAttachment>? Attachments = null,
     bool IsHtml = false,
-    ComposeIntent Intent = ComposeIntent.NewMail);
+    ComposeIntent Intent = ComposeIntent.NewMail,
+    string? ConversationIdentity = null);
 
 public sealed record ComposeSender(MailAccount Account, Mailbox Mailbox)
 {

@@ -11,7 +11,9 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
     private readonly SemaphoreSlim _gate = new(1, 1);
     private SqliteConnection? _connection;
     private bool _optimizedSearch;
-    private bool _correspondentsReady;
+    private volatile bool _correspondentsReady;
+
+    public bool HasIndexedCorrespondents => _correspondentsReady;
 
     public Task InitializeAsync(CancellationToken cancellationToken = default) =>
         Task.Run(() => InitializeCoreAsync(cancellationToken), cancellationToken);
@@ -52,6 +54,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             await EnsureColumnAsync(connection, "local_drafts", "synced_local_updated_at", "TEXT", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "local_drafts", "provider_updated_at", "TEXT", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "local_drafts", "provider_etag", "TEXT", cancellationToken).ConfigureAwait(false);
+            await EnsureColumnAsync(connection, "local_drafts", "conversation_identity", "TEXT", cancellationToken).ConfigureAwait(false);
             await RunOnceAsync(connection, "thread-index-v1", BackfillThreadIndex, cancellationToken).ConfigureAwait(false);
             _optimizedSearch = await MigrationCompleteAsync(connection, "message-search-v2", cancellationToken).ConfigureAwait(false);
             _correspondentsReady = await MigrationCompleteAsync(connection, "message-correspondents-v1", cancellationToken).ConfigureAwait(false);
@@ -901,10 +904,10 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             command.CommandText = """
                 INSERT INTO local_drafts(
                     id, account_id, mailbox_id, recipients, cc, bcc, subject, body, attachments_json,
-                    updated_at, is_html, provider_draft_id, synced_local_updated_at, provider_updated_at, provider_etag)
+                    updated_at, is_html, provider_draft_id, synced_local_updated_at, provider_updated_at, provider_etag, conversation_identity)
                 VALUES(
                     $id, $account, $mailbox, $to, $cc, $bcc, $subject, $body, $attachments,
-                    $updated, $isHtml, $providerDraft, $syncedLocal, $providerUpdated, $providerETag)
+                    $updated, $isHtml, $providerDraft, $syncedLocal, $providerUpdated, $providerETag, $conversationIdentity)
                 ON CONFLICT(id) DO UPDATE SET
                     account_id = excluded.account_id,
                     mailbox_id = excluded.mailbox_id,
@@ -931,6 +934,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                         THEN COALESCE(excluded.provider_updated_at, local_drafts.provider_updated_at)
                         ELSE excluded.provider_updated_at
                     END,
+                    conversation_identity = excluded.conversation_identity,
                     provider_etag = CASE
                         WHEN excluded.account_id = local_drafts.account_id AND excluded.mailbox_id = local_drafts.mailbox_id
                         THEN COALESCE(excluded.provider_etag, local_drafts.provider_etag)
@@ -952,6 +956,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             command.Parameters.AddWithValue("$syncedLocal", FormatNullable(draft.SyncedLocalUpdatedAt));
             command.Parameters.AddWithValue("$providerUpdated", FormatNullable(draft.ProviderUpdatedAt));
             command.Parameters.AddWithValue("$providerETag", (object?)draft.ProviderETag ?? DBNull.Value);
+            command.Parameters.AddWithValue("$conversationIdentity", (object?)draft.ConversationIdentity ?? DBNull.Value);
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }, cancellationToken).ConfigureAwait(false);
     }
@@ -963,7 +968,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             await using var command = connection.CreateCommand();
             command.CommandText = """
                 SELECT id, account_id, mailbox_id, recipients, cc, bcc, subject, body, attachments_json,
-                       updated_at, is_html, provider_draft_id, synced_local_updated_at, provider_updated_at, provider_etag
+                       updated_at, is_html, provider_draft_id, synced_local_updated_at, provider_updated_at, provider_etag, conversation_identity
                 FROM local_drafts ORDER BY updated_at DESC;
                 """;
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -979,7 +984,8 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                     reader.IsDBNull(11) ? null : reader.GetString(11),
                     reader.IsDBNull(12) ? null : ParseTimestamp(reader.GetString(12)),
                     reader.IsDBNull(13) ? null : ParseTimestamp(reader.GetString(13)),
-                    reader.IsDBNull(14) ? null : reader.GetString(14)));
+                    reader.IsDBNull(14) ? null : reader.GetString(14),
+                    reader.IsDBNull(15) ? null : reader.GetString(15)));
             }
             return drafts;
         }, cancellationToken);
@@ -1853,7 +1859,8 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             provider_draft_id TEXT,
             synced_local_updated_at TEXT,
             provider_updated_at TEXT,
-            provider_etag TEXT
+            provider_etag TEXT,
+            conversation_identity TEXT
         );
         CREATE INDEX IF NOT EXISTS local_drafts_updated_at ON local_drafts(updated_at DESC);
         """;

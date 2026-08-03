@@ -206,6 +206,29 @@ public sealed class ConversationThreadTests
     }
 
     [Fact]
+    public async Task ShowsAndOpensDraftsForTheSelectedConversation()
+    {
+        var opened = new TaskCompletionSource<LocalDraft>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var viewModel = new ConversationThreadViewModel(openDraft: draft =>
+        {
+            opened.SetResult(draft);
+            return Task.CompletedTask;
+        });
+        var message = Message("mailbox", "message", "thread", null, 1);
+        var draft = new LocalDraft(
+            "draft", "account", "mailbox", "to@example.com", "", "", "Reply", "Body", [],
+            DateTimeOffset.UtcNow,
+            ConversationIdentity: ConversationThread.ThreadIdentity(message));
+
+        viewModel.Reconcile([message], message);
+        viewModel.ReconcileDrafts([draft]);
+
+        Assert.Equal("2 items", viewModel.ThreadItemCountText);
+        Assert.Same(draft, Assert.Single(viewModel.Drafts));
+        viewModel.OpenDraftCommand.Execute(draft);
+        Assert.Same(draft, await opened.Task.WaitAsync(TestContext.Current.CancellationToken));
+    }
+    [Fact]
     public void UsesResponsiveThreadBreakpoint()
     {
         Assert.True(ConversationThreadView.IsCompactWidth(639));

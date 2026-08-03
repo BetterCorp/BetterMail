@@ -17,12 +17,9 @@ public sealed class ComposeWindowViewModelTests
             ]));
 
         viewModel.ToField.Query = "ada";
-        for (var attempt = 0; attempt < 100 && !viewModel.ToField.IsSearchOpen; attempt++)
-        {
-            await Task.Delay(10, TestContext.Current.CancellationToken);
-        }
-        var suggestion = Assert.Single(viewModel.ToField.Suggestions);
-        viewModel.ToField.AddSuggestionCommand.Execute(suggestion);
+        Assert.True(viewModel.ToField.IsSearchOpen);
+        Assert.Single(viewModel.ToField.Suggestions);
+        Assert.True(viewModel.ToField.CommitFirstSuggestion());
 
         var token = Assert.Single(viewModel.ToField.Tokens);
         Assert.Equal("Ada Lovelace <ada@example.com>", viewModel.To);
@@ -118,7 +115,7 @@ public sealed class ComposeWindowViewModelTests
         var viewModel = new ComposeWindowViewModel(
             [account],
             [mailbox],
-            new ComposeRequest(DraftId: "draft-one"),
+            new ComposeRequest(DraftId: "draft-one", ConversationIdentity: "mailbox:conversation:one"),
             (_, id, _) =>
             {
                 sentId = id;
@@ -148,6 +145,7 @@ public sealed class ComposeWindowViewModelTests
         Assert.NotNull(saved);
         Assert.Equal(account.AccountId, saved.AccountId);
         Assert.Equal(mailbox.Id, saved.MailboxId);
+        Assert.Equal("mailbox:conversation:one", saved.ConversationIdentity);
         Assert.Equal("Saved", viewModel.DraftStatus);
 
         viewModel.SendCommand.Execute(null);

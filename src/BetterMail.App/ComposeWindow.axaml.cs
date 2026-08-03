@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
+using Avalonia.VisualTree;
 using BetterMail.Core;
 
 namespace BetterMail.App;
@@ -16,6 +17,7 @@ public sealed partial class ComposeWindow : Window
     {
         InitializeComponent();
         Closing += SaveBeforeClosing;
+        Opened += (_, _) => FocusToRecipient();
     }
 
     public ComposeWindow(
@@ -53,6 +55,25 @@ public sealed partial class ComposeWindow : Window
         }
     }
 
+    private void FocusToRecipient()
+    {
+        if (DataContext is not ComposeWindowViewModel viewModel)
+        {
+            return;
+        }
+        this.GetVisualDescendants().OfType<TextBox>()
+            .FirstOrDefault(textBox => ReferenceEquals(textBox.DataContext, viewModel.ToField))
+            ?.Focus();
+    }
+
+    private static void RecipientQueryGotFocus(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is TextBox { DataContext: ComposeRecipientField field })
+        {
+            field.RefreshSearch();
+        }
+    }
+
     private void RecipientQueryKeyDown(object? sender, KeyEventArgs e)
     {
         if (sender is not TextBox { DataContext: ComposeRecipientField field } ||
@@ -62,6 +83,11 @@ public sealed partial class ComposeWindow : Window
         }
         try
         {
+            if (e.Key is Key.Enter or Key.Tab && field.CommitFirstSuggestion())
+            {
+                e.Handled = true;
+                return;
+            }
             field.CommitQuery();
             e.Handled = true;
         }

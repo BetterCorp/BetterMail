@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:app="using:BetterMail.App"
+             xmlns:core="using:BetterMail.Core"
              x:Class="BetterMail.App.ConversationThreadView">
   <UserControl.Styles>
     <Style Selector="Border.threadMessage">
@@ -26,7 +27,7 @@
                                FontWeight="SemiBold"
                                TextWrapping="Wrap"
                                MaxLines="2" />
-          <TextBlock Text="{Binding SelectedThread.Messages.Count, StringFormat='{}{0} messages'}"
+          <TextBlock Text="{Binding ThreadItemCountText}"
                      FontSize="11"
                      Opacity="0.62" />
         </StackPanel>
@@ -38,7 +39,8 @@
                   MaxHeight="184"
                   VerticalScrollBarVisibility="Auto"
                   AutomationProperties.Name="Conversation message headers">
-      <ItemsControl x:Name="ThreadMessages"
+      <StackPanel>
+        <ItemsControl x:Name="ThreadMessages"
                     ItemsSource="{Binding SelectedThread.Messages}">
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="app:ConversationMessageItem">
@@ -91,6 +93,29 @@
           </DataTemplate>
         </ItemsControl.ItemTemplate>
       </ItemsControl>
+        <ItemsControl ItemsSource="{Binding Drafts}"
+                      IsVisible="{Binding HasDrafts}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="core:LocalDraft">
+              <Button Classes="command"
+                      Padding="12,9"
+                      HorizontalContentAlignment="Stretch"
+                      Command="{Binding $parent[UserControl].DataContext.OpenDraftCommand}"
+                      CommandParameter="{Binding}"
+                      AutomationProperties.Name="{Binding DisplaySubject, StringFormat='Continue draft {0}'}">
+                <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="9">
+                  <Border Background="#FFF4CC" CornerRadius="3" Padding="6,2">
+                    <TextBlock Text="Draft" Foreground="#8A5A00" FontSize="11" FontWeight="SemiBold" />
+                  </Border>
+                  <TextBlock Grid.Column="1" Text="{Binding DisplaySubject}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Grid.Column="2" Text="{Binding LocalUpdatedAt, StringFormat='{}{0:g}'}" FontSize="11" Opacity="0.62" />
+                  <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding To, StringFormat='To: {0}'}" FontSize="11" Opacity="0.62" TextTrimming="CharacterEllipsis" />
+                </Grid>
+              </Button>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
     </ScrollViewer>
 
     <Grid Grid.Row="2"

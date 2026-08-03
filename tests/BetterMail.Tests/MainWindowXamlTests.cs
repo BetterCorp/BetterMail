@@ -169,7 +169,14 @@ public sealed class MainWindowXamlTests
         Assert.Contains("BetterMailQuickActionShadow", xaml);
         Assert.Contains("IsVisible=" + (char)34 + "{Binding IsMore}" + (char)34, xaml);
         Assert.Contains("VerticalContentAlignment" + (char)34 + " Value=" + (char)34 + "Center", xaml);
-        Assert.DoesNotContain("quickActionsFade", xaml);
+        Assert.DoesNotContain("ListBoxItem:selected Border.quickActions", xaml);
+        Assert.Contains("window.Show();", mainWindowSource);
+        Assert.DoesNotContain("window.Show(this);", mainWindowSource);
+        Assert.Contains("mainWindow.OpenNotificationAsync", appSource);
+        Assert.DoesNotContain("mainWindow?.Activate()", appSource);
+        Assert.Contains("GotFocus=" + (char)34 + "RecipientQueryGotFocus" + (char)34, composeXaml);
+        Assert.Contains("ItemsSource=" + (char)34 + "{Binding Drafts}" + (char)34, conversationXaml);
+        Assert.Contains("OpenDraftCommand", conversationXaml);        Assert.DoesNotContain("quickActionsFade", xaml);
         Assert.DoesNotContain("<Border.OpacityMask>", xaml);
         Assert.Contains("DoubleTapped=" + (char)34 + "MessageRowDoubleTapped" + (char)34, xaml);
         Assert.Contains("DoubleTapped=" + (char)34 + "CalendarEventDoubleTapped" + (char)34, calendarXaml);

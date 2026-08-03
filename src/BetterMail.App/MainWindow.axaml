@@ -452,11 +452,6 @@
                 <Setter Property="IsHitTestVisible" Value="True" />
                 <Setter Property="RenderTransform" Value="translate(0px, 0px)" />
               </Style>
-              <Style Selector="ListBoxItem:selected Border.quickActions">
-                <Setter Property="Opacity" Value="1" />
-                <Setter Property="IsHitTestVisible" Value="True" />
-                <Setter Property="RenderTransform" Value="translate(0px, 0px)" />
-              </Style>
               <Style Selector="TextBlock.mailRowTitle.unread">
                 <Setter Property="FontWeight" Value="SemiBold" />
               </Style>

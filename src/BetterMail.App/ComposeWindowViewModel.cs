@@ -17,6 +17,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
     private readonly SemaphoreSlim _draftGate = new(1, 1);
     private readonly string _draftId;
     private readonly ComposeIntent _intent;
+    private readonly string? _conversationIdentity;
     private CancellationTokenSource? _autosaveCancellation;
     private ComposeSender? _selectedSender;
     private string _subject;
@@ -58,6 +59,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         _send = send;
         _signatureForSender = signatureForSender ?? ((_, _) => null);
         _intent = request.Intent;
+        _conversationIdentity = request.ConversationIdentity;
         _saveDraft = saveDraft;
         _deleteDraft = deleteDraft;
         _autosaveDelay = autosaveDelay ?? TimeSpan.FromMilliseconds(600);
@@ -382,7 +384,8 @@ public sealed class ComposeWindowViewModel : ViewModelBase
                 _renderer.SanitizeComposeHtml(Body),
                 Attachments.ToArray(),
                 DateTimeOffset.UtcNow,
-                IsHtml: true));
+                IsHtml: true,
+                ConversationIdentity: _conversationIdentity));
             DraftStatus = "Saved";
         }
         finally
@@ -489,7 +492,7 @@ public sealed class ComposeRecipientField : ViewModelBase
             {
                 RaisePropertyChanged(nameof(Serialized));
                 _changed();
-                _ = SearchAfterDelayAsync(value);
+                _ = SearchAsync(value);
             }
         }
     }
@@ -543,35 +546,48 @@ public sealed class ComposeRecipientField : ViewModelBase
         }
     }
 
-    private async Task SearchAfterDelayAsync(string query)
+    public void RefreshSearch() => _ = SearchAsync(Query);
+
+    public bool CommitFirstSuggestion()
+    {
+        var suggestion = Suggestions.FirstOrDefault();
+        if (suggestion is null)
+        {
+            return false;
+        }
+        Add(suggestion.DisplayName, suggestion.Address);
+        Query = "";
+        CloseSearch();
+        return true;
+    }
+
+    private async Task SearchAsync(string query)
     {
         _searchCancellation?.Cancel();
         _searchCancellation?.Dispose();
         _searchCancellation = new CancellationTokenSource();
         var token = _searchCancellation.Token;
-        Suggestions.Clear();
-        IsSearchOpen = false;
-        if (_search is null || query.Trim().Length < 2)
+        if (_search is null || string.IsNullOrWhiteSpace(query))
         {
+            CloseSearch();
             return;
         }
         try
         {
-            await Task.Delay(200, token);
             var results = await _search(query.Trim(), token);
             token.ThrowIfCancellationRequested();
-            foreach (var result in results.Where(result => Tokens.All(token =>
-                         !string.Equals(token.Address, result.Address, StringComparison.OrdinalIgnoreCase))))
-            {
-                Suggestions.Add(result);
-            }
+            CollectionUpdates.Reconcile(
+                Suggestions,
+                results.Where(result => Tokens.All(existing =>
+                        !string.Equals(existing.Address, result.Address, StringComparison.OrdinalIgnoreCase)))
+                    .ToArray(),
+                static result => result.Address.ToLowerInvariant());
             IsSearchOpen = Suggestions.Count > 0;
         }
         catch (OperationCanceledException)
         {
         }
     }
-
     private Task AddSuggestionAsync(RecipientSuggestion suggestion)
     {
         Add(suggestion.DisplayName, suggestion.Address);

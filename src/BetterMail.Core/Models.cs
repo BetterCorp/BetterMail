@@ -158,7 +158,8 @@ public sealed record CloudDraft(
     DraftMessage Message,
     DateTimeOffset UpdatedAt,
     string? ETag = null,
-    bool HasUnsupportedAttachments = false);
+    bool HasUnsupportedAttachments = false,
+    string? ConversationId = null);
 
 public sealed record DraftAttachment(
     string Name,
@@ -189,7 +190,8 @@ public sealed record LocalDraft(
     string? ProviderDraftId = null,
     DateTimeOffset? SyncedLocalUpdatedAt = null,
     DateTimeOffset? ProviderUpdatedAt = null,
-    string? ProviderETag = null)
+    string? ProviderETag = null,
+    string? ConversationIdentity = null)
 {
     public string DisplaySubject => string.IsNullOrWhiteSpace(Subject) ? "(no subject)" : Subject;
     public DateTimeOffset LocalUpdatedAt => UpdatedAt.ToLocalTime();

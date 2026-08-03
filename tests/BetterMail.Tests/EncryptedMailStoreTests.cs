@@ -187,10 +187,12 @@ public sealed class EncryptedMailStoreTests
                 "Unsent walrus proposal",
                 "Confidential draft body",
                 [new DraftAttachment("notes.txt", "text/plain", "draft attachment"u8.ToArray())],
-                DateTimeOffset.UtcNow);
+                DateTimeOffset.UtcNow,
+                ConversationIdentity: $"{mailbox.Id}:conversation:walrus");
             await store.SaveLocalDraftAsync(draft, cancellationToken);
             var savedDraft = Assert.Single(await store.GetLocalDraftsAsync(cancellationToken));
             Assert.Equal(draft.Subject, savedDraft.Subject);
+            Assert.Equal(draft.ConversationIdentity, savedDraft.ConversationIdentity);
             Assert.Equal("notes.txt", Assert.Single(savedDraft.Attachments).Name);
             var providerUpdatedAt = DateTimeOffset.UtcNow.AddSeconds(1);
             await store.UpdateLocalDraftSyncMetadataAsync(

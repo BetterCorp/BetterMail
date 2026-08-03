@@ -35,7 +35,7 @@ public sealed record ConversationThread(
         var mailbox = message.MailboxId.Trim();
         if (!string.IsNullOrWhiteSpace(message.ConversationId))
         {
-            return $"{mailbox}:conversation:{message.ConversationId.Trim()}";
+            return ThreadIdentity(mailbox, message.ConversationId);
         }
         if (!string.IsNullOrWhiteSpace(message.InternetMessageId))
         {
@@ -43,6 +43,9 @@ public sealed record ConversationThread(
         }
         return $"{mailbox}:message:{MessageIdentity(message)}";
     }
+
+    public static string ThreadIdentity(string mailboxId, string conversationId) =>
+        $"{mailboxId.Trim()}:conversation:{conversationId.Trim()}";
 
     public static string MessageIdentity(MailMessage message)
     {

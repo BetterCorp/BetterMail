@@ -17,7 +17,7 @@ public sealed class Microsoft365MailProvider(
     internal const string MessageSelect =
         "id,conversationId,internetMessageId,parentFolderId,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,isRead,hasAttachments,importance,categories,flag";
     internal const string DraftSelect =
-        "id,subject,toRecipients,ccRecipients,bccRecipients,body,lastModifiedDateTime,hasAttachments";
+        "id,conversationId,subject,toRecipients,ccRecipients,bccRecipients,body,lastModifiedDateTime,hasAttachments";
 
     private readonly HttpClient _httpClient = httpClient ?? new HttpClient
     {
@@ -599,7 +599,8 @@ public sealed class Microsoft365MailProvider(
                 attachments),
             updatedAt,
             OptionalString(message, "@odata.etag"),
-            hasUnsupportedAttachments);
+            hasUnsupportedAttachments,
+            OptionalString(message, "conversationId"));
     }
 
     private static CloudDraft MapDraft(

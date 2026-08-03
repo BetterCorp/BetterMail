@@ -38,7 +38,7 @@
                   </ItemsControl>
                   <TextBox x:Name="RecipientQuery" Text="{Binding Query}" MinWidth="180" BorderThickness="0"
                            Background="Transparent" PlaceholderText="Type a name or address"
-                           KeyDown="RecipientQueryKeyDown" />
+                           GotFocus="RecipientQueryGotFocus" KeyDown="RecipientQueryKeyDown" />
                 </WrapPanel>
                 <Popup IsOpen="{Binding IsSearchOpen}" PlacementTarget="{Binding #RecipientQuery}" Placement="BottomEdgeAlignedLeft"
                        IsLightDismissEnabled="True">

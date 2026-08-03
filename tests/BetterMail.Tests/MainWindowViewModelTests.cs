@@ -95,6 +95,45 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task NotificationPreviewMarksTheCachedMessageRead()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-notification-{Guid.NewGuid():N}");
+        var store = new EncryptedMailStore(
+            Path.Combine(directory, "mail.db"),
+            Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+        try
+        {
+            await store.InitializeAsync(cancellationToken);
+            var account = new MailAccount("microsoft365", "account", "tenant", "person@example.com", "Person", ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+            await store.SaveAccountAsync(account, cancellationToken);
+            await store.SaveMailboxAsync(mailbox, cancellationToken);
+            await store.SaveFoldersAsync(mailbox.Id, [new(mailbox.Id, "inbox", "Inbox", 1, 1, "inbox")], cancellationToken);
+            var message = Message(mailbox.Id, "inbox", "Notification", "Body") with { ProviderId = "notification-message" };
+            await store.ApplySyncPageAsync("notification", new MailSyncPage([message], null, false), cancellationToken);
+            var provider = new RecordingProvider();
+            var viewModel = new MainWindowViewModel(
+                store, directory, _ => { }, _ => { }, null, provider, TimeSpan.FromHours(1));
+            await viewModel.InitializeAsync();
+
+            var preview = await viewModel.OpenNotificationAsync(mailbox.Id, "inbox", message.ProviderId);
+
+            Assert.NotNull(preview);
+            Assert.True(preview.Selected.IsRead);
+            Assert.Contains(message.ProviderId, provider.MarkedReadIds);
+            Assert.True((await store.GetMessageAsync(mailbox.Id, message.ProviderId, cancellationToken))!.IsRead);
+        }
+        finally
+        {
+            await store.DisposeAsync();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+    [Fact]
     public void DismissesTheCurrentError()
     {
         var viewModel = new MainWindowViewModel(null, "data", _ => { }, _ => { }, "Copy me");

@@ -53,7 +53,7 @@ public sealed class DraftSynchronizationServiceTests
             RemoteDrafts =
             [
                 Cloud("mapped", "Server edit", baseline.AddMinutes(3), etag: "new"),
-                Cloud("new", "Imported", baseline.AddMinutes(4)),
+                Cloud("new", "Imported", baseline.AddMinutes(4), conversationId: "conversation"),
                 Cloud("unsupported", "Outlook item", baseline.AddMinutes(5), unsupported: true)
             ]
         };
@@ -73,6 +73,9 @@ public sealed class DraftSynchronizationServiceTests
         Assert.Equal("Local edit", store.Drafts.Single(draft => draft.Id == "conflict").Subject);
         Assert.Contains(store.Drafts, draft => draft.Id == "missing");
         Assert.Contains(store.Drafts, draft => draft.ProviderDraftId == "new" && draft.Subject == "Imported");
+        Assert.Equal(
+            ConversationThread.ThreadIdentity(Mailbox.Id, "conversation"),
+            store.Drafts.Single(draft => draft.ProviderDraftId == "new").ConversationIdentity);
         Assert.DoesNotContain(store.Drafts, draft => draft.ProviderDraftId == "unsupported");
         Assert.Equal(0, provider.UpdateCount);
     }
@@ -94,14 +97,16 @@ public sealed class DraftSynchronizationServiceTests
         string subject,
         DateTimeOffset updatedAt,
         string? etag = null,
-        bool unsupported = false) => new(
+        bool unsupported = false,
+        string? conversationId = null) => new(
         id,
         Account.AccountId,
         Mailbox.Id,
         new DraftMessage(subject, [new("Recipient", "recipient@example.com")], "Body", false),
         updatedAt,
         etag,
-        unsupported);
+        unsupported,
+        conversationId);
 
     private sealed class DraftStore(IEnumerable<LocalDraft> drafts) : IDraftStore
     {

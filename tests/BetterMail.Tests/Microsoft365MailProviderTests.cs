@@ -260,6 +260,7 @@ public sealed class Microsoft365MailProviderTests
             """
             {
               "id":"draft-id",
+              "conversationId":"conversation-id",
               "@odata.etag":"version-2",
               "subject":"Planning",
               "lastModifiedDateTime":"2026-07-14T12:30:00Z",
@@ -275,6 +276,7 @@ public sealed class Microsoft365MailProviderTests
             account, mailbox, document.RootElement, [attachment]);
 
         Assert.Equal("draft-id", draft.ProviderId);
+        Assert.Equal("conversation-id", draft.ConversationId);
         Assert.Equal(account.AccountId, draft.AccountId);
         Assert.Equal(mailbox.Id, draft.MailboxId);
         Assert.True(draft.Message.IsHtml);

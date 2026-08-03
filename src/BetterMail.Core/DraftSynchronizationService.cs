@@ -204,7 +204,10 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
         draft.ProviderId,
         draft.UpdatedAt,
         draft.UpdatedAt,
-        draft.ETag);
+        draft.ETag,
+        string.IsNullOrWhiteSpace(draft.ConversationId)
+            ? null
+            : ConversationThread.ThreadIdentity(draft.MailboxId, draft.ConversationId));
 
     private static IReadOnlyList<MailAddress> ParseAddresses(string value)
     {

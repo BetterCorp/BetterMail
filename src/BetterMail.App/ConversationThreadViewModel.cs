@@ -20,6 +20,8 @@ public sealed class ConversationThreadViewModel : ViewModelBase
     private readonly Action<MailMessage>? _selectionChanged;
     private readonly Func<MailMessage, Task<MailMessage?>>? _loadMessage;
     private readonly Func<MailMessage, string> _location;
+    private readonly Func<LocalDraft, Task>? _openDraft;
+    private IReadOnlyList<LocalDraft> _drafts = [];
     private ConversationThreadItem? _selectedThread;
     private ConversationMessageItem? _selectedMessage;
     private readonly Dictionary<string, ConversationMessageItem> _messageCache = new(StringComparer.Ordinal);
@@ -29,28 +31,33 @@ public sealed class ConversationThreadViewModel : ViewModelBase
         Action<ConversationActionRequest>? action = null,
         Action<MailMessage>? selectionChanged = null,
         Func<MailMessage, Task<MailMessage?>>? loadMessage = null,
-        Func<MailMessage, string>? location = null)
+        Func<MailMessage, string>? location = null,
+        Func<LocalDraft, Task>? openDraft = null)
     {
         _renderer = renderer ?? new MailContentRenderer();
         _action = action;
         _selectionChanged = selectionChanged;
         _loadMessage = loadMessage;
         _location = location ?? (message => message.FolderId);
+        _openDraft = openDraft;
         ToggleMessageCommand = new AsyncCommand<ConversationMessageItem>(ToggleMessageAsync);
         AllowRemoteContentCommand = new AsyncCommand<ConversationMessageItem>(AllowRemoteContentAsync);
         SelectMessageCommand = new AsyncCommand<ConversationMessageItem>(SelectMessageAsync);
         ReplyCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.Reply), CanRunAction);
         ReplyAllCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.ReplyAll), CanRunAction);
         ForwardCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.Forward), CanRunAction);
+        OpenDraftCommand = new AsyncCommand<LocalDraft>(draft => _openDraft?.Invoke(draft) ?? Task.CompletedTask);
     }
 
     public ObservableCollection<ConversationThreadItem> Threads { get; } = [];
+    public ObservableCollection<LocalDraft> Drafts { get; } = [];
     public ICommand ToggleMessageCommand { get; }
     public ICommand AllowRemoteContentCommand { get; }
     public ICommand SelectMessageCommand { get; }
     public ICommand ReplyCommand { get; }
     public ICommand ReplyAllCommand { get; }
     public ICommand ForwardCommand { get; }
+    public ICommand OpenDraftCommand { get; }
 
     public ConversationThreadItem? SelectedThread
     {
@@ -61,6 +68,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
             {
                 RaisePropertyChanged(nameof(HasThread));
                 RaisePropertyChanged(nameof(HasNoThread));
+                RefreshDrafts();
             }
         }
     }
@@ -79,6 +87,24 @@ public sealed class ConversationThreadViewModel : ViewModelBase
 
     public bool HasThread => SelectedThread is not null;
     public bool HasNoThread => !HasThread;
+    public bool HasDrafts => Drafts.Count > 0;
+    public string ThreadItemCountText => $"{(SelectedThread?.Messages.Count ?? 0) + Drafts.Count} items";
+
+    public void ReconcileDrafts(IEnumerable<LocalDraft> drafts)
+    {
+        _drafts = drafts.ToArray();
+        RefreshDrafts();
+    }
+
+    private void RefreshDrafts()
+    {
+        Replace(Drafts, _drafts
+            .Where(draft => draft.ConversationIdentity == SelectedThread?.Identity)
+            .OrderBy(static draft => draft.UpdatedAt)
+            .ToArray());
+        RaisePropertyChanged(nameof(HasDrafts));
+        RaisePropertyChanged(nameof(ThreadItemCountText));
+    }
 
     public void RefreshTheme()
     {
@@ -123,6 +149,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
         var selected = SelectedThread?.Messages.FirstOrDefault(message => message.Identity == selectedIdentity)
             ?? SelectedThread?.Messages.LastOrDefault();
         Select(selected);
+        RaisePropertyChanged(nameof(ThreadItemCountText));
     }
 
     private ConversationMessageItem GetMessageItem(string identity, MailMessage message)

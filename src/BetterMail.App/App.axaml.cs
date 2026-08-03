@@ -78,8 +78,10 @@ public sealed partial class App : Application
                 {
                     try
                     {
-                        await viewModel.OpenNotificationAsync(mailboxId, folderId, messageId);
-                        mainWindow?.Activate();
+                        if (mainWindow is not null)
+                        {
+                            await mainWindow.OpenNotificationAsync(mailboxId, folderId, messageId);
+                        }
                     }
                     catch (Exception exception)
                     {

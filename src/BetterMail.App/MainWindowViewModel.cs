@@ -124,6 +124,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private MailPageCursor? _messagePageCursor;
     private IReadOnlyList<MailFolderKey> _messagePageFolders = [];
     private bool _isLoadingMoreMessages;
+    private Task<IReadOnlyList<RecipientSuggestion>>? _recipientDirectoryTask;
 
     internal string DataDirectory => _dataDirectory;
     internal string MailListContextKey => IsSearchResultsView
@@ -228,7 +229,9 @@ public sealed class MainWindowViewModel : ViewModelBase
             _renderer,
             HandleConversationAction,
             loadMessage: message => GetCachedMessageAsync(message),
-            location: MailLocation);
+            location: MailLocation,
+            openDraft: OpenLocalDraftAsync);
+        Drafts.CollectionChanged += (_, _) => ConversationThread.ReconcileDrafts(Drafts);
         SearchAccountFilters.Add(new SearchAccountFilter("All accounts", null));
         SearchFolderFilters.Add(new SearchFolderFilter("All mail folders", null, null));
         _selectedSearchAccountFilter = SearchAccountFilters[0];
@@ -529,7 +532,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             messages.Add(selected);
         }
-        return new CachedMailPreview(selected, messages);
+        return new CachedMailPreview(selected, messages, Drafts
+            .Where(draft => draft.ConversationIdentity == thread)
+            .ToArray());
     }
 
     internal Task<MailMessage?> GetCachedMessageAsync(
@@ -1267,6 +1272,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(ShowFullScreenLoader));
         StartAutoSync();
         _ = ReconcileAllDraftsInBackgroundAsync();
+        _recipientDirectoryTask = LoadRecipientDirectoryAsync();
     }
 
     private async Task ConnectAsync()
@@ -1555,6 +1561,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             {
                 await Task.Delay(50);
             }
+            _recipientDirectoryTask = null;
             if (WindowsSessionLock.IsLocked())
             {
                 using var vacuumCancellation = new CancellationTokenSource();
@@ -1993,38 +2000,38 @@ public sealed class MainWindowViewModel : ViewModelBase
             RaisePropertyChanged(nameof(SettingsAccounts));
         }
     }
-    internal async Task OpenNotificationAsync(
+    internal async Task<CachedMailPreview?> OpenNotificationAsync(
         string mailboxId,
         string folderProviderId,
         string messageProviderId)
     {
-        if (_store is null)
+        _ = folderProviderId;
+        var preview = await GetCachedPreviewAsync(new(mailboxId, messageProviderId));
+        if (preview is null)
         {
-            return;
+            return null;
         }
-        IsGlobalSearchOpen = false;
-        IsSettingsOpen = false;
-        ActiveModule = "Mail";
-        IsDraftsView = false;
-        IsSearchResultsView = false;
-        SetSelectedFolder(Folders.FirstOrDefault(folder =>
-            folder.MailboxId == mailboxId && folder.ProviderId == folderProviderId));
-        await LoadMessagesAsync();
-
-        var message = Messages.FirstOrDefault(candidate =>
-            candidate.MailboxId == mailboxId && candidate.ProviderId == messageProviderId)
-            ?? await _store.GetMessageAsync(mailboxId, messageProviderId);
-        if (message is null)
+        if (!preview.Selected.IsRead)
         {
-            return;
+            try
+            {
+                await UpdateReadStateAsync(preview.Selected, isRead: true);
+                var selected = preview.Selected with { IsRead = true };
+                preview = preview with
+                {
+                    Selected = selected,
+                    Messages = preview.Messages
+                        .Select(message => SameMessage(message, selected) ? selected : message)
+                        .ToArray()
+                };
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                Error = $"Message could not be marked as read: {exception.Message}";
+            }
         }
-        if (!Messages.Any(candidate => SameMessage(candidate, message)))
-        {
-            ReconcileMessages([.. Messages, message]);
-        }
-        SelectedMessage = Messages.First(candidate => SameMessage(candidate, message));
+        return preview;
     }
-
     private Task RequestSharedMailboxAsync(MailAccount account)
     {
         SharedMailboxRequested?.Invoke(account);
@@ -3433,52 +3440,48 @@ public sealed class MainWindowViewModel : ViewModelBase
             .Select(result =>
                 $"{result.Owner.DisplayName}: {result.Error} Open Settings > Accounts and re-authenticate if access expired."));
         RaisePropertyChanged(nameof(IsWorkspaceEmpty));
+        _recipientDirectoryTask = null;
     }
 
     internal async Task<IReadOnlyList<RecipientSuggestion>> SearchRecipientSuggestionsAsync(
         string query,
         CancellationToken cancellationToken)
     {
-        var discoveredTask = _store is null
-            ? Task.FromResult<IReadOnlyList<DiscoveredPerson>>([])
-            : _store.GetDiscoveredPeopleAsync(query, 20, cancellationToken);
-        var contactsTask = _workspaceProvider is null
-            ? Task.FromResult<IReadOnlyList<ContactInfo>>(Contacts
-                .Where(contact => Contains(contact.DisplayName, query) ||
-                    contact.EmailAddresses.Any(address => Contains(address, query)))
-                .ToArray())
-            : SearchSavedContactsAsync();
-        await Task.WhenAll(discoveredTask, contactsTask);
-        return contactsTask.Result
-            .SelectMany(contact => contact.EmailAddresses.Select(address => new RecipientSuggestion(
-                contact.DisplayName,
-                address,
-                Accounts.FirstOrDefault(account => account.AccountId == contact.AccountId)?.EmailAddress ?? "Saved contact")))
-            .Concat(discoveredTask.Result.Select(person => new RecipientSuggestion(
-                person.DisplayName,
-                person.EmailAddress,
-                "Mail history")))
-            .DistinctBy(static suggestion => suggestion.Address, StringComparer.OrdinalIgnoreCase)
+        var directory = await (_recipientDirectoryTask ??= LoadRecipientDirectoryAsync())
+            .WaitAsync(cancellationToken);
+        return directory
+            .Where(suggestion => Contains(suggestion.DisplayName, query) || Contains(suggestion.Address, query))
+            .OrderByDescending(suggestion => suggestion.Address.StartsWith(query, StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(suggestion => suggestion.DisplayName.StartsWith(query, StringComparison.OrdinalIgnoreCase))
+            .ThenBy(static suggestion => suggestion.DisplayName, StringComparer.OrdinalIgnoreCase)
             .Take(20)
             .ToArray();
-
-        async Task<IReadOnlyList<ContactInfo>> SearchSavedContactsAsync()
-        {
-            var results = await Task.WhenAll(Accounts.Select(async account =>
-            {
-                try
-                {
-                    return await GetSavedContactsAsync(account, query, cancellationToken);
-                }
-                catch (Exception exception) when (exception is not OperationCanceledException)
-                {
-                    return Array.Empty<ContactInfo>();
-                }
-            }));
-            return results.SelectMany(static contacts => contacts).ToArray();
-        }
     }
 
+    private async Task<IReadOnlyList<RecipientSuggestion>> LoadRecipientDirectoryAsync()
+    {
+        if (_store is null)
+        {
+            return [];
+        }
+        var suggestions = new List<RecipientSuggestion>();
+        foreach (var owner in ContactOwners)
+        {
+            var contacts = await _store.GetWorkspaceItemsAsync<ContactInfo>(
+                "contact", owner.CacheId, "all");
+            suggestions.AddRange(contacts.SelectMany(contact => contact.EmailAddresses.Select(address =>
+                new RecipientSuggestion(contact.DisplayName, address, owner.DisplayName))));
+        }
+        if (_store.HasIndexedCorrespondents)
+        {
+            suggestions.AddRange((await _store.GetDiscoveredPeopleAsync("", 5000))
+                .Select(person => new RecipientSuggestion(person.DisplayName, person.EmailAddress, "Mail history")));
+        }
+        return suggestions
+            .Where(static suggestion => !string.IsNullOrWhiteSpace(suggestion.Address))
+            .DistinctBy(static suggestion => suggestion.Address, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
     private Task EditContactAsync(PersonEntry person)
     {
         if (person.SavedContact is null)
@@ -4371,6 +4374,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void RebuildContactOwners()
     {
+        _recipientDirectoryTask = null;
         var selectedMailboxId = SelectedContactOwner?.Mailbox.Id;
         Replace(ContactOwners,
             from mailbox in Mailboxes
@@ -4695,7 +4699,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         return account is not null && mailbox is not null && mailbox.AccountId == account.AccountId;
     }
 
-    private Task OpenLocalDraftAsync(LocalDraft draft)
+    internal Task OpenLocalDraftAsync(LocalDraft draft)
     {
         IsSettingsOpen = false;
         ActiveModule = "Mail";
@@ -4709,7 +4713,8 @@ public sealed class MainWindowViewModel : ViewModelBase
             draft.AccountId,
             draft.MailboxId,
             draft.Attachments,
-            draft.IsHtml));
+            draft.IsHtml,
+            ConversationIdentity: draft.ConversationIdentity));
 
         return Task.CompletedTask;
     }
@@ -4735,7 +4740,8 @@ public sealed class MainWindowViewModel : ViewModelBase
             AccountId: accountId,
             MailboxId: mailboxId,
             IsHtml: true,
-            Intent: ComposeIntent.Reply));
+            Intent: ComposeIntent.Reply,
+            ConversationIdentity: BetterMail.Core.ConversationThread.ThreadIdentity(message)));
     }
 
     private Task ReplyAllAsync()
@@ -4770,7 +4776,8 @@ public sealed class MainWindowViewModel : ViewModelBase
             AccountId: accountId,
             MailboxId: mailboxId,
             IsHtml: true,
-            Intent: ComposeIntent.ReplyAll));
+            Intent: ComposeIntent.ReplyAll,
+            ConversationIdentity: BetterMail.Core.ConversationThread.ThreadIdentity(message)));
     }
 
     private Task ForwardAsync()
@@ -4798,7 +4805,8 @@ public sealed class MainWindowViewModel : ViewModelBase
                     attachment.ContentBytes!))
                 .ToArray(),
             IsHtml: true,
-            Intent: ComposeIntent.Forward));
+            Intent: ComposeIntent.Forward,
+            ConversationIdentity: BetterMail.Core.ConversationThread.ThreadIdentity(message)));
     }
 
     private async Task<IReadOnlyList<MailAttachment>?> LoadComposeSourceAttachmentsAsync(
@@ -5346,7 +5354,8 @@ internal sealed record AccountContactResult(
 
 internal sealed record CachedMailPreview(
     MailMessage Selected,
-    IReadOnlyList<MailMessage> Messages);
+    IReadOnlyList<MailMessage> Messages,
+    IReadOnlyList<LocalDraft> Drafts);
 
 public sealed record GlobalSearchResult(
     string Category,
