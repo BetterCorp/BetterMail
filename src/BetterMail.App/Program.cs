@@ -8,10 +8,13 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        VelopackApp.Build()
-            .SetAutoApplyOnStartup(true)
-            .OnBeforeUninstallFastCallback(_ => DefaultMailApp.Unregister())
-            .Run();
+        var velopack = VelopackApp.Build()
+            .SetAutoApplyOnStartup(true);
+        if (OperatingSystem.IsWindows())
+        {
+            velopack.OnBeforeUninstallFastCallback(_ => DefaultMailApp.Unregister());
+        }
+        velopack.Run();
         DefaultMailApp.Register();
 
         var activation = args.FirstOrDefault(argument =>
