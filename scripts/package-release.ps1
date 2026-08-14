@@ -62,7 +62,7 @@ elseif ($Runtime -eq "osx-arm64") {
     $plist = Join-Path $publishDirectory "BetterMail.Info.plist"
     (Get-Content -Raw (Join-Path $repositoryRoot "packaging/BetterMail.Info.plist")).Replace("__VERSION__", $Version) |
         Set-Content -NoNewline $plist
-    $platformArguments = @("--plist", $plist, "--bundleId", "com.bettercorp.bettermail")
+    $platformArguments = @("--plist", $plist)
 }
 
 dotnet tool run vpk -- pack `
