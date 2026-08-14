@@ -56,10 +56,21 @@ public sealed record InboxNotificationContext(
     Mailbox Mailbox,
     MailFolder Folder);
 
-public sealed class NewMailNotificationCoordinator(IDesktopNotificationService service)
+public sealed class NewMailNotificationCoordinator
 {
+    private static readonly TimeSpan MaximumNotificationAge = TimeSpan.FromMinutes(30);
+    private readonly IDesktopNotificationService _service;
+    private readonly Func<DateTimeOffset> _now;
     private readonly object _gate = new();
     private readonly Dictionary<string, HashSet<string>> _seen = new(StringComparer.Ordinal);
+
+    public NewMailNotificationCoordinator(
+        IDesktopNotificationService service,
+        Func<DateTimeOffset>? now = null)
+    {
+        _service = service;
+        _now = now ?? (() => DateTimeOffset.UtcNow);
+    }
 
     public bool IsPrimed(InboxNotificationContext context)
     {
@@ -121,7 +132,8 @@ public sealed class NewMailNotificationCoordinator(IDesktopNotificationService s
         {
             return;
         }
-        foreach (var message in added)
+        var cutoff = _now() - MaximumNotificationAge;
+        foreach (var message in added.Where(message => message.ReceivedAt >= cutoff))
         {
             _ = DeliverAsync(new DesktopNotification(
                 context.Account.EmailAddress,
@@ -141,7 +153,7 @@ public sealed class NewMailNotificationCoordinator(IDesktopNotificationService s
     {
         try
         {
-            await service.ShowAsync(notification);
+            await _service.ShowAsync(notification);
         }
         catch
         {

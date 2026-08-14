@@ -360,6 +360,53 @@ public sealed class EncryptedMailStoreTests
         Directory.Delete(directory, recursive: true);
     }
 
+    [Fact]
+    public async Task FindsTheNextCachedCalendarEvent()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-next-event-{Guid.NewGuid():N}");
+        var now = new DateTimeOffset(2026, 8, 5, 10, 0, 0, TimeSpan.Zero);
+        try
+        {
+            await using var store = new EncryptedMailStore(
+                Path.Combine(directory, "mail.db"),
+                Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+            await store.InitializeAsync(cancellationToken);
+            await store.ReplaceWorkspaceItemsAsync(
+                "calendar", "account", "all",
+                [new CalendarInfo("calendar", "Work", "#0F6CBD", true, "account")],
+                static item => item.ProviderId,
+                static item => item.Name,
+                cancellationToken);
+            var ongoing = new CalendarEvent(
+                "ongoing", "calendar", "Current meeting",
+                now.AddMinutes(-10), now.AddMinutes(20), null, AccountId: "account");
+            await store.ReplaceCalendarEventsAsync(
+                "account", "calendar", now.AddDays(-1), now.AddDays(7),
+                [
+                    new("ended", "calendar", "Ended", now.AddHours(-2), now.AddHours(-1), null, AccountId: "account"),
+                    new("cancelled", "calendar", "Cancelled", now.AddMinutes(-5), now.AddMinutes(30), null,
+                        AccountId: "account", IsCancelled: true),
+                    new("later", "calendar", "Later", now.AddHours(1), now.AddHours(2), null, AccountId: "account"),
+                    ongoing
+                ],
+                cancellationToken);
+
+            Assert.Equal(ongoing, await store.GetNextCalendarEventAsync(now, cancellationToken));
+            Assert.Equal(ongoing, await store.GetCalendarEventAsync(
+                "account", "calendar", "ongoing", cancellationToken));
+            Assert.Equal("Work", Assert.Single(
+                await store.GetCalendarInfosAsync("account", cancellationToken)).Name);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
 
     [Fact]
     public async Task PagesCompressesSearchesAndPrunesOnlyOldLocalMessages()

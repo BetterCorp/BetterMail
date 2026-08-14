@@ -78,6 +78,20 @@
             </StackPanel>
           </Border>
           <Border Classes="settingsCard">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="18">
+              <StackPanel Spacing="5">
+                <TextBlock Text="Default mail app" FontSize="18" FontWeight="SemiBold" />
+                <TextBlock Text="Open mail links in a new BetterMail message. Your operating system keeps control of the default."
+                           Opacity="0.62" TextWrapping="Wrap" />
+                <TextBlock Text="On macOS, choose BetterMail in Mail > Settings > General > Default email reader."
+                           Opacity="0.62" TextWrapping="Wrap" />
+              </StackPanel>
+              <Button Grid.Column="1" Classes="primary" Content="Choose default mail app"
+                      Command="{Binding ChooseDefaultMailAppCommand}"
+                      AutomationProperties.Name="Choose BetterMail as the default mail app" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsCard">
             <StackPanel Spacing="9">
               <TextBlock Text="Mail sync" FontSize="18" FontWeight="SemiBold" />
               <TextBlock Text="Download messages from" FontWeight="SemiBold" />

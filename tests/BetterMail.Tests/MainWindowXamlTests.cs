@@ -170,7 +170,7 @@ public sealed class MainWindowXamlTests
         Assert.Contains("IsVisible=" + (char)34 + "{Binding IsMore}" + (char)34, xaml);
         Assert.Contains("VerticalContentAlignment" + (char)34 + " Value=" + (char)34 + "Center", xaml);
         Assert.DoesNotContain("ListBoxItem:selected Border.quickActions", xaml);
-        Assert.Contains("window.Show();", mainWindowSource);
+        Assert.Contains("IndependentWindow.Show(window);", mainWindowSource);
         Assert.DoesNotContain("window.Show(this);", mainWindowSource);
         Assert.Contains("mainWindow.OpenNotificationAsync", appSource);
         Assert.DoesNotContain("mainWindow?.Activate()", appSource);
@@ -251,6 +251,11 @@ public sealed class MainWindowXamlTests
         Assert.Contains("CopyToOutputDirectory=" + (char)34 + "PreserveNewest" + (char)34, project);
         var packaging = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "scripts", "package-release.ps1"));
         Assert.Contains("Join-Path $publishDirectory " + (char)34 + "BetterMail.ico" + (char)34, packaging);
+        var desktop = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "packaging", "BetterMail.desktop"));
+        Assert.Contains("MimeType=x-scheme-handler/mailto;", desktop);
+        var plist = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "packaging", "BetterMail.Info.plist"));
+        Assert.Contains("CFBundleURLSchemes", plist);
+        Assert.Contains("<string>mailto</string>", plist);
 
         Assert.Contains("ReauthenticateAccountCommand", accounts);
         Assert.Contains("AddSharedMailboxForAccountCommand", accounts);

@@ -44,16 +44,38 @@ if ($Runtime -ne "win-x64") {
     chmod +x (Join-Path $publishDirectory $mainExecutable)
 }
 
+$packDirectory = $publishDirectory
+$platformArguments = @()
+if ($Runtime -eq "linux-x64") {
+    $appDir = "$publishDirectory.AppDir"
+    Remove-Item -Recurse -Force $appDir -ErrorAction SilentlyContinue
+    $appBin = Join-Path $appDir "usr/bin"
+    New-Item -ItemType Directory -Force $appBin | Out-Null
+    Copy-Item -Path (Join-Path $publishDirectory "*") -Destination $appBin -Recurse
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot "scripts/AppRun") -Destination (Join-Path $appDir "AppRun")
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot "packaging/BetterMail.desktop") -Destination (Join-Path $appDir "BetterMail.desktop")
+    Copy-Item -LiteralPath $icon -Destination (Join-Path $appDir "BetterMail.png")
+    chmod +x (Join-Path $appDir "AppRun")
+    $packDirectory = $appDir
+}
+elseif ($Runtime -eq "osx-arm64") {
+    $plist = Join-Path $publishDirectory "BetterMail.Info.plist"
+    (Get-Content -Raw (Join-Path $repositoryRoot "packaging/BetterMail.Info.plist")).Replace("__VERSION__", $Version) |
+        Set-Content -NoNewline $plist
+    $platformArguments = @("--plist", $plist, "--bundleId", "com.bettercorp.bettermail")
+}
+
 dotnet tool run vpk -- pack `
     --packId BetterCorp.BetterMail `
     --packVersion $Version `
-    --packDir $publishDirectory `
+    --packDir $packDirectory `
     --mainExe $mainExecutable `
     --packTitle BetterMail `
     --packAuthors BetterCorp `
     --icon $icon `
     --runtime $Runtime `
     --outputDir $releaseDirectory `
-    --delta None
+    --delta None `
+    @platformArguments
 
 if ($LASTEXITCODE -ne 0) { throw "Velopack packaging failed for $Runtime" }

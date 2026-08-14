@@ -275,7 +275,14 @@ public sealed record CalendarEvent(
     int ReminderMinutesBeforeStart = 0,
     CalendarRecurrence? Recurrence = null,
     string? AccountId = null,
-    CalendarAvailability Availability = CalendarAvailability.Unknown)
+    CalendarAvailability Availability = CalendarAvailability.Unknown,
+    MailAddress? Organizer = null,
+    string? Body = null,
+    bool BodyIsHtml = false,
+    bool IsAllDay = false,
+    bool IsCancelled = false,
+    string? WebLink = null,
+    string? OnlineMeetingUrl = null)
 {
     public string TimeText => $"{StartsAt.ToLocalTime():ddd, MMM d · HH:mm}–{EndsAt.ToLocalTime():HH:mm}";
 }
@@ -289,6 +296,7 @@ public enum CalendarAvailability
     Busy,
     OutOfOffice
 }
+
 public sealed record ContactInfo(
     string ProviderId,
     string DisplayName,

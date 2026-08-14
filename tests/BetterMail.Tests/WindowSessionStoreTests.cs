@@ -14,11 +14,40 @@ public sealed class WindowSessionStoreTests
             var first = new PreviewWindowSession("mailbox-one", "message-one");
             var second = new PreviewWindowSession("mailbox-two", "message-two");
 
-            store.Save([first, first, second]);
+            var calendarEvent = new CalendarEventWindowSession("account", "calendar", "event");
+            var compose = new ComposeWindowSession("draft");
+            store.Save(new([first, first, second], [calendarEvent], [compose]));
 
-            Assert.Equal([first, second], store.Load());
+            var saved = store.Load();
+            Assert.Equal([first, second], saved.Previews);
+            Assert.Equal([calendarEvent], saved.Events);
+            Assert.Equal([compose], saved.Composes);
             File.WriteAllText(Path.Combine(directory, "window-session.json"), "not json");
-            Assert.Empty(store.Load());
+            Assert.Empty(store.Load().Previews);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void ReadsLegacyPreviewArray()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-session-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(
+                Path.Combine(directory, "window-session.json"),
+                """[{"MailboxId":"mailbox","ProviderMessageId":"message"}]""");
+
+            Assert.Equal(
+                [new PreviewWindowSession("mailbox", "message")],
+                new WindowSessionStore(directory).Load().Previews);
         }
         finally
         {

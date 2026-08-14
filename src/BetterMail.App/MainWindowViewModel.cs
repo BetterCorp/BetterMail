@@ -59,6 +59,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _isBusy;
     private bool _isCompact;
     private bool _desktopNotificationsEnabled = true;
+    private bool _defaultMailPromptShown;
     private string _mailSyncRange = "All mail";
     private bool _isLoadingAttachments;
     private bool _isSyncing;
@@ -125,6 +126,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private IReadOnlyList<MailFolderKey> _messagePageFolders = [];
     private bool _isLoadingMoreMessages;
     private Task<IReadOnlyList<RecipientSuggestion>>? _recipientDirectoryTask;
+    private CalendarEventSource? _nextCalendarEvent;
 
     internal string DataDirectory => _dataDirectory;
     internal string MailListContextKey => IsSearchResultsView
@@ -187,6 +189,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         ClearSearchResultsCommand = new AsyncCommand(ClearSearchResultsAsync);
         FocusSearchCommand = new AsyncCommand(FocusSearchAsync);
         ComposeCommand = new AsyncCommand(() => RequestComposeAsync(new ComposeRequest()));
+        OpenNextCalendarEventCommand = new AsyncCommand(OpenNextCalendarEventAsync, () => NextCalendarEvent is not null);
+        ChooseDefaultMailAppCommand = new AsyncCommand(ChooseDefaultMailAppAsync);
         OpenDraftCommand = new AsyncCommand<LocalDraft>(OpenLocalDraftAsync);
         SetDefaultSenderCommand = new AsyncCommand<SenderSettingsItem>(SetDefaultSenderAsync);
         NewSignatureCommand = new AsyncCommand(OpenSignatureTemplatesAsync);
@@ -266,6 +270,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public event Action? SearchFocusRequested;
     public event Action<MailAccount>? SharedMailboxRequested;
     public event Action<MailHeadersDocument>? HeadersRequested;
+    public event Action<CalendarEventSource>? CalendarEventDetailsRequested;
     public ObservableCollection<MailAccount> Accounts { get; } = [];
     public ObservableCollection<Mailbox> Mailboxes { get; } = [];
     public IEnumerable<Mailbox> SharedMailboxes => Mailboxes.Where(static mailbox => mailbox.IsShared);
@@ -310,6 +315,45 @@ public sealed class MainWindowViewModel : ViewModelBase
         private set => SetProperty(ref _isLoadingMailStatistics, value);
     }
     public bool HasMailStatistics => MailStatistics.Count > 0;
+    public CalendarEventSource? NextCalendarEvent
+    {
+        get => _nextCalendarEvent;
+        private set
+        {
+            if (SetProperty(ref _nextCalendarEvent, value))
+            {
+                RaisePropertyChanged(nameof(HasNextCalendarEvent));
+                RaisePropertyChanged(nameof(NextCalendarEventSubject));
+                RaisePropertyChanged(nameof(NextCalendarEventTime));
+                RaisePropertyChanged(nameof(NextCalendarEventColor));
+                ((AsyncCommand)OpenNextCalendarEventCommand).Refresh();
+            }
+        }
+    }
+    public bool HasNextCalendarEvent => NextCalendarEvent is not null;
+    public string NextCalendarEventSubject => NextCalendarEvent?.Event.Subject ?? "";
+    public string NextCalendarEventColor => NextCalendarEvent?.Calendar.Color ?? "#157EFB";
+    public string NextCalendarEventTime
+    {
+        get
+        {
+            if (NextCalendarEvent?.Event is not { } calendarEvent)
+            {
+                return "";
+            }
+            if (calendarEvent.StartsAt <= DateTimeOffset.Now && calendarEvent.EndsAt > DateTimeOffset.Now)
+            {
+                return calendarEvent.IsAllDay ? "All day" : "Now";
+            }
+            var start = calendarEvent.StartsAt.ToLocalTime();
+            var futureDay = start.Date != DateTime.Today;
+            if (calendarEvent.IsAllDay)
+            {
+                return futureDay ? $"{start:ddd} All day" : "All day";
+            }
+            return start.ToString(futureDay ? "ddd HH:mm" : "HH:mm");
+        }
+    }
     public string MailStatisticsSummary =>
         $"{MailStatistics.Sum(static item => item.SyncedMessages):N0} synced locally ({MailSyncRange}) | " +
         $"{MailStatistics.Sum(static item => item.CloudMessages):N0} total on Microsoft 365 | " +
@@ -345,6 +389,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ICommand ClearSearchResultsCommand { get; }
     public ICommand FocusSearchCommand { get; }
     public ICommand ComposeCommand { get; }
+    public ICommand OpenNextCalendarEventCommand { get; }
+    public ICommand ChooseDefaultMailAppCommand { get; }
     public ICommand OpenDraftCommand { get; }
     public ICommand SetDefaultSenderCommand { get; }
     public ICommand NewSignatureCommand { get; }
@@ -542,6 +588,29 @@ public sealed class MainWindowViewModel : ViewModelBase
         return new CachedMailPreview(selected, messages, Drafts
             .Where(draft => draft.ConversationIdentity == thread)
             .ToArray());
+    }
+
+    internal async Task<CalendarEventSource?> GetCachedCalendarEventSourceAsync(
+        CalendarEventWindowSession session,
+        CancellationToken cancellationToken = default)
+    {
+        if (_store is null)
+        {
+            return null;
+        }
+        var account = Accounts.FirstOrDefault(candidate => candidate.AccountId == session.AccountId);
+        var calendarEvent = await _store.GetCalendarEventAsync(
+            session.AccountId, session.CalendarId, session.ProviderEventId, cancellationToken);
+        var calendar = (await _store.GetCalendarInfosAsync(session.AccountId, cancellationToken))
+            .FirstOrDefault(candidate => candidate.ProviderId == session.CalendarId);
+        if (account is null || calendarEvent is null || calendar is null)
+        {
+            return null;
+        }
+        var color = !string.IsNullOrWhiteSpace(calendar.Color) && calendar.Color.StartsWith('#')
+            ? calendar.Color
+            : AccountColors.For(calendar.ProviderId);
+        return new(account, new CalendarChoice(calendar, color, () => { }), calendarEvent);
     }
 
     internal Task<MailMessage?> GetCachedMessageAsync(
@@ -995,6 +1064,12 @@ public sealed class MainWindowViewModel : ViewModelBase
         set => SetProperty(ref _desktopNotificationsEnabled, value);
     }
 
+    public bool DefaultMailPromptShown
+    {
+        get => _defaultMailPromptShown;
+        set => SetProperty(ref _defaultMailPromptShown, value);
+    }
+
     public string MailSyncRange
     {
         get => _mailSyncRange;
@@ -1277,6 +1352,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(HasAccounts));
         RaisePropertyChanged(nameof(ShowOnboarding));
         RaisePropertyChanged(nameof(ShowFullScreenLoader));
+        await RefreshNextCalendarEventAsync();
         StartAutoSync();
         _ = ReconcileAllDraftsInBackgroundAsync();
         _recipientDirectoryTask = LoadRecipientDirectoryAsync();
@@ -1632,6 +1708,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(60));
         while (await timer.WaitForNextTickAsync())
         {
+            await RefreshNextCalendarEventAsync();
             if (!IsBusy && !IsSyncing && Accounts.Count > 0 && _provider is not null)
             {
                 await SyncAsync();
@@ -1670,6 +1747,7 @@ public sealed class MainWindowViewModel : ViewModelBase
                 await RefreshNotesAsync(account);
                 await _store.GarbageCollectWorkspaceAsync(account.AccountId);
             }
+            await RefreshNextCalendarEventAsync();
         }
         finally
         {
@@ -3176,9 +3254,43 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        CalendarWorkspace ??= new CalendarWorkspaceViewModel(
-            _workspaceProvider, Accounts.ToArray(), store: _store);
+        if (CalendarWorkspace is null)
+        {
+            CalendarWorkspace = new CalendarWorkspaceViewModel(
+                _workspaceProvider, Accounts.ToArray(), store: _store);
+            CalendarWorkspace.EventsChanged += () => _ = RefreshNextCalendarEventAsync();
+        }
         await CalendarWorkspace.UpdateAccountsAsync(Accounts.ToArray());
+    }
+
+    private Task OpenNextCalendarEventAsync()
+    {
+        if (NextCalendarEvent is { } source)
+        {
+            CalendarEventDetailsRequested?.Invoke(source);
+        }
+        return Task.CompletedTask;
+    }
+
+    private async Task RefreshNextCalendarEventAsync()
+    {
+        if (_store is null)
+        {
+            NextCalendarEvent = null;
+            return;
+        }
+        try
+        {
+            var calendarEvent = await _store.GetNextCalendarEventAsync(DateTimeOffset.Now);
+            NextCalendarEvent = calendarEvent?.AccountId is { Length: > 0 } accountId
+                ? await GetCachedCalendarEventSourceAsync(new(
+                    accountId, calendarEvent.CalendarId, calendarEvent.ProviderId))
+                : null;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            NextCalendarEvent = null;
+        }
     }
 
     private async Task LoadNotesWorkspaceAsync()
@@ -4915,6 +5027,21 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         ComposeRequested?.Invoke(request);
         return Task.CompletedTask;
+    }
+
+    internal Task OpenComposeAsync(ComposeRequest request) => RequestComposeAsync(request);
+
+    private async Task ChooseDefaultMailAppAsync()
+    {
+        try
+        {
+            await DefaultMailApp.ChooseAsync();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+            InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            Error = exception.Message;
+        }
     }
 
     private async Task RunBusyAsync(string status, Func<Task> work)

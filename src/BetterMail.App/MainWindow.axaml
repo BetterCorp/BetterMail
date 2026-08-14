@@ -233,9 +233,9 @@
             BorderBrush="{DynamicResource BetterMailDividerBrush}"
             BorderThickness="0,0,0,1"
             IsVisible="{Binding ShowMailSurface}"
-            Padding="8,6">
-      <Grid>
-        <Grid ColumnDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="3" IsVisible="{Binding !IsMailActionRunning}">
+            Padding="0">
+      <Grid ColumnDefinitions="*,Auto">
+        <Grid Grid.Column="0" Margin="8,6" ColumnDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="3" IsVisible="{Binding !IsMailActionRunning}">
           <StackPanel Orientation="Horizontal" Spacing="3">
             <Button x:Name="FolderToggle" Classes="command" Content="☰ Folders" Click="FolderToggleClicked" IsVisible="False" AutomationProperties.Name="Show folders" />
             <Button Classes="primary" Content="＋ New mail" Command="{Binding ComposeCommand}" AutomationProperties.Name="New mail" />
@@ -285,7 +285,9 @@
             </Button.Flyout>
           </Button>
         </Grid>
-        <StackPanel IsVisible="{Binding IsMailActionRunning}"
+        <StackPanel Grid.Column="0"
+                    Margin="8,6"
+                    IsVisible="{Binding IsMailActionRunning}"
                     Orientation="Horizontal"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
@@ -293,6 +295,31 @@
           <ProgressBar Width="96" Height="3" IsIndeterminate="True" VerticalAlignment="Center" />
           <TextBlock Text="{Binding MailActionStatus}" FontWeight="SemiBold" VerticalAlignment="Center" />
         </StackPanel>
+        <Button Grid.Column="1"
+                Classes="command"
+                Width="200"
+                Margin="0"
+                Padding="0"
+                CornerRadius="0"
+                HorizontalContentAlignment="Stretch"
+                IsVisible="{Binding HasNextCalendarEvent}"
+                Command="{Binding OpenNextCalendarEventCommand}"
+                AutomationProperties.Name="{Binding NextCalendarEventSubject, StringFormat='Open next event: {0}'}">
+          <Grid ColumnDefinitions="3,*,Auto">
+            <Border Background="{Binding NextCalendarEventColor}" />
+            <TextBlock Grid.Column="1"
+                       Margin="9,0,6,0"
+                       Text="{Binding NextCalendarEventSubject}"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center"
+                       TextTrimming="CharacterEllipsis" />
+            <TextBlock Grid.Column="2"
+                       Margin="3,0,9,0"
+                       Text="{Binding NextCalendarEventTime}"
+                       Opacity="0.72"
+                       VerticalAlignment="Center" />
+          </Grid>
+        </Button>
       </Grid>
     </Border>
 

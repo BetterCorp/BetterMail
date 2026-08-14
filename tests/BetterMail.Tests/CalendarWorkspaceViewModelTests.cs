@@ -26,6 +26,7 @@ public sealed class CalendarWorkspaceViewModelTests
         Assert.Equal(2, overlapping.Length);
         Assert.NotEqual(overlapping[0].Left, overlapping[1].Left);
         Assert.All(overlapping, item => Assert.True(item.Width > 0 && item.Height >= 24));
+        Assert.Single(viewModel.DayColumns, day => day.IsToday);
 
         var work = viewModel.CalendarGroups[0].Calendars.Single(item => item.Info.ProviderId == "work");
         work.IsVisible = false;
@@ -150,6 +151,21 @@ public sealed class CalendarWorkspaceViewModelTests
             $"{source.Event.StartsAt.ToLocalTime():HH:mm}–{source.Event.EndsAt.ToLocalTime():HH:mm}",
             CalendarEventItem.ForMonth(source).Time);
         Assert.Equal("Busy", CalendarEventItem.ForMonth(source).AvailabilityText);
+    }
+
+    [Fact]
+    public void FindsSupportedMeetingLinks()
+    {
+        var calendarEvent = new CalendarEvent(
+            "event", "calendar", "Meeting", Now, Now.AddHours(1), null,
+            Body: "Join https://meet.google.com/abc-defg-hij",
+            OnlineMeetingUrl: "https://teams.microsoft.com/l/meetup-join/example");
+
+        Assert.Equal(
+            "https://teams.microsoft.com/l/meetup-join/example",
+            CalendarEventWindow.FindJoinUri(calendarEvent)!.AbsoluteUri);
+        Assert.Null(CalendarEventWindow.FindJoinUri(
+            calendarEvent with { Body = "https://example.com/meeting", OnlineMeetingUrl = null }));
     }
 
     private static MailAccount[] Accounts() =>

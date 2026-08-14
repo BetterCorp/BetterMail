@@ -102,6 +102,8 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
     public ICommand SaveEventCommand { get; }
     public ICommand DeleteEventCommand { get; }
     public ICommand CloseEditorCommand { get; }
+    public event Action<CalendarEventSource>? EventDetailsRequested;
+    public event Action? EventsChanged;
 
     public DateTimeOffset SelectedDate
     {
@@ -319,6 +321,7 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
                 }
             }
             RebuildLayout();
+            EventsChanged?.Invoke();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -433,6 +436,7 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
                 return new CalendarMonthCell(
                     day,
                     day.Month == SelectedDate.Month,
+                    day.Date == _now().ToLocalTime().Date,
                     visible.Where(item => OccursOn(item.Event, day))
                         .OrderBy(item => item.Event.StartsAt)
                         .Select(CalendarEventItem.ForMonth)
@@ -454,9 +458,11 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
                 .ThenBy(item => item.Event.ProviderId, StringComparer.Ordinal)
                 .ToArray();
             var items = sources.Select(source => BuildTimelineItem(source, day, sources, dayWidth)).ToArray();
-            return new CalendarDayColumn(day, dayWidth, items);
+            return new CalendarDayColumn(day, dayWidth, day.Date == _now().ToLocalTime().Date, items);
         }));
     }
+
+    internal void RequestEventDetails(CalendarEventItem item) => EventDetailsRequested?.Invoke(item.Source);
 
     private static CalendarEventItem BuildTimelineItem(
         CalendarEventSource source,
@@ -781,6 +787,7 @@ public sealed record CalendarEventItem(
 public sealed record CalendarDayColumn(
     DateTimeOffset Date,
     double Width,
+    bool IsToday,
     IReadOnlyList<CalendarEventItem> Events)
 {
     public string Heading => Date.ToString("ddd d");
@@ -789,6 +796,7 @@ public sealed record CalendarDayColumn(
 public sealed record CalendarMonthCell(
     DateTimeOffset Date,
     bool IsCurrentMonth,
+    bool IsToday,
     IReadOnlyList<CalendarEventItem> Events)
 {
     public string DayNumber => Date.Day.ToString(CultureInfo.InvariantCulture);

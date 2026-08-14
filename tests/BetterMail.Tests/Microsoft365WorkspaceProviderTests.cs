@@ -65,6 +65,12 @@ public sealed class Microsoft365WorkspaceProviderTests
               "isReminderOn":true,
               "reminderMinutesBeforeStart":15,
               "showAs":"oof",
+              "organizer":{"emailAddress":{"name":"Grace","address":"grace@example.com"}},
+              "body":{"contentType":"html","content":"<p>Agenda</p>"},
+              "isAllDay":false,
+              "isCancelled":false,
+              "webLink":"https://outlook.office.com/calendar/item",
+              "onlineMeeting":{"joinUrl":"https://teams.microsoft.com/l/meetup-join/example"},
               "recurrence":{
                 "pattern":{"type":"absoluteMonthly","interval":1,"dayOfMonth":20},
                 "range":{"type":"endDate","startDate":"2026-07-20","endDate":"2026-12-20","recurrenceTimeZone":"UTC"}
@@ -83,6 +89,11 @@ public sealed class Microsoft365WorkspaceProviderTests
         Assert.Equal(CalendarAvailability.OutOfOffice, calendarEvent.Availability);
         Assert.Equal(CalendarRecurrencePatternType.AbsoluteMonthly, calendarEvent.Recurrence!.PatternType);
         Assert.Equal(new DateOnly(2026, 12, 20), calendarEvent.Recurrence.EndDate);
+        Assert.Equal("grace@example.com", calendarEvent.Organizer!.Address);
+        Assert.Equal("<p>Agenda</p>", calendarEvent.Body);
+        Assert.True(calendarEvent.BodyIsHtml);
+        Assert.Equal("https://outlook.office.com/calendar/item", calendarEvent.WebLink);
+        Assert.Equal("https://teams.microsoft.com/l/meetup-join/example", calendarEvent.OnlineMeetingUrl);
     }
 
     [Fact]

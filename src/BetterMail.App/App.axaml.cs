@@ -1,5 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Controls;
+using Avalonia.Layout;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using Avalonia.Platform;
@@ -14,11 +16,28 @@ public sealed partial class App : Application
     private EncryptedMailStore? _store;
     private AppUpdater? _updater;
     private IDesktopNotificationService? _desktopNotificationService;
+    private MainWindow? _mainWindow;
+    private MainWindowViewModel? _viewModel;
+    private bool _ready;
+    private bool _showingDefaultMailPrompt;
+    private readonly Queue<string> _pendingActivations = [];
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
     public override void OnFrameworkInitializationCompleted()
     {
+        AppActivation.SetHandler(value => Dispatcher.UIThread.Post(() => _ = HandleActivationAsync(value)));
+        if (this.TryGetFeature<IActivatableLifetime>() is { } activatableLifetime)
+        {
+            activatableLifetime.Activated += (_, args) =>
+            {
+                if (args.Kind == ActivationKind.OpenUri &&
+                    args.GetType().GetProperty("Uri")?.GetValue(args) is Uri uri)
+                {
+                    AppActivation.Publish(uri.AbsoluteUri);
+                }
+            };
+        }
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var dataDirectory = Path.Combine(
@@ -100,6 +119,7 @@ public sealed partial class App : Application
         viewModel.SelectedAccentName = preferences.AccentName;
         viewModel.IsCompact = preferences.IsCompact;
         viewModel.DesktopNotificationsEnabled = preferences.DesktopNotificationsEnabled;
+        viewModel.DefaultMailPromptShown = preferences.DefaultMailPromptShown;
         viewModel.MailSyncRange = preferences.MailSyncRange;
         viewModel.ConfigureMailQuickActions(preferences.MailQuickActions);
         viewModel.PropertyChanged += (_, args) =>
@@ -108,6 +128,7 @@ public sealed partial class App : Application
                 nameof(MainWindowViewModel.SelectedAccentName) or
                 nameof(MainWindowViewModel.IsCompact) or
                 nameof(MainWindowViewModel.DesktopNotificationsEnabled) or
+                nameof(MainWindowViewModel.DefaultMailPromptShown) or
                 nameof(MainWindowViewModel.MailSyncRange) or
                 nameof(MainWindowViewModel.MailQuickActionsVersion) or
                 nameof(MainWindowViewModel.SenderPreferencesVersion))
@@ -121,7 +142,8 @@ public sealed partial class App : Application
                     DefaultSenderMailboxId: viewModel.DefaultSenderMailboxId,
                     Signatures: viewModel.GetSignaturePreferences(),
                     MailboxSignatures: viewModel.GetMailboxSignaturePreferences(),
-                    MailQuickActions: viewModel.GetMailQuickActionPreferences()));
+                    MailQuickActions: viewModel.GetMailQuickActionPreferences(),
+                    DefaultMailPromptShown: viewModel.DefaultMailPromptShown));
             }
         };
         viewModel.ConfigureSenderPreferences(
@@ -131,11 +153,21 @@ public sealed partial class App : Application
             preferences.Signatures,
             preferences.MailboxSignatures);
         mainWindow = new MainWindow { DataContext = viewModel };
+        _mainWindow = mainWindow;
+        _viewModel = viewModel;
         desktop.MainWindow = mainWindow;
         mainWindow.Show();
         startupWindow.Close();
         await viewModel.InitializeAsync();
         await mainWindow.RestorePreviewWindowsAsync();
+        _ready = true;
+        while (_pendingActivations.TryDequeue(out var activation))
+        {
+            await HandleActivationAsync(activation);
+        }
+        viewModel.Accounts.CollectionChanged += (_, _) =>
+            Dispatcher.UIThread.Post(() => _ = ShowDefaultMailPromptAsync());
+        await ShowDefaultMailPromptAsync();
 
         _updater = AppUpdater.Create(async () =>
         {
@@ -147,6 +179,98 @@ public sealed partial class App : Application
             var updater = _updater;
             mainWindow.CheckForUpdatesAsync = () => updater.CheckNowAsync(mainWindow);
             await _updater.StartAsync(mainWindow);
+        }
+    }
+
+    private async Task HandleActivationAsync(string activation)
+    {
+        if (!_ready || _mainWindow is null || _viewModel is null)
+        {
+            _pendingActivations.Enqueue(activation);
+            return;
+        }
+
+        if (_mainWindow.WindowState == WindowState.Minimized)
+        {
+            _mainWindow.WindowState = WindowState.Normal;
+        }
+        if (!_mainWindow.IsVisible)
+        {
+            _mainWindow.Show();
+        }
+        _mainWindow.Activate();
+        if (MailtoParser.TryParse(activation, out var request))
+        {
+            await _viewModel.OpenComposeAsync(request);
+        }
+    }
+
+    private async Task ShowDefaultMailPromptAsync()
+    {
+        var viewModel = _viewModel;
+        var owner = _mainWindow;
+        if (!_ready || owner is null || viewModel is null || viewModel.Accounts.Count == 0 ||
+            viewModel.DefaultMailPromptShown || _showingDefaultMailPrompt)
+        {
+            return;
+        }
+
+        _showingDefaultMailPrompt = true;
+        viewModel.DefaultMailPromptShown = true;
+        var choose = new Button { Content = "Choose default mail app" };
+        var later = new Button { Content = "Not now" };
+        var dialog = new Window
+        {
+            Title = "Open mail links with BetterMail?",
+            Icon = owner.Icon,
+            Width = 440,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(22),
+                Spacing = 14,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "BetterMail can create a new message when you click a mail link.",
+                        FontSize = 18,
+                        FontWeight = FontWeight.SemiBold,
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    new TextBlock
+                    {
+                        Text = OperatingSystem.IsMacOS()
+                            ? "We’ll open Mail. Choose BetterMail under Mail > Settings > General > Default email reader."
+                            : "Your operating system will confirm which app should open mail links.",
+                        Opacity = 0.7,
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Spacing = 8,
+                        Children = { later, choose }
+                    }
+                }
+            }
+        };
+        later.Click += (_, _) => dialog.Close();
+        choose.Click += async (_, _) =>
+        {
+            await ((AsyncCommand)viewModel.ChooseDefaultMailAppCommand).ExecuteAsync();
+            dialog.Close();
+        };
+        try
+        {
+            await dialog.ShowDialog(owner);
+        }
+        finally
+        {
+            _showingDefaultMailPrompt = false;
         }
     }
 

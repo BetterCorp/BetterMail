@@ -13,7 +13,8 @@ public sealed record AppPreferences(
     Dictionary<string, string>? SenderSignatures = null,
     List<SignaturePreference>? Signatures = null,
     Dictionary<string, MailboxSignaturePreferences>? MailboxSignatures = null,
-    List<string>? MailQuickActions = null);
+    List<string>? MailQuickActions = null,
+    bool DefaultMailPromptShown = false);
 
 public static class AppPreferencesStore
 {

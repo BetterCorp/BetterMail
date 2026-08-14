@@ -26,6 +26,9 @@ public sealed partial class MainWindow : Window
     private IReadOnlyList<MailMessage> _draggedMessages = [];
     private WindowSessionStore? _windowSessions;
     private readonly Dictionary<PreviewWindowSession, Window> _previewWindows = [];
+    private readonly Dictionary<ComposeWindowSession, Window> _composeWindows = [];
+    private readonly Dictionary<CalendarEventWindowSession, CalendarEventWindow> _calendarEventWindows = [];
+    private CalendarWorkspaceViewModel? _subscribedCalendarWorkspace;
     private bool _isClosing;
     private bool _preservingMessageSelection;
 
@@ -39,7 +42,7 @@ public sealed partial class MainWindow : Window
         Closing += (_, _) =>
         {
             _isClosing = true;
-            _windowSessions?.Save(_previewWindows.Keys);
+            SaveWindowSessions();
         };
         ApplyResponsiveLayout(Width);
     }
@@ -587,7 +590,8 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        foreach (var session in _windowSessions.Load())
+        var saved = _windowSessions.Load();
+        foreach (var session in saved.Previews)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var preview = await _viewModel.GetCachedPreviewAsync(session, cancellationToken);
@@ -597,7 +601,28 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        _windowSessions.Save(_previewWindows.Keys);
+        foreach (var session in saved.Composes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var draft = _viewModel.Drafts.FirstOrDefault(candidate => candidate.Id == session.DraftId);
+            OpenCompose(draft is null
+                ? new ComposeRequest(DraftId: session.DraftId)
+                : new ComposeRequest(
+                    draft.To, draft.Subject, draft.Body, draft.Cc, draft.Bcc,
+                    draft.Id, draft.AccountId, draft.MailboxId, draft.Attachments,
+                    draft.IsHtml, ConversationIdentity: draft.ConversationIdentity));
+        }
+
+        foreach (var session in saved.Events)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (await _viewModel.GetCachedCalendarEventSourceAsync(session, cancellationToken) is { } source)
+            {
+                ShowCalendarEventWindow(source);
+            }
+        }
+
+        SaveWindowSessions();
     }
 
     private void ShowPreviewWindow(PreviewWindowSession session, CachedMailPreview preview)
@@ -634,12 +659,12 @@ public sealed partial class MainWindow : Window
             if (!_isClosing)
             {
                 _previewWindows.Remove(session);
-                _windowSessions?.Save(_previewWindows.Keys);
+                SaveWindowSessions();
             }
         };
         window.Closed += (_, _) => _previewWindows.Remove(session);
-        window.Show();
-        _windowSessions?.Save(_previewWindows.Keys);
+        IndependentWindow.Show(window);
+        SaveWindowSessions();
     }
 
     private void MessageReplyClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
@@ -765,8 +790,10 @@ public sealed partial class MainWindow : Window
             _viewModel.SharedMailboxRequested -= OpenSharedMailbox;
             _viewModel.SearchFocusRequested -= FocusMailSearch;
             _viewModel.HeadersRequested -= OpenHeaders;
+            _viewModel.CalendarEventDetailsRequested -= ShowCalendarEventWindow;
             _viewModel.PropertyChanged -= ViewModelPropertyChanged;
             _viewModel.Messages.CollectionChanged -= MessagesCollectionChanged;
+            AttachCalendarWorkspace(null);
         }
 
         _viewModel = viewModel;
@@ -777,8 +804,10 @@ public sealed partial class MainWindow : Window
             _viewModel.SharedMailboxRequested += OpenSharedMailbox;
             _viewModel.SearchFocusRequested += FocusMailSearch;
             _viewModel.HeadersRequested += OpenHeaders;
+            _viewModel.CalendarEventDetailsRequested += ShowCalendarEventWindow;
             _viewModel.PropertyChanged += ViewModelPropertyChanged;
             _viewModel.Messages.CollectionChanged += MessagesCollectionChanged;
+            AttachCalendarWorkspace(_viewModel.CalendarWorkspace);
         }
         UpdateMailPanes();
         UpdateLoadOlderVisibility();
@@ -795,6 +824,10 @@ public sealed partial class MainWindow : Window
         if (args.PropertyName == nameof(MainWindowViewModel.HasMoreMessages))
         {
             UpdateLoadOlderVisibility();
+        }
+        if (args.PropertyName == nameof(MainWindowViewModel.CalendarWorkspace))
+        {
+            AttachCalendarWorkspace(_viewModel?.CalendarWorkspace);
         }
     }
 
@@ -821,7 +854,72 @@ public sealed partial class MainWindow : Window
             _viewModel.SignatureForSender,
             _viewModel.FilesProvider,
             _viewModel.SearchRecipientSuggestionsAsync);
+        if (window.DataContext is not ComposeWindowViewModel composeViewModel)
+        {
+            return;
+        }
+        var session = new ComposeWindowSession(composeViewModel.DraftId);
+        if (_composeWindows.TryGetValue(session, out var existing))
+        {
+            existing.Activate();
+            return;
+        }
+        _composeWindows[session] = window;
+        window.Closed += (_, _) =>
+        {
+            _composeWindows.Remove(session);
+            if (!_isClosing)
+            {
+                SaveWindowSessions();
+            }
+        };
+        SaveWindowSessions();
+        _ = composeViewModel.FlushDraftAsync();
         _ = window.ShowDialog<bool>(this);
+    }
+
+    private void SaveWindowSessions() => _windowSessions?.Save(new WindowSessionState(
+        _previewWindows.Keys.ToArray(),
+        _calendarEventWindows.Keys.ToArray(),
+        _composeWindows.Keys.ToArray()));
+
+    private void AttachCalendarWorkspace(CalendarWorkspaceViewModel? workspace)
+    {
+        if (ReferenceEquals(_subscribedCalendarWorkspace, workspace))
+        {
+            return;
+        }
+        if (_subscribedCalendarWorkspace is not null)
+        {
+            _subscribedCalendarWorkspace.EventDetailsRequested -= ShowCalendarEventWindow;
+        }
+        _subscribedCalendarWorkspace = workspace;
+        if (workspace is not null)
+        {
+            workspace.EventDetailsRequested += ShowCalendarEventWindow;
+        }
+    }
+
+    private void ShowCalendarEventWindow(CalendarEventSource source)
+    {
+        var window = new CalendarEventWindow(source, Icon);
+        var session = window.Session;
+        if (_calendarEventWindows.TryGetValue(session, out var existing))
+        {
+            existing.Activate();
+            return;
+        }
+        _calendarEventWindows[session] = window;
+        window.Closed += (_, _) =>
+        {
+            _calendarEventWindows.Remove(session);
+            if (!_isClosing)
+            {
+                SaveWindowSessions();
+            }
+        };
+        IndependentWindow.Show(window);
+        SaveWindowSessions();
     }
 
     private void OpenSharedMailbox(MailAccount account)

@@ -893,6 +893,82 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             ("$from", from.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)),
             ("$to", to.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)));
 
+    public Task<IReadOnlyList<CalendarInfo>> GetCalendarInfosAsync(
+        string accountId,
+        CancellationToken cancellationToken = default) =>
+        QueryWorkspaceItemsAsync<CalendarInfo>(
+            "calendar", accountId, "all", null, 1000, cancellationToken);
+
+    public Task<CalendarEvent?> GetCalendarEventAsync(
+        string accountId,
+        string calendarId,
+        string providerEventId,
+        CancellationToken cancellationToken = default) =>
+        WithLockAsync<CalendarEvent?>(async connection =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT payload_json FROM workspace_items
+                WHERE kind = 'calendar-event' AND account_id = $account
+                  AND scope_id = $calendar AND provider_id = $event
+                LIMIT 1;
+                """;
+            command.Parameters.AddWithValue("$account", accountId);
+            command.Parameters.AddWithValue("$calendar", calendarId);
+            command.Parameters.AddWithValue("$event", providerEventId);
+            var payload = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as string;
+            return payload is null ? null : JsonSerializer.Deserialize<CalendarEvent>(payload);
+        }, cancellationToken);
+
+    public Task<CalendarEvent?> GetNextCalendarEventAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default) =>
+        WithLockAsync<CalendarEvent?>(async connection =>
+        {
+            var candidates = new List<CalendarEvent>();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT payload_json FROM workspace_items
+                WHERE kind = 'calendar-event' AND period_end > $now
+                ORDER BY period_start
+                LIMIT 200;
+                """;
+            command.Parameters.AddWithValue("$now", now.UtcDateTime.ToString("O", CultureInfo.InvariantCulture));
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (JsonSerializer.Deserialize<CalendarEvent>(reader.GetString(0)) is { IsCancelled: false } item)
+                {
+                    candidates.Add(item);
+                }
+            }
+
+            var localNow = now.ToLocalTime();
+            var today = DateOnly.FromDateTime(localNow.Date);
+            return candidates
+                .OrderBy(item => NextEventRank(item, localNow, today))
+                .ThenBy(item => item.StartsAt)
+                .FirstOrDefault();
+        }, cancellationToken);
+
+    private static int NextEventRank(CalendarEvent item, DateTimeOffset now, DateOnly today)
+    {
+        var startsToday = DateOnly.FromDateTime(item.StartsAt.ToLocalTime().Date) == today;
+        if (!item.IsAllDay && item.StartsAt <= now)
+        {
+            return 0;
+        }
+        if (!item.IsAllDay && startsToday)
+        {
+            return 1;
+        }
+        if (item.IsAllDay && startsToday)
+        {
+            return 2;
+        }
+        return 3;
+    }
+
     public async Task SaveLocalDraftAsync(LocalDraft draft, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(draft.Id);

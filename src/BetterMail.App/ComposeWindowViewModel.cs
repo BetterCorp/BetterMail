@@ -78,6 +78,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
     }
 
     public event EventHandler? Sent;
+    internal string DraftId => _draftId;
     public ObservableCollection<ComposeSender> Senders { get; }
     public ObservableCollection<DraftAttachment> Attachments { get; } = [];
     public IReadOnlyList<ComposeRecipientField> RecipientFields { get; }

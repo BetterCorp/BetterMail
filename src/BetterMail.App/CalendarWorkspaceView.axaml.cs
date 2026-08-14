@@ -193,39 +193,9 @@ public sealed partial class CalendarWorkspaceView : UserControl
             viewModel.CloseEditorCommand.Execute(null);
         }
 
-        var calendarEvent = item.Source.Event;
-        var attendees = string.Join(", ", (calendarEvent.Attendees ?? [])
-            .Select(static attendee => attendee.Address.ToString()));
-        var content = new StackPanel { Margin = new Thickness(24), Spacing = 10 };
-        content.Children.Add(new TextBlock
+        if (DataContext is CalendarWorkspaceViewModel calendar)
         {
-            Text = calendarEvent.Subject,
-            FontSize = 24,
-            FontWeight = Avalonia.Media.FontWeight.SemiBold,
-            TextWrapping = Avalonia.Media.TextWrapping.Wrap
-        });
-        content.Children.Add(new TextBlock { Text = calendarEvent.TimeText, Opacity = 0.72 });
-        content.Children.Add(new TextBlock { Text = item.CalendarIdentity, Opacity = 0.62 });
-        if (!string.IsNullOrWhiteSpace(calendarEvent.Location))
-        {
-            content.Children.Add(new TextBlock { Text = $"Location: {calendarEvent.Location}", TextWrapping = Avalonia.Media.TextWrapping.Wrap });
-        }
-        if (!string.IsNullOrWhiteSpace(attendees))
-        {
-            content.Children.Add(new TextBlock { Text = $"Attendees: {attendees}", TextWrapping = Avalonia.Media.TextWrapping.Wrap });
-        }
-        if (TopLevel.GetTopLevel(this) is Window owner)
-        {
-            new Window
-            {
-                Title = calendarEvent.Subject,
-                Icon = owner.Icon,
-                Width = 560,
-                Height = 360,
-                MinWidth = 360,
-                MinHeight = 240,
-                Content = new ScrollViewer { Content = content }
-            }.Show(owner);
+            calendar.RequestEventDetails(item);
         }
         args.Handled = true;
     }

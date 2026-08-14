@@ -2,7 +2,8 @@
 Type=Application
 Name=BetterMail
 Comment=Fast local-first Microsoft 365 mail
-Exec=BetterMail
+Exec=BetterMail %u
 Icon=BetterMail
 Categories=Network;Email;
+MimeType=x-scheme-handler/mailto;
 Terminal=false

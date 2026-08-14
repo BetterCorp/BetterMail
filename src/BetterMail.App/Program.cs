@@ -10,8 +10,29 @@ internal static class Program
     {
         VelopackApp.Build()
             .SetAutoApplyOnStartup(true)
+            .OnBeforeUninstallFastCallback(_ => DefaultMailApp.Unregister())
             .Run();
-        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        DefaultMailApp.Register();
+
+        var activation = args.FirstOrDefault(argument =>
+            argument.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase)) ?? "activate";
+        AppActivationRelay? relay = null;
+        if (OperatingSystem.IsMacOS())
+        {
+            AppActivation.Publish(activation);
+        }
+        else if (!AppActivationRelay.TryStartPrimary(activation, out relay))
+        {
+            return;
+        }
+        try
+        {
+            BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        }
+        finally
+        {
+            relay?.Dispose();
+        }
     }
 
     public static AppBuilder BuildAvaloniaApp() => AppBuilder

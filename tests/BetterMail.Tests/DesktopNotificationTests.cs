@@ -72,6 +72,25 @@ public sealed class DesktopNotificationTests
     }
 
     [Fact]
+    public void OnlyMessagesReceivedWithinThirtyMinutesNotifyAndAllBecomeSeen()
+    {
+        var now = new DateTimeOffset(2026, 8, 5, 12, 0, 0, TimeSpan.Zero);
+        var service = new RecordingNotificationService();
+        var coordinator = new NewMailNotificationCoordinator(service, () => now);
+        var context = Context(shared: false);
+        coordinator.Prime(context, []);
+
+        var recent = Message(context, "recent", "Recent") with { ReceivedAt = now.AddMinutes(-29).AddSeconds(-59) };
+        var boundary = Message(context, "boundary", "Boundary") with { ReceivedAt = now.AddMinutes(-30) };
+        var old = Message(context, "old", "Old") with { ReceivedAt = now.AddMinutes(-30).AddSeconds(-1) };
+
+        coordinator.Observe(context, [old, boundary, recent], enabled: true);
+        coordinator.Observe(context, [old, boundary, recent], enabled: true);
+
+        Assert.Equal(["Boundary", "Recent"], service.Notifications.Select(notification => notification.Subject));
+    }
+
+    [Fact]
     public void NotificationSettingDefaultsOnAndPersistsOff()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"bettermail-notifications-{Guid.NewGuid():N}");

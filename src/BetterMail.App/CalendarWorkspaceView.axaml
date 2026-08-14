@@ -2,6 +2,14 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:app="using:BetterMail.App"
              x:Class="BetterMail.App.CalendarWorkspaceView">
+  <UserControl.Styles>
+    <Style Selector="Grid.today">
+      <Setter Property="Background" Value="{DynamicResource BetterMailSelectionBrush}" />
+    </Style>
+    <Style Selector="Border.today">
+      <Setter Property="Background" Value="{DynamicResource BetterMailSelectionBrush}" />
+    </Style>
+  </UserControl.Styles>
   <Grid x:Name="RootGrid" RowDefinitions="Auto,*" ColumnDefinitions="238,*">
     <Border x:Name="CalendarSidebar" Grid.RowSpan="2"
             BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,1,0"
@@ -90,9 +98,13 @@
           </ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="app:CalendarDayColumn">
-              <Grid Width="{Binding Width}" RowDefinitions="34,1152">
+              <Grid Width="{Binding Width}" RowDefinitions="34,1152" Classes.today="{Binding IsToday}">
                 <Border BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1">
-                  <TextBlock Text="{Binding Heading}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  <Grid>
+                    <Border Width="3" Background="{DynamicResource BetterMailAccentBrush}"
+                            HorizontalAlignment="Left" IsVisible="{Binding IsToday}" />
+                    <TextBlock Text="{Binding Heading}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </Grid>
                 </Border>
                 <Grid Grid.Row="1">
                   <ItemsControl ItemsSource="{Binding $parent[UserControl].DataContext.Hours}" IsHitTestVisible="False">
@@ -149,8 +161,12 @@
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="app:CalendarMonthCell">
               <Border MinHeight="112" Padding="5"
+                      Classes.today="{Binding IsToday}"
                       BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,1,1">
                 <Grid RowDefinitions="Auto,*">
+                  <Border Width="3" Background="{DynamicResource BetterMailAccentBrush}"
+                          HorizontalAlignment="Left" VerticalAlignment="Stretch" Grid.RowSpan="2"
+                          IsVisible="{Binding IsToday}" />
                   <TextBlock Text="{Binding DayNumber}" FontWeight="SemiBold" HorizontalAlignment="Right" />
                   <ItemsControl Grid.Row="1" ItemsSource="{Binding Events}">
                     <ItemsControl.ItemTemplate>

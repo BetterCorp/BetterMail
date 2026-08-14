@@ -18,7 +18,8 @@ public sealed class Microsoft365WorkspaceProvider(
     private const string DriveItemSelect = "id,name,size,webUrl,parentReference,folder,file";
     private const string NotePageSelect = "id,title,lastModifiedDateTime,order,level,links";
     private const string EventSelect =
-        "id,calendar,subject,start,end,location,attendees,isReminderOn,reminderMinutesBeforeStart,recurrence,showAs";
+        "id,calendar,subject,start,end,location,attendees,isReminderOn,reminderMinutesBeforeStart,recurrence,showAs," +
+        "organizer,body,isAllDay,isCancelled,webLink,onlineMeeting";
     private const string TaskSelect =
         "id,title,status,body,dueDateTime,importance,isReminderOn,reminderDateTime,recurrence,categories,createdDateTime,completedDateTime";
     private static readonly string[] CalendarScopes = ["Calendars.ReadWrite"];
@@ -1512,7 +1513,22 @@ public sealed class Microsoft365WorkspaceProvider(
                 "busy" => CalendarAvailability.Busy,
                 "oof" => CalendarAvailability.OutOfOffice,
                 _ => CalendarAvailability.Unknown
-            });
+            },
+            item.TryGetProperty("organizer", out var organizer) &&
+                organizer.TryGetProperty("emailAddress", out var organizerAddress)
+                ? new MailAddress(
+                    OptionalString(organizerAddress, "name") ?? "",
+                    OptionalString(organizerAddress, "address") ?? "")
+                : null,
+            item.TryGetProperty("body", out var body) ? OptionalString(body, "content") : null,
+            item.TryGetProperty("body", out body) &&
+                string.Equals(OptionalString(body, "contentType"), "html", StringComparison.OrdinalIgnoreCase),
+            item.TryGetProperty("isAllDay", out var allDay) && allDay.GetBoolean(),
+            item.TryGetProperty("isCancelled", out var cancelled) && cancelled.GetBoolean(),
+            OptionalString(item, "webLink"),
+            item.TryGetProperty("onlineMeeting", out var onlineMeeting) && onlineMeeting.ValueKind == JsonValueKind.Object
+                ? OptionalString(onlineMeeting, "joinUrl")
+                : null);
     }
 
     private static void ValidateDraft(CalendarEventDraft draft)
