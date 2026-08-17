@@ -1067,6 +1067,12 @@ public sealed class MainWindowViewModelTests
 
             viewModel.ToggleFlagCommand.Execute(null);
             await WaitUntilAsync(() => provider.Flagged == true && viewModel.SelectedMessage?.IsFlagged == true, cancellationToken);
+            viewModel.TogglePinCommand.Execute(null);
+            await WaitUntilAsync(() => viewModel.SelectedMessage?.IsPinned == true && viewModel.PinnedMessageCount == 1, cancellationToken);
+            viewModel.ShowPinnedCommand.Execute(null);
+            await WaitUntilAsync(() => viewModel.IsPinnedView && viewModel.Messages.Count == 1, cancellationToken);
+            viewModel.ShowUnifiedInboxCommand.Execute(null);
+            await WaitUntilAsync(() => viewModel.IsUnifiedInbox && viewModel.Messages.Count == 2, cancellationToken);
 
             provider.MoveRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
             viewModel.DeleteCommand.Execute(null);
@@ -1353,6 +1359,12 @@ public sealed class MainWindowViewModelTests
             await WaitUntilAsync(
                 () => viewModel.Drafts.SingleOrDefault()?.ProviderDraftId is not null,
                 cancellationToken);
+            Assert.Empty(viewModel.Drafts.Single().Body);
+            ComposeRequest? openedDraft = null;
+            viewModel.ComposeRequested += request => openedDraft = request;
+            viewModel.OpenDraftCommand.Execute(viewModel.Drafts.Single());
+            await WaitUntilAsync(() => openedDraft is not null, cancellationToken);
+            Assert.Equal("Body", openedDraft!.Body);
 
             var selected = Assert.Single(viewModel.Messages);
             viewModel.SelectedMessage = selected;

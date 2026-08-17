@@ -16,7 +16,7 @@
     </Style>
   </UserControl.Styles>
 
-  <Grid RowDefinitions="Auto,Auto,*">
+  <Grid RowDefinitions="Auto,Auto,Auto,2*,5*">
     <Border Padding="16,11"
             BorderBrush="{DynamicResource BetterMailDividerBrush}"
             BorderThickness="0,0,0,1">
@@ -35,8 +35,85 @@
       </Grid>
     </Border>
 
-    <ScrollViewer Grid.Row="1"
-                  MaxHeight="184"
+    <Border Grid.Row="1" Padding="8,5" BorderBrush="{DynamicResource BetterMailDividerBrush}"
+            BorderThickness="0,0,0,1" IsVisible="{Binding ShowActions}">
+      <Grid>
+        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                      IsVisible="{Binding !IsActionRunning}">
+          <StackPanel Orientation="Horizontal" Spacing="4">
+            <Button Classes="command" Content="Reply all" Command="{Binding ReplyAllCommand}" />
+            <Button Classes="command" Content="Reply" Command="{Binding ReplyCommand}" />
+            <Button Classes="command" Content="Forward" Command="{Binding ForwardCommand}" />
+            <Button Classes="command" Content="Archive" Command="{Binding ArchiveCommand}" />
+            <Button Classes="command" Content="Delete" Command="{Binding DeleteCommand}" />
+            <Button Classes="command" Content="Move">
+              <Button.Flyout>
+                <Flyout>
+                  <ScrollViewer MaxHeight="420" MinWidth="230">
+                    <ItemsControl ItemsSource="{Binding MoveFolders}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="app:MailFolderItem">
+                          <Button Classes="command" Content="{Binding DisplayName}" HorizontalContentAlignment="Left"
+                                  Command="{Binding $parent[UserControl].DataContext.MoveToFolderCommand}" CommandParameter="{Binding}" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+                </Flyout>
+              </Button.Flyout>
+            </Button>
+            <Button Classes="command" Content="More">
+              <Button.Flyout>
+                <Flyout>
+                  <StackPanel MinWidth="190">
+                    <Button Classes="command" Content="Junk" HorizontalContentAlignment="Left" Command="{Binding JunkCommand}" />
+                    <Button Classes="command" Content="Not junk" HorizontalContentAlignment="Left" Command="{Binding NotJunkCommand}" />
+                    <Button Classes="command" Content="{Binding ToggleFlagText}" HorizontalContentAlignment="Left" Command="{Binding ToggleFlagCommand}" />
+                    <Button Classes="command" Content="{Binding TogglePinText}" HorizontalContentAlignment="Left" Command="{Binding TogglePinCommand}" />
+                    <Button Classes="command" Content="{Binding ToggleReadText}" HorizontalContentAlignment="Left" Command="{Binding ToggleReadCommand}" />
+                    <Button Classes="command" Content="View headers" HorizontalContentAlignment="Left" Command="{Binding ViewHeadersCommand}" />
+                  </StackPanel>
+                </Flyout>
+              </Button.Flyout>
+            </Button>
+          </StackPanel>
+        </ScrollViewer>
+        <ProgressBar Width="110" Height="3" IsIndeterminate="True" HorizontalAlignment="Center"
+                     VerticalAlignment="Center" IsVisible="{Binding IsActionRunning}" />
+      </Grid>
+    </Border>
+
+    <Border Grid.Row="2" Padding="12,7" Background="#0A0F6CBD"
+            BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1"
+            IsVisible="{Binding ShowAttachmentArea}">
+      <StackPanel Spacing="5">
+        <TextBlock Text="{Binding AttachmentSummary}" FontSize="11" FontWeight="SemiBold"
+                   IsVisible="{Binding !IsLoadingAttachments}" />
+        <ProgressBar Width="90" Height="3" IsIndeterminate="True" HorizontalAlignment="Left"
+                     IsVisible="{Binding IsLoadingAttachments}" />
+        <ItemsControl ItemsSource="{Binding Attachments}" IsVisible="{Binding !IsLoadingAttachments}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="core:MailAttachment">
+              <Button Classes="command" Padding="8,5" Margin="0,0,6,2"
+                      Command="{Binding $parent[UserControl].DataContext.OpenAttachmentCommand}"
+                      CommandParameter="{Binding}"
+                      ToolTip.Tip="Preview attachment"
+                      AutomationProperties.Name="{Binding Name, StringFormat='Preview attachment {0}'}">
+                <StackPanel Orientation="Horizontal" Spacing="5">
+                  <TextBlock Text="&#x1F4CE;" FontFamily="Segoe UI Symbol" Opacity="0.65" />
+                  <TextBlock Text="{Binding Name}" MaxWidth="220" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+              </Button>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </Border>
+
+    <ScrollViewer Grid.Row="3"
                   VerticalScrollBarVisibility="Auto"
                   AutomationProperties.Name="Conversation message headers">
       <StackPanel>
@@ -118,7 +195,7 @@
       </StackPanel>
     </ScrollViewer>
 
-    <Grid Grid.Row="2"
+    <Grid Grid.Row="4"
           RowDefinitions="Auto,*"
           IsVisible="{Binding HasThread}">
       <Border Padding="10,5"
@@ -148,7 +225,7 @@
                      AutomationProperties.Name="Selected conversation message content" />
     </Grid>
 
-    <StackPanel Grid.Row="1"
+    <StackPanel Grid.Row="3"
                 Grid.RowSpan="2"
                 IsVisible="{Binding HasNoThread}"
                 HorizontalAlignment="Center"

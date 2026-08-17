@@ -92,6 +92,11 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _isConfirmingAccountRemoval;
     private bool _isWorkspaceLoading;
     private bool _isDraftsView;
+    private DraftListFilter _draftListFilter;
+    private MailMessageFilter _unifiedFilter;
+    private int _pinnedMessageCount;
+    private int _flaggedMessageCount;
+    private int _unifiedMessageCount;
     private bool _isGlobalSearchOpen;
     private bool _isGlobalSearchRunning;
     private bool _isSearchResultsView;
@@ -177,9 +182,14 @@ public sealed class MainWindowViewModel : ViewModelBase
         JunkCommand = new AsyncCommand(() => MoveSelectedMessageAsync("junkemail", "Moving to Junk Email...", "Moved to Junk Email"), CanRunSelectedMailAction);
         NotJunkCommand = new AsyncCommand(() => MoveSelectedMessageAsync("inbox", "Moving to Inbox...", "Marked as not junk"), CanRunSelectedMailAction);
         ToggleFlagCommand = new AsyncCommand(ToggleFlagAsync, CanRunSelectedMailAction);
+        TogglePinCommand = new AsyncCommand(TogglePinAsync, CanRunSelectedMailAction);
         MoveToFolderCommand = new AsyncCommand<MailFolderItem>(MoveSelectionToFolderAsync, CanMoveSelectionToFolder);
         ShowUnifiedInboxCommand = new AsyncCommand(ShowUnifiedInboxAsync);
+        ShowPinnedCommand = new AsyncCommand(() => ShowUnifiedFilterAsync(MailMessageFilter.Pinned));
+        ShowFlaggedCommand = new AsyncCommand(() => ShowUnifiedFilterAsync(MailMessageFilter.Flagged));
         ShowDraftsCommand = new AsyncCommand(ShowDraftsAsync);
+        ShowSyncIssuesCommand = new AsyncCommand(() => ShowDraftListAsync(DraftListFilter.SyncIssues));
+        ShowDraftConflictsCommand = new AsyncCommand(() => ShowDraftListAsync(DraftListFilter.Conflicts));
         ShowCalendarCommand = new AsyncCommand(() => ShowWorkspaceModuleAsync("Calendar"), CanOpenWorkspaceModule);
         ShowContactsCommand = new AsyncCommand(() => ShowWorkspaceModuleAsync("People"), CanOpenWorkspaceModule);
         ShowTasksCommand = new AsyncCommand(() => ShowWorkspaceModuleAsync("To Do"), CanOpenWorkspaceModule);
@@ -243,7 +253,6 @@ public sealed class MainWindowViewModel : ViewModelBase
             loadMessage: message => GetCachedMessageAsync(message),
             location: MailLocation,
             openDraft: OpenLocalDraftAsync);
-        Drafts.CollectionChanged += (_, _) => ConversationThread.ReconcileDrafts(Drafts);
         SearchAccountFilters.Add(new SearchAccountFilter("All accounts", null));
         SearchFolderFilters.Add(new SearchFolderFilter("All mail folders", null, null));
         _selectedSearchAccountFilter = SearchAccountFilters[0];
@@ -298,6 +307,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ObservableCollection<MailboxFolderGroup> FolderGroups { get; } = [];
     public ObservableCollection<MailAttachment> Attachments { get; } = [];
     public ObservableCollection<LocalDraft> Drafts { get; } = [];
+    public ObservableCollection<LocalDraft> VisibleDrafts { get; } = [];
     public ObservableCollection<MailboxStatisticsItem> MailStatistics { get; } = [];
     public ObservableCollection<GlobalSearchResult> GlobalSearchResults { get; } = [];
     public ObservableCollection<SearchAccountFilter> SearchAccountFilters { get; } = [];
@@ -378,9 +388,14 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ICommand JunkCommand { get; }
     public ICommand NotJunkCommand { get; }
     public ICommand ToggleFlagCommand { get; }
+    public ICommand TogglePinCommand { get; }
     public ICommand MoveToFolderCommand { get; }
     public ICommand ShowUnifiedInboxCommand { get; }
+    public ICommand ShowPinnedCommand { get; }
+    public ICommand ShowFlaggedCommand { get; }
     public ICommand ShowDraftsCommand { get; }
+    public ICommand ShowSyncIssuesCommand { get; }
+    public ICommand ShowDraftConflictsCommand { get; }
     public ICommand ShowCalendarCommand { get; }
     public ICommand ShowContactsCommand { get; }
     public ICommand ShowTasksCommand { get; }
@@ -498,6 +513,7 @@ public sealed class MainWindowViewModel : ViewModelBase
                     RaisePropertyChanged(nameof(SelectedMessageTime));
                     RaisePropertyChanged(nameof(ToggleReadText));
                     RaisePropertyChanged(nameof(ToggleFlagText));
+                    RaisePropertyChanged(nameof(TogglePinText));
                     RaisePropertyChanged(nameof(HasSelectedAttachments));
                     RefreshMailActionCommands();
                     return;
@@ -521,6 +537,7 @@ public sealed class MainWindowViewModel : ViewModelBase
                 RaisePropertyChanged(nameof(SelectedMessageTime));
                 RaisePropertyChanged(nameof(ToggleReadText));
                 RaisePropertyChanged(nameof(ToggleFlagText));
+                RaisePropertyChanged(nameof(TogglePinText));
                 RaisePropertyChanged(nameof(HasSelectedAttachments));
                 Attachments.Clear();
                 RaisePropertyChanged(nameof(HasMultipleAttachments));
@@ -677,6 +694,12 @@ public sealed class MainWindowViewModel : ViewModelBase
                 RaisePropertyChanged(nameof(IsMessageListView));
                 RaisePropertyChanged(nameof(CurrentFolderName));
                 RaisePropertyChanged(nameof(IsUnifiedInbox));
+                RaisePropertyChanged(nameof(IsUnifiedSection));
+                RaisePropertyChanged(nameof(IsPinnedView));
+                RaisePropertyChanged(nameof(IsFlaggedView));
+                RaisePropertyChanged(nameof(IsAllDraftsView));
+                RaisePropertyChanged(nameof(IsSyncIssuesView));
+                RaisePropertyChanged(nameof(IsDraftConflictsView));
                 RaisePropertyChanged(nameof(CurrentItemCountText));
                 RaisePropertyChanged(nameof(ShowEmptyState));
                 RaisePropertyChanged(nameof(ShowDraftEmptyState));
@@ -684,16 +707,31 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
     public bool IsMessageListView => !IsDraftsView;
-    public bool IsUnifiedInbox => _selectedFolder is null && !IsDraftsView && !IsSearchResultsView;
+    public bool IsUnifiedInbox => IsUnifiedSection && _unifiedFilter == MailMessageFilter.All;
+    public bool IsUnifiedSection => _selectedFolder is null && !IsDraftsView && !IsSearchResultsView;
+    public bool IsPinnedView => IsUnifiedSection && _unifiedFilter == MailMessageFilter.Pinned;
+    public bool IsFlaggedView => IsUnifiedSection && _unifiedFilter == MailMessageFilter.Flagged;
+    public bool IsAllDraftsView => IsDraftsView && _draftListFilter == DraftListFilter.All;
+    public bool IsSyncIssuesView => IsDraftsView && _draftListFilter == DraftListFilter.SyncIssues;
+    public bool IsDraftConflictsView => IsDraftsView && _draftListFilter == DraftListFilter.Conflicts;
     public bool ShowEmptyState => IsMessageListView && Messages.Count == 0 && !IsBusy;
-    public bool ShowDraftEmptyState => IsDraftsView && Drafts.Count == 0;
+    public bool ShowDraftEmptyState => IsDraftsView && VisibleDrafts.Count == 0;
     public string MessageCountText => $"{Messages.Count:N0} messages";
     public bool HasMoreMessages => _messagePageCursor is not null && !IsSearchResultsView;
     public string CurrentItemCountText => IsDraftsView
-        ? $"{Drafts.Count:N0} draft{(Drafts.Count == 1 ? "" : "s")}"
+        ? $"{VisibleDrafts.Count:N0} draft{(VisibleDrafts.Count == 1 ? "" : "s")}"
         : MessageCountText;
     public string DraftCountText => Drafts.Count == 0 ? "Drafts" : $"Drafts ({Drafts.Count:N0})";
     public bool HasDrafts => Drafts.Count > 0;
+    public int SyncIssueCount => Drafts.Count(static draft => draft.HasSyncIssue);
+    public int DraftConflictCount => Drafts.Count(static draft => draft.HasSyncConflict);
+    public string SyncIssueCountText => SyncIssueCount > 0 ? SyncIssueCount.ToString("N0") : "";
+    public string DraftConflictCountText => DraftConflictCount > 0 ? DraftConflictCount.ToString("N0") : "";
+    public int PinnedMessageCount => _pinnedMessageCount;
+    public int FlaggedMessageCount => _flaggedMessageCount;
+    public string UnifiedMessageCountText => _unifiedMessageCount > 0 ? _unifiedMessageCount.ToString("N0") : "";
+    public string PinnedMessageCountText => PinnedMessageCount > 0 ? PinnedMessageCount.ToString("N0") : "";
+    public string FlaggedMessageCountText => FlaggedMessageCount > 0 ? FlaggedMessageCount.ToString("N0") : "";
     public bool HasPeopleErrors => !string.IsNullOrWhiteSpace(PeopleErrorText);
     public bool IsEditingContact => _editingContact is not null;
     public bool IsCreatingContact => IsContactEditorOpen && _editingContact is null;
@@ -751,7 +789,21 @@ public sealed class MainWindowViewModel : ViewModelBase
             }
         }
     }
-    public string CurrentFolderName => IsSearchResultsView ? "Search results" : IsDraftsView ? "Drafts" : _selectedFolder?.DisplayName ?? "Inbox";
+    public string CurrentFolderName => IsSearchResultsView
+        ? "Search results"
+        : IsDraftsView
+            ? _draftListFilter switch
+            {
+                DraftListFilter.SyncIssues => "Sync issues",
+                DraftListFilter.Conflicts => "Draft conflicts",
+                _ => "Drafts"
+            }
+            : _unifiedFilter switch
+            {
+                MailMessageFilter.Pinned => "Pinned",
+                MailMessageFilter.Flagged => "Flagged",
+                _ => _selectedFolder?.DisplayName ?? "Inbox"
+            };
     public double MessageRowHeight => IsCompact ? 58 : 78;
     public Avalonia.Thickness MessageRowMargin => IsCompact
         ? new(10, 2, 9, 3)
@@ -765,6 +817,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string SelectedMessageTime => SelectedMessage?.ReceivedAt.ToLocalTime().ToString("dddd, MMMM d, yyyy, h:mm tt") ?? "";
     public string ToggleReadText => SelectedMessage?.IsRead == true ? "Mark unread" : "Mark read";
     public string ToggleFlagText => SelectedMessage?.IsFlagged == true ? "Clear flag" : "Flag";
+    public string TogglePinText => SelectedMessage?.IsPinned == true ? "Unpin" : "Pin";
     public string SyncIcon => IsSyncing ? SyncFrames[_syncFrame] : "↻";
     public string SyncButtonText => $"{SyncIcon} Sync";
     public bool HasSelectedAttachments => SelectedMessage?.HasAttachments == true;
@@ -937,6 +990,9 @@ public sealed class MainWindowViewModel : ViewModelBase
             {
                 RaisePropertyChanged(nameof(CurrentFolderName));
                 RaisePropertyChanged(nameof(IsUnifiedInbox));
+                RaisePropertyChanged(nameof(IsUnifiedSection));
+                RaisePropertyChanged(nameof(IsPinnedView));
+                RaisePropertyChanged(nameof(IsFlaggedView));
                 RaisePropertyChanged(nameof(CurrentItemCountText));
                 RaisePropertyChanged(nameof(SearchResultSummary));
             }
@@ -1323,8 +1379,8 @@ public sealed class MainWindowViewModel : ViewModelBase
             await _store.InitializeAsync();
             Replace(Accounts, await _store.GetAccountsAsync());
             Replace(Mailboxes, await _store.GetMailboxesAsync());
-            Replace(Drafts, await _store.GetLocalDraftsAsync());
-            RaiseDraftState();
+            Replace(Drafts, await _store.GetLocalDraftSummariesAsync());
+            RebuildVisibleDrafts();
             foreach (var account in Accounts.Where(account => Mailboxes.All(mailbox => mailbox.AccountId != account.AccountId || mailbox.IsShared)))
             {
                 var primary = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
@@ -1580,7 +1636,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             {
                 Drafts.Remove(draft);
             }
-            RaiseDraftState();
+            RebuildVisibleDrafts();
             foreach (var mailbox in Mailboxes.Where(candidate => candidate.AccountId == account.AccountId).ToArray())
             {
                 _mailboxSignatures.Remove(mailbox.Id);
@@ -2051,6 +2107,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             var issue = result.Items.FirstOrDefault(static item =>
                 item.Status is DraftSyncStatus.Conflict or
                     DraftSyncStatus.MissingRemote or
+                    DraftSyncStatus.UnsupportedAttachment or
                     DraftSyncStatus.Failed);
             return issue is null
                 ? null
@@ -2072,8 +2129,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             return;
         }
-        Replace(Drafts, await _store.GetLocalDraftsAsync());
-        RaiseDraftState();
+        Replace(Drafts, await _store.GetLocalDraftSummariesAsync());
+        RebuildVisibleDrafts();
     }
 
     private async Task PrimeNewMailNotificationsAsync()
@@ -3041,7 +3098,12 @@ public sealed class MainWindowViewModel : ViewModelBase
             : Folders.Where(static folder => folder.WellKnownName == "inbox")
                 .Select(static folder => new MailFolderKey(folder.MailboxId, folder.ProviderId))
                 .ToArray();
-        var page = await _store.GetMessagesPageAsync(_messagePageFolders);
+        if (_selectedFolder is null)
+        {
+            await RefreshUnifiedCountsAsync();
+        }
+        var filter = _selectedFolder is null ? _unifiedFilter : MailMessageFilter.All;
+        var page = await _store.GetMessagesPageAsync(_messagePageFolders, filter: filter);
         _messagePageCursor = page.NextCursor;
         ReconcileMessages(page.Messages);
         RaiseMessageState();
@@ -3060,7 +3122,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         ((AsyncCommand)LoadMoreMessagesCommand).Refresh();
         try
         {
-            var page = await _store.GetMessagesPageAsync(_messagePageFolders, _messagePageCursor);
+            var filter = _selectedFolder is null ? _unifiedFilter : MailMessageFilter.All;
+            var page = await _store.GetMessagesPageAsync(_messagePageFolders, _messagePageCursor, filter: filter);
             _messagePageCursor = page.NextCursor;
             ReconcileMessages(Messages.Concat(page.Messages).DistinctBy(MessageKey).ToArray());
             RaiseMessageState();
@@ -3187,6 +3250,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         if (_selectedFolder is not null) _selectedFolder.IsSelected = true;
         RaisePropertyChanged(nameof(CurrentFolderName));
         RaisePropertyChanged(nameof(IsUnifiedInbox));
+        RaisePropertyChanged(nameof(IsUnifiedSection));
+        RaisePropertyChanged(nameof(IsPinnedView));
+        RaisePropertyChanged(nameof(IsFlaggedView));
     }
 
     private async Task ShowUnifiedInboxAsync()
@@ -3195,11 +3261,29 @@ public sealed class MainWindowViewModel : ViewModelBase
         ActiveModule = "Mail";
         IsDraftsView = false;
         IsSearchResultsView = false;
+        _unifiedFilter = MailMessageFilter.All;
         SetSelectedFolder(null);
         Messages.Clear();
         SelectedMessage = null;
         RaisePropertyChanged(nameof(CurrentFolderName));
         RaisePropertyChanged(nameof(IsUnifiedInbox));
+        await LoadMessagesAsync();
+    }
+
+    private async Task ShowUnifiedFilterAsync(MailMessageFilter filter)
+    {
+        IsSettingsOpen = false;
+        ActiveModule = "Mail";
+        IsDraftsView = false;
+        IsSearchResultsView = false;
+        _unifiedFilter = filter;
+        SetSelectedFolder(null);
+        Messages.Clear();
+        SelectedMessage = null;
+        RaisePropertyChanged(nameof(CurrentFolderName));
+        RaisePropertyChanged(nameof(IsUnifiedInbox));
+        RaisePropertyChanged(nameof(IsPinnedView));
+        RaisePropertyChanged(nameof(IsFlaggedView));
         await LoadMessagesAsync();
     }
 
@@ -3209,6 +3293,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         ActiveModule = "Mail";
         IsDraftsView = false;
         IsSearchResultsView = false;
+        _unifiedFilter = MailMessageFilter.All;
         SetSelectedFolder(folder);
         Messages.Clear();
         SelectedMessage = null;
@@ -3218,13 +3303,22 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 
     private Task ShowDraftsAsync()
+        => ShowDraftListAsync(DraftListFilter.All);
+
+    private Task ShowDraftListAsync(DraftListFilter filter)
     {
         IsSettingsOpen = false;
         ActiveModule = "Mail";
         IsDraftsView = true;
         IsSearchResultsView = false;
+        _draftListFilter = filter;
         SelectedMessage = null;
         SetSelectedFolder(null);
+        RebuildVisibleDrafts();
+        RaisePropertyChanged(nameof(IsAllDraftsView));
+        RaisePropertyChanged(nameof(IsSyncIssuesView));
+        RaisePropertyChanged(nameof(IsDraftConflictsView));
+        RaisePropertyChanged(nameof(CurrentFolderName));
         return Task.CompletedTask;
     }
 
@@ -3390,6 +3484,26 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             NextCalendarEvent = null;
         }
+    }
+
+    private async Task RefreshUnifiedCountsAsync()
+    {
+        if (_store is null)
+        {
+            return;
+        }
+        var inboxFolders = Folders.Where(static folder => folder.WellKnownName == "inbox")
+            .Select(static folder => new MailFolderKey(folder.MailboxId, folder.ProviderId))
+            .ToArray();
+        var counts = await _store.GetMessageFilterCountsAsync(inboxFolders);
+        _unifiedMessageCount = counts.All;
+        _pinnedMessageCount = counts.Pinned;
+        _flaggedMessageCount = counts.Flagged;
+        RaisePropertyChanged(nameof(UnifiedMessageCountText));
+        RaisePropertyChanged(nameof(PinnedMessageCount));
+        RaisePropertyChanged(nameof(FlaggedMessageCount));
+        RaisePropertyChanged(nameof(PinnedMessageCountText));
+        RaisePropertyChanged(nameof(FlaggedMessageCountText));
     }
 
     private async Task LoadNotesWorkspaceAsync()
@@ -3883,9 +3997,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         SearchCommand.Execute(null);
     }
 
-    private async Task ToggleReadAsync()
+    private Task ToggleReadAsync() => ToggleReadMessagesAsync(ActionMessages());
+
+    private async Task ToggleReadMessagesAsync(IReadOnlyList<MailMessage> messages)
     {
-        var messages = ActionMessages();
         if (messages.Count == 0 || _isMailActionRunning)
         {
             return;
@@ -3971,7 +4086,12 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        _selectionWorkCancellation?.Cancel();
+        var movedKeys = messages.Select(MessageKey).ToHashSet(StringComparer.Ordinal);
+        var selectedWasMoved = SelectedMessage is not null && movedKeys.Contains(MessageKey(SelectedMessage));
+        if (selectedWasMoved)
+        {
+            _selectionWorkCancellation?.Cancel();
+        }
         Error = null;
         BeginMailAction(actionStatus);
         try
@@ -4000,9 +4120,16 @@ public sealed class MainWindowViewModel : ViewModelBase
                 }
             }
 
-            SelectedMessages.Clear();
-            SelectedMessage = Messages.Count == 0 ? null : Messages[Math.Min(firstIndex, Messages.Count - 1)];
+            foreach (var selected in SelectedMessages.Where(message => movedKeys.Contains(MessageKey(message))).ToArray())
+            {
+                SelectedMessages.Remove(selected);
+            }
+            if (selectedWasMoved)
+            {
+                SelectedMessage = Messages.Count == 0 ? null : Messages[Math.Min(firstIndex, Messages.Count - 1)];
+            }
             RaiseMessageState();
+            await RefreshUnifiedCountsAsync();
             Status = successStatus;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -4016,9 +4143,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private async Task ToggleFlagAsync()
+    private Task ToggleFlagAsync() => ToggleFlagMessagesAsync(ActionMessages());
+
+    private async Task ToggleFlagMessagesAsync(IReadOnlyList<MailMessage> messages)
     {
-        var messages = ActionMessages();
         if (messages.Count == 0 || _provider is null || _store is null || _isMailActionRunning)
         {
             return;
@@ -4043,7 +4171,52 @@ public sealed class MainWindowViewModel : ViewModelBase
                 ApplyMessageStateUpdate(message, isFlagged: isFlagged);
             }
 
+            if (!isFlagged && IsFlaggedView)
+            {
+                ReconcileMessages(Messages.Where(static message => message.IsFlagged).ToArray());
+            }
+            await RefreshUnifiedCountsAsync();
+
             Status = isFlagged ? "Message flagged" : "Flag cleared";
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Error = exception.Message;
+            Status = "Action failed";
+        }
+        finally
+        {
+            EndMailAction();
+        }
+    }
+
+    private Task TogglePinAsync() => TogglePinMessagesAsync(ActionMessages());
+
+    private async Task TogglePinMessagesAsync(IReadOnlyList<MailMessage> messages)
+    {
+        if (messages.Count == 0 || _store is null || _isMailActionRunning)
+        {
+            return;
+        }
+
+        var isPinned = !messages[0].IsPinned;
+        BeginMailAction(isPinned ? "Pinning message..." : "Unpinning message...");
+        try
+        {
+            foreach (var message in messages)
+            {
+                await _store.UpdateMessageStateAsync(
+                    message.MailboxId,
+                    message.ProviderId,
+                    isPinned: isPinned);
+                ApplyMessageStateUpdate(message, isPinned: isPinned);
+            }
+            if (!isPinned && IsPinnedView)
+            {
+                ReconcileMessages(Messages.Where(static message => message.IsPinned).ToArray());
+            }
+            await RefreshUnifiedCountsAsync();
+            Status = isPinned ? "Message pinned" : "Message unpinned";
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -4079,13 +4252,16 @@ public sealed class MainWindowViewModel : ViewModelBase
         ((AsyncCommand)JunkCommand).Refresh();
         ((AsyncCommand)NotJunkCommand).Refresh();
         ((AsyncCommand)ToggleFlagCommand).Refresh();
+        ((AsyncCommand)TogglePinCommand).Refresh();
         ((AsyncCommand<MailFolderItem>)MoveToFolderCommand).Refresh();
         ((AsyncCommand)ViewHeadersCommand).Refresh();
     }
 
-    private async Task ViewHeadersAsync()
+    private Task ViewHeadersAsync() =>
+        ViewHeadersAsync(ConversationThread.SelectedMessage?.Message ?? SelectedMessage);
+
+    private async Task ViewHeadersAsync(MailMessage? message)
     {
-        var message = ConversationThread.SelectedMessage?.Message ?? SelectedMessage;
         if (message is null || _provider is null || _isMailActionRunning ||
             !TryGetMessageContext(message, out var account, out var mailbox))
         {
@@ -4165,7 +4341,11 @@ public sealed class MainWindowViewModel : ViewModelBase
         ApplyMessageStateUpdate(message, isRead: isRead);
     }
 
-    private void ApplyMessageStateUpdate(MailMessage message, bool? isRead = null, bool? isFlagged = null)
+    private void ApplyMessageStateUpdate(
+        MailMessage message,
+        bool? isRead = null,
+        bool? isFlagged = null,
+        bool? isPinned = null)
     {
         var current = IsCurrentMessage(message)
             ? SelectedMessage!
@@ -4173,7 +4353,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         ApplyMessageUpdate(current, current with
         {
             IsRead = isRead ?? current.IsRead,
-            IsFlagged = isFlagged ?? current.IsFlagged
+            IsFlagged = isFlagged ?? current.IsFlagged,
+            IsPinned = isPinned ?? current.IsPinned
         });
     }
 
@@ -4271,8 +4452,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         CancellationToken cancellationToken = default)
     {
         var hasCidImages = message?.Body?.Contains("cid:", StringComparison.OrdinalIgnoreCase) == true;
-        if (message is null || (!message.HasAttachments && !hasCidImages) || _provider is null ||
-            !TryGetMessageContext(message, out var account, out var mailbox))
+        if (message is null || (!message.HasAttachments && !hasCidImages) || _provider is null)
         {
             return;
         }
@@ -4280,21 +4460,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         IsLoadingAttachments = true;
         try
         {
-            var attachments = await _provider.GetAttachmentsAsync(
-                account,
-                mailbox,
-                message.ProviderId,
-                cancellationToken);
-            if (hasCidImages)
-            {
-                attachments = await HydrateAttachmentsAsync(
-                    account,
-                    mailbox,
-                    message.ProviderId,
-                    attachments,
-                    static attachment => attachment.IsInline && attachment.Size <= InlineAttachmentLimitBytes,
-                    cancellationToken);
-            }
+            var attachments = await GetAttachmentsAsync(message, cancellationToken);
             if (!IsCurrentMessage(message))
             {
                 return;
@@ -4330,12 +4496,51 @@ public sealed class MainWindowViewModel : ViewModelBase
         MailAttachment attachment,
         CancellationToken cancellationToken = default)
     {
+        var message = SelectedMessage;
+        return message is null
+            ? null
+            : await LoadAttachmentContentAsync(message, attachment, cancellationToken);
+    }
+
+    internal async Task<IReadOnlyList<MailAttachment>> GetAttachmentsAsync(
+        MailMessage message,
+        CancellationToken cancellationToken = default)
+    {
+        if (_provider is null || !TryGetMessageContext(message, out var account, out var mailbox))
+        {
+            return [];
+        }
+        try
+        {
+            var attachments = await _provider.GetAttachmentsAsync(
+                account, mailbox, message.ProviderId, cancellationToken);
+            return message.Body?.Contains("cid:", StringComparison.OrdinalIgnoreCase) == true
+                ? await HydrateAttachmentsAsync(
+                    account,
+                    mailbox,
+                    message.ProviderId,
+                    attachments,
+                    static attachment => attachment.IsInline && attachment.Size <= InlineAttachmentLimitBytes,
+                    cancellationToken)
+                : attachments;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Error = $"Attachments could not be loaded: {exception.Message}";
+            return [];
+        }
+    }
+
+    internal async Task<MailAttachment?> LoadAttachmentContentAsync(
+        MailMessage message,
+        MailAttachment attachment,
+        CancellationToken cancellationToken = default)
+    {
         if (attachment.ContentBytes is not null)
         {
             return attachment;
         }
-        var message = SelectedMessage;
-        if (message is null || _provider is null ||
+        if (_provider is null ||
             !TryGetMessageContext(message, out var account, out var mailbox))
         {
             return null;
@@ -4864,8 +5069,14 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             Drafts.Remove(existing);
         }
-        Drafts.Insert(0, draft);
-        RaiseDraftState();
+        Drafts.Insert(0, draft with
+        {
+            Body = "",
+            Attachments = [],
+            SyncStatus = draft.SyncStatus ?? existing?.SyncStatus,
+            SyncError = draft.SyncError ?? existing?.SyncError
+        });
+        RebuildVisibleDrafts();
     }
 
     public async Task DeleteLocalDraftAsync(string id)
@@ -4904,7 +5115,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private async Task<LocalDraft?> GetStoredDraftAsync(string id) =>
         _store is null
             ? null
-            : (await _store.GetLocalDraftsAsync()).FirstOrDefault(candidate => candidate.Id == id);
+            : await _store.GetLocalDraftAsync(id);
 
     private async Task DeleteLocalDraftRecordAsync(string id)
     {
@@ -4917,7 +5128,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         if (existing is not null)
         {
             Drafts.Remove(existing);
-            RaiseDraftState();
+            RebuildVisibleDrafts();
         }
     }
 
@@ -4928,8 +5139,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         return account is not null && mailbox is not null && mailbox.AccountId == account.AccountId;
     }
 
-    internal Task OpenLocalDraftAsync(LocalDraft draft)
+    internal async Task OpenLocalDraftAsync(LocalDraft draft)
     {
+        draft = await GetStoredDraftAsync(draft.Id) ?? draft;
         IsSettingsOpen = false;
         ActiveModule = "Mail";
         ComposeRequested?.Invoke(new ComposeRequest(
@@ -4944,8 +5156,6 @@ public sealed class MainWindowViewModel : ViewModelBase
             draft.Attachments,
             draft.IsHtml,
             ConversationIdentity: draft.ConversationIdentity));
-
-        return Task.CompletedTask;
     }
 
     private Task ReplyAsync()
@@ -5264,16 +5474,39 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private void HandleConversationAction(ConversationActionRequest request)
-    {
-        _ = request.Action switch
+    private Task HandleConversationAction(ConversationActionRequest request) =>
+        request.Action switch
         {
             ConversationAction.Reply => ReplyToAsync(request.Message),
             ConversationAction.ReplyAll => ReplyAllToAsync(request.Message),
             ConversationAction.Forward => ForwardMessageAsync(request.Message),
             _ => Task.CompletedTask
         };
-    }
+
+    internal IReadOnlyList<MailFolderItem> MoveFoldersFor(MailMessage message) =>
+        Folders.Where(folder => folder.MailboxId == message.MailboxId && folder.ProviderId != message.FolderId)
+            .ToArray();
+
+    internal Task HandlePreviewActionAsync(ConversationActionRequest request) => request.Action switch
+    {
+        ConversationAction.Reply => ReplyToAsync(request.Message),
+        ConversationAction.ReplyAll => ReplyAllToAsync(request.Message),
+        ConversationAction.Forward => ForwardMessageAsync(request.Message),
+        ConversationAction.Archive => MoveMessagesAsync([request.Message], "archive", "Archiving...", "Archived"),
+        ConversationAction.Delete => MoveMessagesAsync([request.Message], "deleteditems", "Moving to Deleted Items...", "Moved to Deleted Items"),
+        ConversationAction.Junk => MoveMessagesAsync([request.Message], "junkemail", "Moving to Junk Email...", "Moved to Junk Email"),
+        ConversationAction.NotJunk => MoveMessagesAsync([request.Message], "inbox", "Moving to Inbox...", "Marked as not junk"),
+        ConversationAction.ToggleRead => ToggleReadMessagesAsync([request.Message]),
+        ConversationAction.ToggleFlag => ToggleFlagMessagesAsync([request.Message]),
+        ConversationAction.TogglePin => TogglePinMessagesAsync([request.Message]),
+        ConversationAction.ViewHeaders => ViewHeadersAsync(request.Message),
+        ConversationAction.Move when request.Destination is not null => MoveMessagesAsync(
+            [request.Message],
+            request.Destination.ProviderId,
+            $"Moving to {request.Destination.DisplayName}...",
+            $"Moved to {request.Destination.DisplayName}"),
+        _ => Task.CompletedTask
+    };
 
     private void RaiseDraftState()
     {
@@ -5281,6 +5514,23 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(HasDrafts));
         RaisePropertyChanged(nameof(CurrentItemCountText));
         RaisePropertyChanged(nameof(ShowDraftEmptyState));
+        RaisePropertyChanged(nameof(SyncIssueCount));
+        RaisePropertyChanged(nameof(DraftConflictCount));
+        RaisePropertyChanged(nameof(SyncIssueCountText));
+        RaisePropertyChanged(nameof(DraftConflictCountText));
+    }
+
+    private void RebuildVisibleDrafts()
+    {
+        var visible = _draftListFilter switch
+        {
+            DraftListFilter.SyncIssues => Drafts.Where(static draft => draft.HasSyncIssue),
+            DraftListFilter.Conflicts => Drafts.Where(static draft => draft.HasSyncConflict),
+            _ => Drafts.AsEnumerable()
+        };
+        Replace(VisibleDrafts, visible.OrderByDescending(static draft => draft.UpdatedAt));
+        ConversationThread.ReconcileDrafts(Drafts);
+        RaiseDraftState();
     }
 
     private static void Replace<T>(ObservableCollection<T> destination, IEnumerable<T> source)
@@ -5291,6 +5541,13 @@ public sealed class MainWindowViewModel : ViewModelBase
             destination.Add(item);
         }
     }
+}
+
+internal enum DraftListFilter
+{
+    All,
+    SyncIssues,
+    Conflicts
 }
 
 public sealed class MailFolderItem(MailFolder folder, string mailboxDisplayName) : ViewModelBase

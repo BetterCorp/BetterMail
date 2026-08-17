@@ -215,7 +215,7 @@ public sealed class MainWindowXamlTests
         Assert.Contains("x:Name=" + (char)34 + "SettingsSurface" + (char)34 + " Grid.Row=" + (char)34 + "0" + (char)34 + " Grid.RowSpan=" + (char)34 + "3" + (char)34, xaml);
         Assert.Contains("x:Name=" + (char)34 + "FullAppLoader" + (char)34, xaml);
         Assert.Contains(BindingAttribute("IsVisible", "ShowFullScreenLoader"), xaml);
-        Assert.Contains("ItemsSource=" + (char)34 + "{Binding Drafts}" + (char)34, xaml);
+        Assert.Contains("ItemsSource=" + (char)34 + "{Binding VisibleDrafts}" + (char)34, xaml);
         Assert.Contains("Height=" + (char)34 + "{ReflectionBinding $parent[Window].DataContext.MessageRowHeight}" + (char)34, xaml);
         Assert.Contains("x:Name=" + (char)34 + "PeopleCards" + (char)34, xaml);
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding ContactOwners}" + (char)34, xaml);

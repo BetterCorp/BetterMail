@@ -41,6 +41,11 @@ public sealed partial class ComposeWindow : Window
             _dialogResult = true;
             Close();
         };
+        viewModel.Deleted += (_, _) =>
+        {
+            _closeAfterSave = true;
+            Close(false);
+        };
         DataContext = viewModel;
     }
 

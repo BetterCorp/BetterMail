@@ -462,6 +462,11 @@ public interface IDraftStore
 {
     Task SaveLocalDraftAsync(LocalDraft draft, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<LocalDraft>> GetLocalDraftsAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<LocalDraft>> GetLocalDraftSummariesAsync(CancellationToken cancellationToken = default) =>
+        GetLocalDraftsAsync(cancellationToken);
+    async Task<LocalDraft?> GetLocalDraftAsync(string id, CancellationToken cancellationToken = default) =>
+        (await GetLocalDraftsAsync(cancellationToken).ConfigureAwait(false))
+            .FirstOrDefault(draft => draft.Id == id);
     Task DeleteLocalDraftAsync(string id, CancellationToken cancellationToken = default);
     Task UpdateLocalDraftSyncMetadataAsync(
         string id,
@@ -469,6 +474,11 @@ public interface IDraftStore
         DateTimeOffset syncedLocalUpdatedAt,
         DateTimeOffset providerUpdatedAt,
         string? providerETag,
+        CancellationToken cancellationToken = default);
+    Task UpdateLocalDraftSyncIssueAsync(
+        string id,
+        DraftSyncStatus? status,
+        string? error,
         CancellationToken cancellationToken = default);
 }
 

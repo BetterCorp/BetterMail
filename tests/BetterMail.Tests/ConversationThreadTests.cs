@@ -39,7 +39,7 @@ public sealed class ConversationThreadTests
         var renderer = new MailContentRenderer();
         var viewModel = new ConversationThreadViewModel(
             renderer,
-            request => action = request,
+            request => { action = request; return Task.CompletedTask; },
             location: message => $"Account / {message.FolderId}");
         var old = Message(
             "mailbox-a", "old", "thread", "<old@example>", 1,
@@ -82,6 +82,31 @@ public sealed class ConversationThreadTests
         viewModel.ReplyAllCommand.Execute(null);
         Assert.Equal(ConversationAction.ReplyAll, action?.Action);
         Assert.Equal("middle", action?.Message.ProviderId);
+    }
+
+    [Fact]
+    public async Task PreviewActionsUseThePreviewMessageAndDestination()
+    {
+        var requests = new List<ConversationActionRequest>();
+        var destination = new MailFolderItem(
+            new MailFolder("mailbox", "archive", "Archive", 0, 0, "archive"),
+            "Mailbox");
+        var message = Message("mailbox", "message", "thread", null, 1);
+        var viewModel = new ConversationThreadViewModel(
+            action: request => { requests.Add(request); return Task.CompletedTask; },
+            moveFolders: _ => [destination],
+            showActions: true);
+        viewModel.Reconcile([message], message);
+
+        viewModel.TogglePinCommand.Execute(null);
+        await WaitUntilAsync(() => requests.Count == 1);
+        Assert.Equal(ConversationAction.TogglePin, requests[0].Action);
+        Assert.True(viewModel.SelectedMessage!.Message.IsPinned);
+
+        viewModel.MoveToFolderCommand.Execute(destination);
+        await WaitUntilAsync(() => requests.Count == 2);
+        Assert.Equal(ConversationAction.Move, requests[1].Action);
+        Assert.Same(destination, requests[1].Destination);
     }
 
     [Fact]
@@ -208,6 +233,42 @@ public sealed class ConversationThreadTests
     }
 
     [Fact]
+    public async Task PreviewAttachmentsFollowTheSelectedThreadMessage()
+    {
+        var first = Message("mailbox", "first", "thread", null, 1) with { HasAttachments = true };
+        var second = Message("mailbox", "second", "thread", null, 2) with { HasAttachments = true };
+        var firstResult = new TaskCompletionSource<IReadOnlyList<MailAttachment>>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondAttachment = new MailAttachment(
+            "second-file", "second.txt", "text/plain", 4, false, null, null);
+        MailMessage? openedMessage = null;
+        var viewModel = new ConversationThreadViewModel(
+            showActions: true,
+            loadAttachments: message => message.ProviderId == "first"
+                ? firstResult.Task
+                : Task.FromResult<IReadOnlyList<MailAttachment>>([secondAttachment]),
+            openAttachment: (message, _) =>
+            {
+                openedMessage = message;
+                return Task.CompletedTask;
+            });
+
+        viewModel.Reconcile([first, second], first);
+        viewModel.SelectMessageCommand.Execute(
+            viewModel.SelectedThread!.Messages.Single(item => item.Message.ProviderId == "second"));
+
+        await WaitUntilAsync(() => viewModel.Attachments.Count == 1);
+        firstResult.SetResult(
+            [new MailAttachment("first-file", "first.txt", "text/plain", 4, false, null, null)]);
+        await Task.Delay(20, TestContext.Current.CancellationToken);
+        Assert.Same(secondAttachment, Assert.Single(viewModel.Attachments));
+
+        viewModel.OpenAttachmentCommand.Execute(secondAttachment);
+        await WaitUntilAsync(() => openedMessage is not null);
+        Assert.Equal("second", openedMessage!.ProviderId);
+    }
+
+    [Fact]
     public async Task ShowsAndOpensDraftsForTheSelectedConversation()
     {
         var opened = new TaskCompletionSource<LocalDraft>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -221,9 +282,10 @@ public sealed class ConversationThreadTests
             "draft", "account", "mailbox", "to@example.com", "", "", "Reply", "Body", [],
             DateTimeOffset.UtcNow,
             ConversationIdentity: ConversationThread.ThreadIdentity(message));
+        var conflict = draft with { Id = "conflict", SyncStatus = DraftSyncStatus.Conflict };
 
         viewModel.Reconcile([message], message);
-        viewModel.ReconcileDrafts([draft]);
+        viewModel.ReconcileDrafts([draft, conflict]);
 
         Assert.Equal("2 items", viewModel.ThreadItemCountText);
         Assert.Same(draft, Assert.Single(viewModel.Drafts));

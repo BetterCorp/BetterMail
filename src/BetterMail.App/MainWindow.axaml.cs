@@ -91,7 +91,7 @@ public sealed partial class MainWindow : Window
     {
         var nextMode = LayoutModeFor(width);
         InlineMailActions.IsVisible = UsesInlineMailActions(width);
-        GlobalSearchResultsPanel.Width = Math.Clamp(width - (nextMode == ResponsiveLayoutMode.Phone ? 24 : 360), 300, 1000);
+        GlobalSearchResultsPanel.Width = Math.Max(width - (nextMode == ResponsiveLayoutMode.Phone ? 24 : 360), 300);
         if (_layoutInitialized && _layoutMode == nextMode)
         {
             return;
@@ -638,12 +638,29 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        Window window = null!;
         var previewViewModel = new ConversationThreadViewModel(
             loadMessage: message => viewModel.GetCachedMessageAsync(message),
-            openDraft: viewModel.OpenLocalDraftAsync);
+            openDraft: viewModel.OpenLocalDraftAsync,
+            action: viewModel.HandlePreviewActionAsync,
+            moveFolders: viewModel.MoveFoldersFor,
+            showActions: true,
+            loadAttachments: message => viewModel.GetAttachmentsAsync(message),
+            openAttachment: async (message, attachment) =>
+            {
+                var hydrated = await viewModel.LoadAttachmentContentAsync(message, attachment);
+                if (hydrated is not null && window is not null)
+                {
+                    new FilePreviewWindow(
+                        hydrated.Name,
+                        hydrated.ContentType,
+                        hydrated.Size,
+                        hydrated.ContentBytes).Show(window);
+                }
+            });
         previewViewModel.Reconcile(preview.Messages, preview.Selected);
         previewViewModel.ReconcileDrafts(preview.Drafts);
-        var window = new Window
+        window = new Window
         {
             Title = preview.Selected.Subject,
             Icon = Icon,
@@ -683,6 +700,8 @@ public sealed partial class MainWindow : Window
         Execute(_viewModel?.NotJunkCommand);
     private void MessageFlagClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
         Execute(_viewModel?.ToggleFlagCommand);
+    private void MessagePinClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
+        Execute(_viewModel?.TogglePinCommand);
     private void MessageReadClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
         Execute(_viewModel?.ToggleReadCommand);
     private void MessageHeadersClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>

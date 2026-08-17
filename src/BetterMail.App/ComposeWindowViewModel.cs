@@ -70,6 +70,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
             Attachments.Add(attachment);
         }
         SendCommand = new AsyncCommand(SendAsync, () => SelectedSender is not null && !IsSending);
+        DeleteCommand = new AsyncCommand(DeleteSavedDraftAsync, () => _deleteDraft is not null && !IsSending);
         RemoveAttachmentCommand = new AsyncCommand<DraftAttachment>(RemoveAttachmentAsync);
         if (HasContent())
         {
@@ -78,6 +79,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
     }
 
     public event EventHandler? Sent;
+    public event EventHandler? Deleted;
     internal string DraftId => _draftId;
     public ObservableCollection<ComposeSender> Senders { get; }
     public ObservableCollection<DraftAttachment> Attachments { get; } = [];
@@ -86,6 +88,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
     public ComposeRecipientField CcField { get; }
     public ComposeRecipientField BccField { get; }
     public ICommand SendCommand { get; }
+    public ICommand DeleteCommand { get; }
     public ICommand RemoveAttachmentCommand { get; }
 
     public ComposeSender? SelectedSender
@@ -96,6 +99,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
             if (SetProperty(ref _selectedSender, value))
             {
                 ((AsyncCommand)SendCommand).Refresh();
+                ((AsyncCommand)DeleteCommand).Refresh();
                 ApplySignatureForSender(value);
                 ScheduleAutosave();
             }
@@ -397,6 +401,8 @@ public sealed class ComposeWindowViewModel : ViewModelBase
 
     private async Task DeleteSavedDraftAsync()
     {
+        _autosaveCancellation?.Cancel();
+        _sent = true;
         await _draftGate.WaitAsync();
         try
         {
@@ -404,6 +410,13 @@ public sealed class ComposeWindowViewModel : ViewModelBase
             {
                 await _deleteDraft(_draftId);
             }
+            DraftStatus = "";
+            Deleted?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _sent = false;
+            Error = $"Draft could not be deleted: {exception.Message}";
         }
         finally
         {

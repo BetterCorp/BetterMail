@@ -278,6 +278,7 @@
                   <Border Height="1" Background="{DynamicResource BetterMailDividerBrush}" Margin="4" />
                   <Button Classes="command" Content="Junk" HorizontalContentAlignment="Left" Click="MessageJunkClicked" AutomationProperties.Name="Mark selected message as junk" />
                   <Button Classes="command" Content="{Binding ToggleFlagText}" HorizontalContentAlignment="Left" Click="MessageFlagClicked" AutomationProperties.Name="{Binding ToggleFlagText}" />
+                  <Button Classes="command" Content="{Binding TogglePinText}" HorizontalContentAlignment="Left" Command="{Binding TogglePinCommand}" AutomationProperties.Name="{Binding TogglePinText}" />
                   <Button Classes="command" Content="{Binding ToggleReadText}" HorizontalContentAlignment="Left" Click="MessageReadClicked" AutomationProperties.Name="{Binding ToggleReadText}" />
                   <Button Classes="command" Content="View headers" HorizontalContentAlignment="Left" Command="{Binding ViewHeadersCommand}" AutomationProperties.Name="View internet message headers" />
                 </StackPanel>
@@ -337,10 +338,24 @@
                     AutomationProperties.Name="Unified Inbox" TabIndex="40">
               <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Text="Unified Inbox" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="{Binding MessageCountText}" FontWeight="SemiBold" Foreground="#0F6CBD" Margin="6,0,1,0" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{Binding UnifiedMessageCountText}" FontWeight="SemiBold" Foreground="#0F6CBD" Margin="6,0,1,0" VerticalAlignment="Center" />
               </Grid>
             </Button>
-            <Button Classes="folder" Classes.selected="{Binding IsDraftsView}"
+            <Button Classes="folder" Classes.selected="{Binding IsPinnedView}" Command="{Binding ShowPinnedCommand}"
+                    Margin="18,0,0,0" Click="FolderSelectedClicked" AutomationProperties.Name="Pinned messages">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="Pinned" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{Binding PinnedMessageCountText}" FontWeight="SemiBold" Foreground="#0F6CBD" Margin="6,0,1,0" />
+              </Grid>
+            </Button>
+            <Button Classes="folder" Classes.selected="{Binding IsFlaggedView}" Command="{Binding ShowFlaggedCommand}"
+                    Margin="18,0,0,0" Click="FolderSelectedClicked" AutomationProperties.Name="Flagged messages">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="Flagged" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{Binding FlaggedMessageCountText}" FontWeight="SemiBold" Foreground="#0F6CBD" Margin="6,0,1,0" />
+              </Grid>
+            </Button>
+            <Button Classes="folder" Classes.selected="{Binding IsAllDraftsView}"
                     Command="{Binding ShowDraftsCommand}"
                     Click="FolderSelectedClicked"
                     AutomationProperties.Name="Open Drafts">
@@ -349,6 +364,28 @@
                 <TextBlock Grid.Column="1" Text="{Binding Drafts.Count}" FontWeight="SemiBold" Foreground="#0F6CBD" Margin="6,0,1,0" VerticalAlignment="Center" />
               </Grid>
             </Button>
+            <Expander Margin="0,1" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+              <Expander.Header>
+                <Grid ColumnDefinitions="*,Auto" HorizontalAlignment="Stretch">
+                  <TextBlock Text="Sync issues" FontWeight="SemiBold" />
+                  <TextBlock Grid.Column="1" Text="{Binding SyncIssueCountText}" FontWeight="SemiBold" Foreground="#D13438" Margin="6,0,1,0" />
+                </Grid>
+              </Expander.Header>
+              <StackPanel Margin="18,2,0,3">
+                <Button Classes="folder" Classes.selected="{Binding IsSyncIssuesView}" Command="{Binding ShowSyncIssuesCommand}" Click="FolderSelectedClicked">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Text="All issues" />
+                    <TextBlock Grid.Column="1" Text="{Binding SyncIssueCountText}" Foreground="#D13438" />
+                  </Grid>
+                </Button>
+                <Button Classes="folder" Classes.selected="{Binding IsDraftConflictsView}" Command="{Binding ShowDraftConflictsCommand}" Click="FolderSelectedClicked">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Text="Conflicts" />
+                    <TextBlock Grid.Column="1" Text="{Binding DraftConflictCountText}" Foreground="#D13438" />
+                  </Grid>
+                </Button>
+              </StackPanel>
+            </Expander>
 
             <TextBlock Text="ACCOUNTS" FontSize="11" FontWeight="SemiBold" Opacity="0.65" Margin="4,12,4,3" />
             <ItemsControl ItemsSource="{Binding FolderGroups}" HorizontalAlignment="Stretch">
@@ -516,6 +553,7 @@
                       <MenuItem Header="Not junk" Click="MessageNotJunkClicked" AutomationProperties.Name="Mark message as not junk" />
                       <MenuItem Header="Move to folder" SubmenuOpened="MoveMenuOpened" AutomationProperties.Name="Move message to folder" />
                       <MenuItem Header="Flag or clear flag" Click="MessageFlagClicked" AutomationProperties.Name="Toggle message flag" />
+                      <MenuItem Header="Pin or unpin" Click="MessagePinClicked" AutomationProperties.Name="Toggle message pin" />
                       <MenuItem Header="Mark read or unread" Click="MessageReadClicked" AutomationProperties.Name="Toggle message read state" />
                       <MenuItem Header="View message headers" Click="MessageHeadersClicked" AutomationProperties.Name="View message headers" />
                     </ContextMenu>
@@ -536,13 +574,14 @@
                                  FontSize="11" Opacity="0.62" />
                     </Grid>
 
-                    <Grid Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" ColumnDefinitions="*,Auto,Auto">
+                    <Grid Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" ColumnDefinitions="*,Auto,Auto,Auto">
                       <TextBlock Classes="mailRowTitle" Classes.unread="{Binding IsUnread}"
                                  Text="{Binding Subject}" TextTrimming="CharacterEllipsis" />
                       <TextBlock Grid.Column="1" Text="&#x1F4CE;" FontFamily="Segoe UI Symbol"
                                  IsVisible="{Binding HasAttachments}" Margin="7,0,0,0" Opacity="0.65"
                                  ToolTip.Tip="Has attachments" />
                       <TextBlock Grid.Column="2" Text="⚑" IsVisible="{Binding IsFlagged}" Margin="7,0,0,0" Foreground="#C75000" ToolTip.Tip="Flagged" />
+                      <TextBlock Grid.Column="3" Text="&#x1F4CC;" IsVisible="{Binding IsPinned}" Margin="7,0,0,0" ToolTip.Tip="Pinned" />
                     </Grid>
 
                     <Grid Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" ColumnDefinitions="*,Auto">
@@ -641,6 +680,7 @@
                                       <Border Height="1" Background="{DynamicResource BetterMailDividerBrush}" Margin="4" />
                                       <Button Classes="command" Content="Junk" HorizontalContentAlignment="Left" Click="MessageJunkClicked" />
                                       <Button Classes="command" Content="{ReflectionBinding $parent[Window].DataContext.ToggleFlagText}" HorizontalContentAlignment="Left" Click="MessageFlagClicked" />
+                                      <Button Classes="command" Content="{ReflectionBinding $parent[Window].DataContext.TogglePinText}" HorizontalContentAlignment="Left" Command="{ReflectionBinding $parent[Window].DataContext.TogglePinCommand}" />
                                       <Button Classes="command" Content="{ReflectionBinding $parent[Window].DataContext.ToggleReadText}" HorizontalContentAlignment="Left" Click="MessageReadClicked" />
                                       <Button Classes="command" Content="View headers" HorizontalContentAlignment="Left"
                                               Command="{ReflectionBinding $parent[Window].DataContext.ViewHeadersCommand}" />
@@ -670,7 +710,7 @@
                   Padding="14,6"
                   AutomationProperties.Name="Load older messages" />
 
-          <ListBox ItemsSource="{Binding Drafts}"
+          <ListBox ItemsSource="{Binding VisibleDrafts}"
                    Grid.RowSpan="2"
                    IsVisible="{Binding IsDraftsView}"
                    Background="Transparent"
@@ -699,10 +739,15 @@
                         CommandParameter="{Binding}"
                         AutomationProperties.Name="{Binding DisplaySubject, StringFormat='Open draft {0}'}">
                   <Grid ColumnDefinitions="*,Auto" RowDefinitions="18,18,18" RowSpacing="1">
-                    <TextBlock Text="Draft" FontWeight="SemiBold" Foreground="{DynamicResource BetterMailAccentBrush}" />
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="Draft" FontWeight="SemiBold" Foreground="{DynamicResource BetterMailAccentBrush}" />
+                      <Border Background="#22D13438" CornerRadius="2" Padding="5,1" IsVisible="{Binding HasSyncIssue}">
+                        <TextBlock Text="{Binding SyncStatusText}" Foreground="#D13438" FontSize="10" FontWeight="SemiBold" />
+                      </Border>
+                    </StackPanel>
                     <TextBlock Grid.Column="1" Text="{Binding LocalUpdatedAt, StringFormat='{}{0:MMM d, HH:mm}'}" FontSize="11" Opacity="0.62" />
                     <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding DisplaySubject}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                    <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding To, StringFormat='To: {0}'}" FontSize="11" Opacity="0.62" TextTrimming="CharacterEllipsis" Margin="0,1,0,1" VerticalAlignment="Center" />
+                    <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding DetailText}" FontSize="11" Opacity="0.62" TextTrimming="CharacterEllipsis" Margin="0,1,0,1" VerticalAlignment="Center" />
                   </Grid>
                 </Button>
               </DataTemplate>

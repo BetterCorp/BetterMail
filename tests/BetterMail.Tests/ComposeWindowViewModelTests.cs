@@ -160,6 +160,35 @@ public sealed class ComposeWindowViewModelTests
     }
 
     [Fact]
+    public async Task DeleteCommandRemovesAutosavedDraftWithoutRecreatingItOnClose()
+    {
+        var account = new MailAccount("microsoft365", "account", "tenant", "person@example.com", "Person", ProviderCapabilities.Mail);
+        var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+        var saved = 0;
+        string? deleted = null;
+        var closed = false;
+        var viewModel = new ComposeWindowViewModel(
+            [account],
+            [mailbox],
+            new ComposeRequest(Subject: "Saved draft", DraftId: "draft-id"),
+            (_, _, _) => Task.CompletedTask,
+            _ => { saved++; return Task.CompletedTask; },
+            id => { deleted = id; return Task.CompletedTask; });
+        viewModel.Deleted += (_, _) => closed = true;
+
+        viewModel.DeleteCommand.Execute(null);
+        for (var attempt = 0; attempt < 50 && !closed; attempt++)
+        {
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+        await viewModel.FlushDraftAsync();
+
+        Assert.Equal("draft-id", deleted);
+        Assert.True(closed);
+        Assert.Equal(0, saved);
+    }
+
+    [Fact]
     public void AcceptsGraphLargeAttachmentsAndRejectsFilesOver150Mb()
     {
         var account = new MailAccount("microsoft365", "account", "tenant", "person@example.com", "Person", ProviderCapabilities.Mail);

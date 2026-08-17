@@ -95,12 +95,13 @@
                         Placeholder="Write something useful…"
                         AutomationProperties.Name="Rich text message body" />
 
-    <Grid Grid.Row="5" ColumnDefinitions="*,Auto,Auto" Margin="0,14,0,0">
+    <Grid Grid.Row="5" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,14,0,0">
       <StackPanel VerticalAlignment="Center">
         <TextBlock Text="{Binding DraftStatus}" FontSize="11" Opacity="0.6" />
       </StackPanel>
-      <Button Grid.Column="1" Content="Cancel" Click="CancelClicked" Margin="8,0" IsEnabled="{Binding !IsSending}" />
-      <Button Grid.Column="2" Classes="primary" Click="SendClicked"
+      <Button Grid.Column="1" Classes="command" Content="Delete draft" Command="{Binding DeleteCommand}" IsEnabled="{Binding !IsSending}" />
+      <Button Grid.Column="2" Content="Cancel" Click="CancelClicked" Margin="8,0" IsEnabled="{Binding !IsSending}" />
+      <Button Grid.Column="3" Classes="primary" Click="SendClicked"
               IsEnabled="{Binding !IsSending}" AutomationProperties.Name="Send message">
         <Grid MinWidth="52">
           <TextBlock Text="Send" HorizontalAlignment="Center" IsVisible="{Binding !IsSending}" />

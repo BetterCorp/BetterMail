@@ -227,6 +227,15 @@ public sealed class EncryptedMailStoreTests
             Assert.Equal(draft.Subject, savedDraft.Subject);
             Assert.Equal(draft.ConversationIdentity, savedDraft.ConversationIdentity);
             Assert.Equal("notes.txt", Assert.Single(savedDraft.Attachments).Name);
+            var draftSummary = Assert.Single(await store.GetLocalDraftSummariesAsync(cancellationToken));
+            Assert.Empty(draftSummary.Body);
+            Assert.Empty(draftSummary.Attachments);
+            Assert.Equal("notes.txt", Assert.Single((await store.GetLocalDraftAsync(draft.Id, cancellationToken))!.Attachments).Name);
+            await store.UpdateLocalDraftSyncIssueAsync(
+                draft.Id, DraftSyncStatus.Conflict, "Both copies changed", cancellationToken);
+            draftSummary = Assert.Single(await store.GetLocalDraftSummariesAsync(cancellationToken));
+            Assert.True(draftSummary.HasSyncConflict);
+            Assert.Equal("Both copies changed", draftSummary.SyncError);
             var providerUpdatedAt = DateTimeOffset.UtcNow.AddSeconds(1);
             await store.UpdateLocalDraftSyncMetadataAsync(
                 draft.Id,
@@ -482,6 +491,12 @@ public sealed class EncryptedMailStoreTests
             var stateOnlyUpdate = (await store.GetMessageAsync(mailbox.Id, "new-a", cancellationToken))!;
             Assert.True(stateOnlyUpdate.IsRead);
             Assert.True(stateOnlyUpdate.IsFlagged);
+            await store.UpdateMessageStateAsync(
+                mailbox.Id, "new-a", isPinned: true, cancellationToken: cancellationToken);
+            Assert.True((await store.GetMessageAsync(mailbox.Id, "new-a", cancellationToken))!.IsPinned);
+            Assert.Equal(1, await store.GetFilteredMessageCountAsync([], MailMessageFilter.Pinned, cancellationToken));
+            Assert.Equal("new-a", Assert.Single((await store.GetMessagesPageAsync(
+                [], cancellationToken: cancellationToken, filter: MailMessageFilter.Pinned)).Messages).ProviderId);
             Assert.Equal("Current searchable body", stateOnlyUpdate.Body);
             var search = Assert.Single(await store.SearchAsync("platypus", cancellationToken: cancellationToken));
             Assert.Null(search.Body);

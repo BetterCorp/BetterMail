@@ -49,7 +49,7 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
             throw new InvalidOperationException("The provider returned a draft owned by another account or mailbox.");
         }
         var remoteById = remoteDrafts.ToDictionary(static draft => draft.ProviderId, StringComparer.Ordinal);
-        var localDrafts = (await store.GetLocalDraftsAsync(cancellationToken).ConfigureAwait(false))
+        var localDrafts = (await store.GetLocalDraftSummariesAsync(cancellationToken).ConfigureAwait(false))
             .Where(draft => draft.AccountId == account.AccountId && draft.MailboxId == mailbox.Id)
             .ToArray();
         var mappedRemoteIds = localDrafts
@@ -65,10 +65,11 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
             {
                 if (string.IsNullOrWhiteSpace(local.ProviderDraftId))
                 {
+                    var full = await GetFullDraftAsync(local, cancellationToken).ConfigureAwait(false);
                     var created = await provider.CreateDraftAsync(
-                        account, mailbox, ToMessage(local), cancellationToken).ConfigureAwait(false);
+                        account, mailbox, ToMessage(full), cancellationToken).ConfigureAwait(false);
                     ValidateOwner(account, mailbox, created);
-                    await SaveMetadataAsync(local, created, cancellationToken).ConfigureAwait(false);
+                    await SaveMetadataAsync(full, created, cancellationToken).ConfigureAwait(false);
                     results.Add(new(local.Id, created.ProviderId, DraftSyncStatus.CreatedRemote));
                     continue;
                 }
@@ -109,10 +110,11 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
                 }
                 else if (localChanged)
                 {
+                    var full = await GetFullDraftAsync(local, cancellationToken).ConfigureAwait(false);
                     var updated = await provider.UpdateDraftAsync(
-                        account, mailbox, remote.ProviderId, ToMessage(local), cancellationToken).ConfigureAwait(false);
+                        account, mailbox, remote.ProviderId, ToMessage(full), cancellationToken).ConfigureAwait(false);
                     ValidateOwner(account, mailbox, updated);
-                    await SaveMetadataAsync(local, updated, cancellationToken).ConfigureAwait(false);
+                    await SaveMetadataAsync(full, updated, cancellationToken).ConfigureAwait(false);
                     results.Add(new(local.Id, updated.ProviderId, DraftSyncStatus.UpdatedRemote));
                 }
                 else if (remoteChanged)
@@ -157,8 +159,23 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
             }
         }
 
+        foreach (var item in results)
+        {
+            var issue = item.Status is DraftSyncStatus.Conflict or DraftSyncStatus.MissingRemote or
+                DraftSyncStatus.UnsupportedAttachment or DraftSyncStatus.Failed;
+            await store.UpdateLocalDraftSyncIssueAsync(
+                item.LocalDraftId,
+                issue ? item.Status : null,
+                issue ? item.Error : null,
+                cancellationToken).ConfigureAwait(false);
+        }
+
         return new DraftSyncResult(results);
     }
+
+    private async Task<LocalDraft> GetFullDraftAsync(LocalDraft draft, CancellationToken cancellationToken) =>
+        await store.GetLocalDraftAsync(draft.Id, cancellationToken).ConfigureAwait(false) ??
+        throw new InvalidOperationException("The local draft no longer exists.");
 
     private Task SaveMetadataAsync(
         LocalDraft local,

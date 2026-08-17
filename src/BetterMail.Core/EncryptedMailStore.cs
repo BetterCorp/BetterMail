@@ -45,6 +45,13 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             await ExecuteAsync(connection, "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;", cancellationToken).ConfigureAwait(false);
             await ExecuteAsync(connection, Schema, cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "messages", "is_flagged", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
+            await EnsureColumnAsync(connection, "messages", "is_pinned", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
+            await ExecuteAsync(connection, """
+                CREATE INDEX IF NOT EXISTS messages_pinned
+                    ON messages(mailbox_id, folder_id, received_at DESC) WHERE is_pinned = 1;
+                CREATE INDEX IF NOT EXISTS messages_flagged
+                    ON messages(mailbox_id, folder_id, received_at DESC) WHERE is_flagged = 1;
+                """, cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "messages", "cc_recipients_json", "TEXT NOT NULL DEFAULT '[]'", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "messages", "body_blob", "BLOB", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "mail_folders", "parent_provider_id", "TEXT", cancellationToken).ConfigureAwait(false);
@@ -55,6 +62,8 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             await EnsureColumnAsync(connection, "local_drafts", "provider_updated_at", "TEXT", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "local_drafts", "provider_etag", "TEXT", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "local_drafts", "conversation_identity", "TEXT", cancellationToken).ConfigureAwait(false);
+            await EnsureColumnAsync(connection, "local_drafts", "sync_status", "TEXT", cancellationToken).ConfigureAwait(false);
+            await EnsureColumnAsync(connection, "local_drafts", "sync_error", "TEXT", cancellationToken).ConfigureAwait(false);
             await RunOnceAsync(connection, "thread-index-v1", BackfillThreadIndex, cancellationToken).ConfigureAwait(false);
             _optimizedSearch = await MigrationCompleteAsync(connection, "message-search-v2", cancellationToken).ConfigureAwait(false);
             _correspondentsReady = await MigrationCompleteAsync(connection, "message-correspondents-v1", cancellationToken).ConfigureAwait(false);
@@ -433,7 +442,8 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         IReadOnlyList<MailFolderKey> folders,
         MailPageCursor? cursor = null,
         int pageSize = 200,
-        CancellationToken cancellationToken = default) =>
+        CancellationToken cancellationToken = default,
+        MailMessageFilter filter = MailMessageFilter.All) =>
         WithLockAsync(async connection =>
         {
             var messages = new List<MailMessage>();
@@ -457,6 +467,10 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                 command.Parameters.AddWithValue("$received", cursor.ReceivedAt.ToString("O", CultureInfo.InvariantCulture));
                 command.Parameters.AddWithValue("$rowid", cursor.RowId);
             }
+            if (filter != MailMessageFilter.All)
+            {
+                filters.Add(filter == MailMessageFilter.Pinned ? "is_pinned = 1" : "is_flagged = 1");
+            }
 
             var limit = Math.Clamp(pageSize, 1, 500);
             command.Parameters.AddWithValue("$limit", limit);
@@ -464,7 +478,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                 SELECT mailbox_id, provider_id, conversation_id, internet_message_id, folder_id, subject,
                        from_name, from_address, recipients_json, received_at, preview, NULL, is_html,
                        is_read, has_attachments, importance, categories_json, etag, is_flagged,
-                       cc_recipients_json, NULL, rowid
+                       cc_recipients_json, NULL, is_pinned, rowid
                 FROM messages {(filters.Count == 0 ? "" : $"WHERE {string.Join(" AND ", filters)}")}
                 ORDER BY received_at DESC, rowid DESC LIMIT $limit;
                 """;
@@ -472,12 +486,66 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 messages.Add(ReadMessage(reader));
-                lastRowId = reader.GetInt64(21);
+                lastRowId = reader.GetInt64(22);
             }
 
             return new MailPage(
                 messages,
                 messages.Count == limit ? new(messages[^1].ReceivedAt, lastRowId) : null);
+        }, cancellationToken);
+
+    public Task<int> GetFilteredMessageCountAsync(
+        IReadOnlyList<MailFolderKey> folders,
+        MailMessageFilter filter,
+        CancellationToken cancellationToken = default) =>
+        WithLockAsync<int>(async connection =>
+        {
+            var clauses = new List<string>();
+            await using var command = connection.CreateCommand();
+            if (folders.Count > 0)
+            {
+                var folderClauses = new List<string>(folders.Count);
+                for (var index = 0; index < folders.Count; index++)
+                {
+                    folderClauses.Add($"(mailbox_id = $mailbox{index} AND folder_id = $folder{index})");
+                    command.Parameters.AddWithValue($"$mailbox{index}", folders[index].MailboxId);
+                    command.Parameters.AddWithValue($"$folder{index}", folders[index].FolderId);
+                }
+                clauses.Add($"({string.Join(" OR ", folderClauses)})");
+            }
+            if (filter != MailMessageFilter.All)
+            {
+                clauses.Add(filter == MailMessageFilter.Pinned ? "is_pinned = 1" : "is_flagged = 1");
+            }
+            command.CommandText = $"SELECT count(*) FROM messages{(clauses.Count == 0 ? "" : $" WHERE {string.Join(" AND ", clauses)}")};";
+            return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
+        }, cancellationToken);
+
+    public Task<MailMessageFilterCounts> GetMessageFilterCountsAsync(
+        IReadOnlyList<MailFolderKey> folders,
+        CancellationToken cancellationToken = default) =>
+        WithLockAsync<MailMessageFilterCounts>(async connection =>
+        {
+            await using var command = connection.CreateCommand();
+            var folderClauses = new List<string>(folders.Count);
+            for (var index = 0; index < folders.Count; index++)
+            {
+                folderClauses.Add($"(mailbox_id = $mailbox{index} AND folder_id = $folder{index})");
+                command.Parameters.AddWithValue($"$mailbox{index}", folders[index].MailboxId);
+                command.Parameters.AddWithValue($"$folder{index}", folders[index].FolderId);
+            }
+            command.CommandText = $"""
+                SELECT count(*),
+                       coalesce(sum(is_pinned), 0),
+                       coalesce(sum(is_flagged), 0)
+                FROM messages{(folderClauses.Count == 0 ? "" : $" WHERE {string.Join(" OR ", folderClauses)}")};
+                """;
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            return new(
+                checked((int)reader.GetInt64(0)),
+                checked((int)reader.GetInt64(1)),
+                checked((int)reader.GetInt64(2)));
         }, cancellationToken);
 
     public async Task<int> PruneMessagesBeforeAsync(
@@ -599,9 +667,10 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         string providerMessageId,
         bool? isRead = null,
         bool? isFlagged = null,
+        bool? isPinned = null,
         CancellationToken cancellationToken = default)
     {
-        if (isRead is null && isFlagged is null)
+        if (isRead is null && isFlagged is null && isPinned is null)
         {
             return Task.CompletedTask;
         }
@@ -612,13 +681,16 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             command.CommandText = """
                 UPDATE messages SET
                     is_read = CASE WHEN $hasRead = 1 THEN $isRead ELSE is_read END,
-                    is_flagged = CASE WHEN $hasFlagged = 1 THEN $isFlagged ELSE is_flagged END
+                    is_flagged = CASE WHEN $hasFlagged = 1 THEN $isFlagged ELSE is_flagged END,
+                    is_pinned = CASE WHEN $hasPinned = 1 THEN $isPinned ELSE is_pinned END
                 WHERE mailbox_id = $mailbox AND provider_id = $provider;
                 """;
             command.Parameters.AddWithValue("$hasRead", isRead is null ? 0 : 1);
             command.Parameters.AddWithValue("$isRead", isRead == true ? 1 : 0);
             command.Parameters.AddWithValue("$hasFlagged", isFlagged is null ? 0 : 1);
             command.Parameters.AddWithValue("$isFlagged", isFlagged == true ? 1 : 0);
+            command.Parameters.AddWithValue("$hasPinned", isPinned is null ? 0 : 1);
+            command.Parameters.AddWithValue("$isPinned", isPinned == true ? 1 : 0);
             command.Parameters.AddWithValue("$mailbox", mailboxId);
             command.Parameters.AddWithValue("$provider", providerMessageId);
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -1046,10 +1118,12 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             command.CommandText = """
                 INSERT INTO local_drafts(
                     id, account_id, mailbox_id, recipients, cc, bcc, subject, body, attachments_json,
-                    updated_at, is_html, provider_draft_id, synced_local_updated_at, provider_updated_at, provider_etag, conversation_identity)
+                    updated_at, is_html, provider_draft_id, synced_local_updated_at, provider_updated_at, provider_etag, conversation_identity,
+                    sync_status, sync_error)
                 VALUES(
                     $id, $account, $mailbox, $to, $cc, $bcc, $subject, $body, $attachments,
-                    $updated, $isHtml, $providerDraft, $syncedLocal, $providerUpdated, $providerETag, $conversationIdentity)
+                    $updated, $isHtml, $providerDraft, $syncedLocal, $providerUpdated, $providerETag, $conversationIdentity,
+                    $syncStatus, $syncError)
                 ON CONFLICT(id) DO UPDATE SET
                     account_id = excluded.account_id,
                     mailbox_id = excluded.mailbox_id,
@@ -1081,7 +1155,9 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                         WHEN excluded.account_id = local_drafts.account_id AND excluded.mailbox_id = local_drafts.mailbox_id
                         THEN COALESCE(excluded.provider_etag, local_drafts.provider_etag)
                         ELSE excluded.provider_etag
-                    END;
+                    END,
+                    sync_status = COALESCE(excluded.sync_status, local_drafts.sync_status),
+                    sync_error = COALESCE(excluded.sync_error, local_drafts.sync_error);
                 """;
             command.Parameters.AddWithValue("$id", draft.Id);
             command.Parameters.AddWithValue("$account", draft.AccountId);
@@ -1099,35 +1175,60 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             command.Parameters.AddWithValue("$providerUpdated", FormatNullable(draft.ProviderUpdatedAt));
             command.Parameters.AddWithValue("$providerETag", (object?)draft.ProviderETag ?? DBNull.Value);
             command.Parameters.AddWithValue("$conversationIdentity", (object?)draft.ConversationIdentity ?? DBNull.Value);
+            command.Parameters.AddWithValue("$syncStatus", (object?)draft.SyncStatus?.ToString() ?? DBNull.Value);
+            command.Parameters.AddWithValue("$syncError", (object?)draft.SyncError ?? DBNull.Value);
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }, cancellationToken).ConfigureAwait(false);
     }
 
     public Task<IReadOnlyList<LocalDraft>> GetLocalDraftsAsync(CancellationToken cancellationToken = default) =>
+        QueryLocalDraftsAsync(includeAttachments: true, cancellationToken: cancellationToken);
+
+    public Task<IReadOnlyList<LocalDraft>> GetLocalDraftSummariesAsync(CancellationToken cancellationToken = default) =>
+        QueryLocalDraftsAsync(includeAttachments: false, cancellationToken: cancellationToken);
+
+    public async Task<LocalDraft?> GetLocalDraftAsync(string id, CancellationToken cancellationToken = default) =>
+        (await QueryLocalDraftsAsync(includeAttachments: true, id, cancellationToken).ConfigureAwait(false)).SingleOrDefault();
+
+    private Task<IReadOnlyList<LocalDraft>> QueryLocalDraftsAsync(
+        bool includeAttachments,
+        string? id = null,
+        CancellationToken cancellationToken = default) =>
         WithLockAsync<IReadOnlyList<LocalDraft>>(async connection =>
         {
             var drafts = new List<LocalDraft>();
             await using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT id, account_id, mailbox_id, recipients, cc, bcc, subject, body, attachments_json,
-                       updated_at, is_html, provider_draft_id, synced_local_updated_at, provider_updated_at, provider_etag, conversation_identity
-                FROM local_drafts ORDER BY updated_at DESC;
+            command.CommandText = $"""
+                SELECT id, account_id, mailbox_id, recipients, cc, bcc, subject,
+                       {(includeAttachments ? "body" : "''")}, {(includeAttachments ? "attachments_json" : "'[]'")},
+                       updated_at, is_html, provider_draft_id, synced_local_updated_at, provider_updated_at, provider_etag, conversation_identity,
+                       sync_status, sync_error
+                FROM local_drafts{(id is null ? "" : " WHERE id = $id")} ORDER BY updated_at DESC;
                 """;
+            if (id is not null)
+            {
+                command.Parameters.AddWithValue("$id", id);
+            }
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
+                var syncStatus = !reader.IsDBNull(16) && Enum.TryParse<DraftSyncStatus>(reader.GetString(16), out var parsedStatus)
+                    ? parsedStatus
+                    : (DraftSyncStatus?)null;
                 drafts.Add(new LocalDraft(
                     reader.GetString(0), reader.GetString(1), reader.GetString(2),
                     reader.GetString(3), reader.GetString(4), reader.GetString(5),
                     reader.GetString(6), reader.GetString(7),
-                    JsonSerializer.Deserialize<List<DraftAttachment>>(reader.GetString(8)) ?? [],
+                    includeAttachments ? JsonSerializer.Deserialize<List<DraftAttachment>>(reader.GetString(8)) ?? [] : [],
                     ParseTimestamp(reader.GetString(9)),
                     reader.GetBoolean(10),
                     reader.IsDBNull(11) ? null : reader.GetString(11),
                     reader.IsDBNull(12) ? null : ParseTimestamp(reader.GetString(12)),
                     reader.IsDBNull(13) ? null : ParseTimestamp(reader.GetString(13)),
                     reader.IsDBNull(14) ? null : reader.GetString(14),
-                    reader.IsDBNull(15) ? null : reader.GetString(15)));
+                    reader.IsDBNull(15) ? null : reader.GetString(15),
+                    syncStatus,
+                    reader.IsDBNull(17) ? null : reader.GetString(17)));
             }
             return drafts;
         }, cancellationToken);
@@ -1170,6 +1271,23 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             }
         }, cancellationToken);
 
+    public Task UpdateLocalDraftSyncIssueAsync(
+        string id,
+        DraftSyncStatus? status,
+        string? error,
+        CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE local_drafts SET sync_status = $status, sync_error = $error WHERE id = $id;
+                """;
+            command.Parameters.AddWithValue("$id", id);
+            command.Parameters.AddWithValue("$status", (object?)status?.ToString() ?? DBNull.Value);
+            command.Parameters.AddWithValue("$error", (object?)error ?? DBNull.Value);
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+
     public async ValueTask DisposeAsync()
     {
         await _gate.WaitAsync().ConfigureAwait(false);
@@ -1203,7 +1321,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             SELECT mailbox_id, provider_id, conversation_id, internet_message_id, folder_id, subject,
                    from_name, from_address, recipients_json, received_at, preview, {(includeBody ? "body" : "NULL")}, is_html,
                    is_read, has_attachments, importance, categories_json, etag, is_flagged,
-                   cc_recipients_json, {(includeBody ? "body_blob" : "NULL")}
+                   cc_recipients_json, {(includeBody ? "body_blob" : "NULL")}, is_pinned
             FROM messages {where}
             ORDER BY received_at DESC, rowid DESC LIMIT $limit;
             """;
@@ -1442,11 +1560,11 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                 mailbox_id, provider_id, conversation_id, internet_message_id, folder_id, subject,
                 from_name, from_address, recipients_json, received_at, preview, body, body_blob, is_html,
                 is_read, has_attachments, importance, categories_json, etag, is_flagged,
-                cc_recipients_json)
+                cc_recipients_json, is_pinned)
             VALUES(
                 $mailbox, $provider, $conversation, $internet, $folder, $subject,
                 $fromName, $fromAddress, $recipients, $received, $preview, $body, $bodyBlob, $isHtml,
-                $isRead, $attachments, $importance, $categories, $etag, $flagged, $ccRecipients)
+                $isRead, $attachments, $importance, $categories, $etag, $flagged, $ccRecipients, $pinned)
             ON CONFLICT(mailbox_id, provider_id) DO UPDATE SET
                 conversation_id = excluded.conversation_id,
                 internet_message_id = excluded.internet_message_id,
@@ -1493,6 +1611,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         command.Parameters.AddWithValue("$categories", JsonSerializer.Serialize(message.Categories));
         command.Parameters.AddWithValue("$etag", (object?)message.ETag ?? DBNull.Value);
         command.Parameters.AddWithValue("$flagged", message.IsFlagged);
+        command.Parameters.AddWithValue("$pinned", message.IsPinned);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
         await using var threadCommand = connection.CreateCommand();
@@ -1530,7 +1649,8 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         JsonSerializer.Deserialize<List<string>>(reader.GetString(16)) ?? [],
         reader.IsDBNull(17) ? null : reader.GetString(17),
         reader.GetBoolean(18),
-        Cc: JsonSerializer.Deserialize<List<MailAddress>>(reader.GetString(19)) ?? []);
+        Cc: JsonSerializer.Deserialize<List<MailAddress>>(reader.GetString(19)) ?? [],
+        IsPinned: reader.GetBoolean(21));
 
 
 
@@ -1825,6 +1945,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             categories_json TEXT NOT NULL,
             etag TEXT,
             is_flagged INTEGER NOT NULL DEFAULT 0,
+            is_pinned INTEGER NOT NULL DEFAULT 0,
             UNIQUE(mailbox_id, provider_id)
         );
 
@@ -2012,7 +2133,9 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             synced_local_updated_at TEXT,
             provider_updated_at TEXT,
             provider_etag TEXT,
-            conversation_identity TEXT
+            conversation_identity TEXT,
+            sync_status TEXT,
+            sync_error TEXT
         );
         CREATE INDEX IF NOT EXISTS local_drafts_updated_at ON local_drafts(updated_at DESC);
         """;

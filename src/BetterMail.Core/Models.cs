@@ -99,7 +99,8 @@ public sealed record MailMessage(
     string? ETag,
     bool IsFlagged = false,
     bool IsDeleted = false,
-    IReadOnlyList<MailAddress>? Cc = null)
+    IReadOnlyList<MailAddress>? Cc = null,
+    bool IsPinned = false)
 {
     public bool IsUnread => !IsRead;
     public DateTimeOffset LocalReceivedAt => ReceivedAt.ToLocalTime();
@@ -125,6 +126,15 @@ public sealed record MailMessage(
         }
     }
 }
+
+public enum MailMessageFilter
+{
+    All,
+    Pinned,
+    Flagged
+}
+
+public sealed record MailMessageFilterCounts(int All, int Pinned, int Flagged);
 
 public sealed record MailAttachment(
     string ProviderId,
@@ -191,10 +201,24 @@ public sealed record LocalDraft(
     DateTimeOffset? SyncedLocalUpdatedAt = null,
     DateTimeOffset? ProviderUpdatedAt = null,
     string? ProviderETag = null,
-    string? ConversationIdentity = null)
+    string? ConversationIdentity = null,
+    DraftSyncStatus? SyncStatus = null,
+    string? SyncError = null)
 {
     public string DisplaySubject => string.IsNullOrWhiteSpace(Subject) ? "(no subject)" : Subject;
     public DateTimeOffset LocalUpdatedAt => UpdatedAt.ToLocalTime();
+    public bool HasSyncIssue => SyncStatus is DraftSyncStatus.Conflict or
+        DraftSyncStatus.MissingRemote or DraftSyncStatus.UnsupportedAttachment or DraftSyncStatus.Failed;
+    public bool HasSyncConflict => SyncStatus == DraftSyncStatus.Conflict;
+    public string DetailText => HasSyncIssue && !string.IsNullOrWhiteSpace(SyncError) ? SyncError : $"To: {To}";
+    public string SyncStatusText => SyncStatus switch
+    {
+        DraftSyncStatus.Conflict => "Conflict",
+        DraftSyncStatus.MissingRemote => "Missing on server",
+        DraftSyncStatus.UnsupportedAttachment => "Unsupported attachment",
+        DraftSyncStatus.Failed => "Sync failed",
+        _ => ""
+    };
 }
 
 public sealed record CalendarInfo(

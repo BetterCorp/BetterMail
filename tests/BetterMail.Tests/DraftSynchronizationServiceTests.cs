@@ -27,6 +27,7 @@ public sealed class DraftSynchronizationServiceTests
         Assert.Contains(result.Items, item =>
             item.LocalDraftId == "fail-id" && item.Status == DraftSyncStatus.Failed);
         Assert.Equal(2, store.Drafts.Count);
+        Assert.Equal(2, store.HydrationCount);
         Assert.Equal("server-Working", store.Drafts.Single(draft => draft.Id == "keep-id").ProviderDraftId);
         Assert.Null(store.Drafts.Single(draft => draft.Id == "fail-id").ProviderDraftId);
     }
@@ -71,6 +72,8 @@ public sealed class DraftSynchronizationServiceTests
         Assert.Contains(result.Items, item =>
             item.ProviderDraftId == "unsupported" && item.Status == DraftSyncStatus.UnsupportedAttachment);
         Assert.Equal("Local edit", store.Drafts.Single(draft => draft.Id == "conflict").Subject);
+        Assert.Equal(DraftSyncStatus.Conflict, store.Drafts.Single(draft => draft.Id == "conflict").SyncStatus);
+        Assert.Equal(DraftSyncStatus.MissingRemote, store.Drafts.Single(draft => draft.Id == "missing").SyncStatus);
         Assert.Contains(store.Drafts, draft => draft.Id == "missing");
         Assert.Contains(store.Drafts, draft => draft.ProviderDraftId == "new" && draft.Subject == "Imported");
         Assert.Equal(
@@ -78,6 +81,7 @@ public sealed class DraftSynchronizationServiceTests
             store.Drafts.Single(draft => draft.ProviderDraftId == "new").ConversationIdentity);
         Assert.DoesNotContain(store.Drafts, draft => draft.ProviderDraftId == "unsupported");
         Assert.Equal(0, provider.UpdateCount);
+        Assert.Equal(0, store.HydrationCount);
     }
 
     private static LocalDraft Local(string id, string subject, DateTimeOffset updatedAt) => new(
@@ -111,6 +115,7 @@ public sealed class DraftSynchronizationServiceTests
     private sealed class DraftStore(IEnumerable<LocalDraft> drafts) : IDraftStore
     {
         public List<LocalDraft> Drafts { get; } = [.. drafts];
+        public int HydrationCount { get; private set; }
 
         public Task SaveLocalDraftAsync(LocalDraft draft, CancellationToken cancellationToken = default)
         {
@@ -128,6 +133,17 @@ public sealed class DraftSynchronizationServiceTests
 
         public Task<IReadOnlyList<LocalDraft>> GetLocalDraftsAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<LocalDraft>>(Drafts.ToArray());
+
+        public Task<IReadOnlyList<LocalDraft>> GetLocalDraftSummariesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<LocalDraft>>(Drafts
+                .Select(static draft => draft with { Body = "", Attachments = [] })
+                .ToArray());
+
+        public Task<LocalDraft?> GetLocalDraftAsync(string id, CancellationToken cancellationToken = default)
+        {
+            HydrationCount++;
+            return Task.FromResult(Drafts.FirstOrDefault(draft => draft.Id == id));
+        }
 
         public Task DeleteLocalDraftAsync(string id, CancellationToken cancellationToken = default)
         {
@@ -151,6 +167,20 @@ public sealed class DraftSynchronizationServiceTests
                 ProviderUpdatedAt = providerUpdatedAt,
                 ProviderETag = providerETag
             };
+            return Task.CompletedTask;
+        }
+
+        public Task UpdateLocalDraftSyncIssueAsync(
+            string id,
+            DraftSyncStatus? status,
+            string? error,
+            CancellationToken cancellationToken = default)
+        {
+            var index = Drafts.FindIndex(draft => draft.Id == id);
+            if (index >= 0)
+            {
+                Drafts[index] = Drafts[index] with { SyncStatus = status, SyncError = error };
+            }
             return Task.CompletedTask;
         }
     }
