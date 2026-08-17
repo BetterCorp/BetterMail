@@ -10,6 +10,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/BetterMail.App/BetterMail.App.csproj" />
     <ProjectReference Include="../../src/BetterMail.Core/BetterMail.Core.csproj" />
+    <ProjectReference Include="../../src/BetterMail.Google/BetterMail.Google.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="xunit.v3" />

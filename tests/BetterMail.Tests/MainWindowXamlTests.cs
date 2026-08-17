@@ -259,7 +259,9 @@ public sealed class MainWindowXamlTests
         Assert.Contains("<string>mailto</string>", plist);
 
         Assert.Contains("ReauthenticateAccountCommand", accounts);
+        Assert.Contains("ConnectGoogleCommand", settingsXaml);
         Assert.Contains("AddSharedMailboxForAccountCommand", accounts);
+        Assert.Contains("IsVisible=" + (char)34 + "{Binding CanAddSharedMailbox}" + (char)34, accounts);
         Assert.Contains("RequestRemoveAccountCommand", accounts);
         Assert.Equal(3, Count(accounts, BindingAttribute("CommandParameter", "Account")));
 

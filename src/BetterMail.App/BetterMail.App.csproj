@@ -19,6 +19,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../BetterMail.Core/BetterMail.Core.csproj" />
+    <ProjectReference Include="../BetterMail.Google/BetterMail.Google.csproj" />
     <ProjectReference Include="../BetterMail.Microsoft365/BetterMail.Microsoft365.csproj" />
   </ItemGroup>
   <ItemGroup>

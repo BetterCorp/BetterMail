@@ -6,7 +6,7 @@ using Microsoft.Data.Sqlite;
 
 namespace BetterMail.Core;
 
-public sealed class EncryptedMailStore(string databasePath, string key) : IMailStore, IDraftStore
+public sealed class EncryptedMailStore(string databasePath, string key) : IMailStore, IDraftStore, IProviderTokenStore
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private SqliteConnection? _connection;
@@ -94,6 +94,71 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         }, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task SaveProviderTokenAsync(ProviderToken token, CancellationToken cancellationToken = default)
+    {
+        await WithLockAsync(async connection =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO provider_tokens(provider_id, account_id, access_token, refresh_token, expires_at, scopes)
+                VALUES($provider, $account, $access, $refresh, $expires, $scopes)
+                ON CONFLICT(provider_id, account_id) DO UPDATE SET
+                    access_token = excluded.access_token,
+                    refresh_token = excluded.refresh_token,
+                    expires_at = excluded.expires_at,
+                    scopes = excluded.scopes;
+                """;
+            command.Parameters.AddWithValue("$provider", token.ProviderId);
+            command.Parameters.AddWithValue("$account", token.AccountId);
+            command.Parameters.AddWithValue("$access", token.AccessToken);
+            command.Parameters.AddWithValue("$refresh", token.RefreshToken);
+            command.Parameters.AddWithValue("$expires", token.ExpiresAt.ToString("O", CultureInfo.InvariantCulture));
+            command.Parameters.AddWithValue("$scopes", token.Scopes);
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<ProviderToken?> GetProviderTokenAsync(
+        string providerId,
+        string accountId,
+        CancellationToken cancellationToken = default) =>
+        WithLockAsync<ProviderToken?>(async connection =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT access_token, refresh_token, expires_at, scopes
+                FROM provider_tokens
+                WHERE provider_id = $provider AND account_id = $account;
+                """;
+            command.Parameters.AddWithValue("$provider", providerId);
+            command.Parameters.AddWithValue("$account", accountId);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+                ? new ProviderToken(
+                    providerId,
+                    accountId,
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    DateTimeOffset.Parse(reader.GetString(2), CultureInfo.InvariantCulture),
+                    reader.GetString(3))
+                : null;
+        }, cancellationToken);
+
+    public async Task DeleteProviderTokenAsync(
+        string providerId,
+        string accountId,
+        CancellationToken cancellationToken = default)
+    {
+        await WithLockAsync(async connection =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM provider_tokens WHERE provider_id = $provider AND account_id = $account;";
+            command.Parameters.AddWithValue("$provider", providerId);
+            command.Parameters.AddWithValue("$account", accountId);
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
     public Task<IReadOnlyList<MailAccount>> GetAccountsAsync(CancellationToken cancellationToken = default) =>
         WithLockAsync<IReadOnlyList<MailAccount>>(async connection =>
         {
@@ -121,6 +186,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
             foreach (var sql in new[]
             {
+                "DELETE FROM provider_tokens WHERE provider_id = $provider AND account_id = $account;",
                 "DELETE FROM local_drafts WHERE account_id = $account;",
                 "DELETE FROM message_threads WHERE mailbox_id IN (SELECT account_id || ':' || lower(address) FROM mailboxes WHERE account_id = $account);",
                 "DELETE FROM messages WHERE mailbox_id IN (SELECT account_id || ':' || lower(address) FROM mailboxes WHERE account_id = $account);",
@@ -1723,6 +1789,16 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             email TEXT NOT NULL,
             display_name TEXT NOT NULL,
             capabilities INTEGER NOT NULL,
+            PRIMARY KEY(provider_id, account_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS provider_tokens(
+            provider_id TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            access_token TEXT NOT NULL,
+            refresh_token TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            scopes TEXT NOT NULL,
             PRIMARY KEY(provider_id, account_id)
         );
 

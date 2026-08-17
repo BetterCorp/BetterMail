@@ -1,7 +1,7 @@
 # BetterMail desktop completion backlog
 
-This is the source of truth for completing the Microsoft 365 desktop application.
-Google Workspace, Android/iOS projects, and platform-specific installer/store builds are deferred.
+This is the source of truth for completing the BetterMail desktop application.
+Google workspace modules beyond Gmail, Android/iOS projects, and platform-specific installer/store builds are deferred.
 
 Status: `[ ]` queued, `[-]` in progress, `[x]` verified complete, `[!]` blocked by an external dependency or tenant policy.
 
@@ -29,6 +29,7 @@ Status: `[ ]` queued, `[-]` in progress, `[x]` verified complete, `[!]` blocked 
 ## P1 — desktop mail workflow completion
 
 - [x] Multiple Microsoft 365 accounts, unified inbox, manual shared mailboxes, and account-owned shared-mailbox settings.
+- [x] Google desktop OAuth and Gmail sync/search/actions/attachments/send/draft support, including mixed-provider routing.
 - [x] Folder hierarchy, local search, delta cursors, F9, 60-second sync, read/unread, flag, archive, junk, and delete.
 - [x] Compose, send, reply, forward, Cc/Bcc, default signature, and small attachments.
 - [x] Autosave encrypted local drafts, reopen them with the original sender/attachments, and remove them after successful send.
@@ -87,6 +88,6 @@ Status: `[ ]` queued, `[-]` in progress, `[x]` verified complete, `[!]` blocked 
 
 ## Explicitly deferred
 
-- Google Workspace/Gmail/Google Calendar/Google Drive provider implementation.
+- Google Calendar, Contacts, Tasks, and Drive provider implementation.
 - Android and iOS application projects, mobile WebView integration, device testing, and store releases.
 - MSI/MSIX/macOS/Linux-specific installers and store packaging beyond development artifacts.

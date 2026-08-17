@@ -7,6 +7,39 @@ namespace BetterMail.Tests;
 public sealed class EncryptedMailStoreTests
 {
     [Fact]
+    public async Task PersistsProviderTokensInsideEncryptedStore()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-token-store-{Guid.NewGuid():N}");
+        try
+        {
+            var store = new EncryptedMailStore(
+                Path.Combine(directory, "mail.db"),
+                Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+            await using (store)
+            {
+                await store.InitializeAsync(cancellationToken);
+                var token = new ProviderToken(
+                    "google-workspace", "account", "access", "refresh",
+                    DateTimeOffset.UtcNow.AddHours(1), "openid gmail.modify");
+                await store.SaveProviderTokenAsync(token, cancellationToken);
+
+                Assert.Equal(token, await store.GetProviderTokenAsync(
+                    token.ProviderId, token.AccountId, cancellationToken));
+                await store.DeleteProviderTokenAsync(token.ProviderId, token.AccountId, cancellationToken);
+                Assert.Null(await store.GetProviderTokenAsync(token.ProviderId, token.AccountId, cancellationToken));
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task MigratesLegacyMessagesAndPersistsCcRecipients()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

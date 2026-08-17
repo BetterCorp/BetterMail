@@ -583,9 +583,17 @@ public sealed class MainWindowViewModelTests
         try
         {
             await store.InitializeAsync(cancellationToken);
-            var account = new MailAccount("microsoft365", "account", "tenant", "person@example.com", "Person", ProviderCapabilities.Mail);
+            var account = new MailAccount(
+                "microsoft365", "account", "tenant", "person@example.com", "Person",
+                ProviderCapabilities.Mail | ProviderCapabilities.Calendar | ProviderCapabilities.Contacts |
+                ProviderCapabilities.Tasks | ProviderCapabilities.Files | ProviderCapabilities.Notes);
             var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
-            var secondAccount = new MailAccount("microsoft365", "second", "tenant", "other@example.com", "Other", ProviderCapabilities.Mail);
+            var secondAccount = account with
+            {
+                AccountId = "second",
+                EmailAddress = "other@example.com",
+                DisplayName = "Other"
+            };
             var secondMailbox = new Mailbox(secondAccount.AccountId, secondAccount.EmailAddress, secondAccount.DisplayName);
             await store.SaveAccountAsync(account, cancellationToken);
             await store.SaveMailboxAsync(mailbox, cancellationToken);
@@ -1139,7 +1147,9 @@ public sealed class MainWindowViewModelTests
     public async Task OpensMicrosoft365WorkspaceModules()
     {
         var account = new MailAccount(
-            "microsoft365", "account", "tenant", "person@example.com", "Person", ProviderCapabilities.Mail);
+            "microsoft365", "account", "tenant", "person@example.com", "Person",
+            ProviderCapabilities.Mail | ProviderCapabilities.Calendar | ProviderCapabilities.Contacts |
+            ProviderCapabilities.Tasks | ProviderCapabilities.Files | ProviderCapabilities.Notes);
         var workspace = new FakeWorkspaceProvider();
         var viewModel = new MainWindowViewModel(
             null,

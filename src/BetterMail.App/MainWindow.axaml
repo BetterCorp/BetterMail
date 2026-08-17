@@ -1031,9 +1031,12 @@
         <StackPanel Spacing="14">
           <Image Source="/Assets/BetterMail.png" Width="48" Height="48" HorizontalAlignment="Left" />
           <TextBlock Text="Welcome to BetterMail" FontSize="26" FontWeight="SemiBold" />
-          <TextBlock Text="Connect your Microsoft 365 account to build your encrypted local inbox." FontSize="15" TextWrapping="Wrap" Opacity="0.74" />
-          <TextBlock Text="Your credentials stay with Microsoft. BetterMail stores its token cache using your operating system's protected credential storage." TextWrapping="Wrap" Opacity="0.62" />
-          <Button Classes="primary" Content="Connect Microsoft 365" Command="{Binding ConnectCommand}" HorizontalAlignment="Left" />
+          <TextBlock Text="Connect Microsoft 365 or Google Workspace to build your encrypted local inbox." FontSize="15" TextWrapping="Wrap" Opacity="0.74" />
+          <TextBlock Text="Your credentials stay with your provider. BetterMail protects local tokens and cached mail with encrypted storage." TextWrapping="Wrap" Opacity="0.62" />
+          <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Left">
+            <Button Classes="primary" Content="Connect Microsoft 365" Command="{Binding ConnectCommand}" />
+            <Button Classes="primary" Content="Connect Google Workspace" Command="{Binding ConnectGoogleCommand}" />
+          </StackPanel>
           <TextBlock Text="{Binding Status}" Opacity="0.62" />
           <Border Background="#D9493D" CornerRadius="3" Padding="9" IsVisible="{Binding HasError}">
             <TextBlock Text="{Binding Error}" Foreground="White" TextWrapping="Wrap" />

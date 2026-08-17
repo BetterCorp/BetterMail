@@ -9,8 +9,8 @@
 ---
 
 BetterMail is an Outlook-style desktop client built around fast local storage, cross-account
-search, and one consistent interface for Microsoft 365. Mail is cached and indexed locally so
-selecting messages and searching does not depend on Microsoft Graph round trips.
+search, and one consistent interface for Microsoft 365 and Gmail. Mail is cached and indexed
+locally so selecting messages and searching does not depend on provider round trips.
 
 > [!WARNING]
 > BetterMail is under active development. Keep independent backups of important data and
@@ -27,14 +27,14 @@ selecting messages and searching does not depend on Microsoft Graph round trips.
 | **Mail** | Multiple accounts, unified inbox, shared mailboxes, folder trees, threads, drafts, attachments, reply/forward, archive, delete, junk, flags, and read state |
 | **Search** | Encrypted local index, cross-account results, scoped mail/people/files search, folder paths, and archive opt-in |
 | **Microsoft 365** | Outlook mail and calendars, People, To Do, OneDrive, OneNote, shared mailboxes, Send As, and Send on behalf |
+| **Google Workspace** | Gmail sync/search, label badges, drafts, attachments, send, archive, spam, stars, and read state |
 | **Calendar** | Aggregated calendars, month and timeline views, calendar colours, event availability, and event editing |
 | **Files** | Account-relative OneDrive trees, cross-drive search, sharing links, and attaching cloud files to mail |
 | **Desktop UX** | Responsive Outlook-style panes, keyboard navigation, F9 sync, background sync, notifications, compact mode, and light/dark/system themes |
 | **Security** | Sanitized HTML, blocked remote content by default, encrypted SQLite storage, DPAPI-backed keys on Windows, and secure token caching |
 
-Google Workspace is planned later. Provider-facing mail and workspace capabilities live behind
-contracts in `BetterMail.Core`, so another provider can be added without replacing the shell or
-local store.
+Google Calendar, Contacts, Tasks, and Drive are not implemented yet. A Google account therefore
+appears in mail views, but not in Microsoft-only workspace modules.
 
 ## Screenshots
 
@@ -65,7 +65,7 @@ local store.
 
 - .NET SDK 10.0.201 or a compatible .NET 10 patch.
 - Windows 10/11, or a glibc Linux desktop supported by Avalonia.
-- A Microsoft 365 work or school account.
+- A Microsoft 365 work or school account, or a Google account with Gmail enabled.
 
 BetterMail ships with its Microsoft Entra public-client application ID. End users do not need to
 create an app registration, configure redirect URLs, or provide a client secret: install the app,
@@ -168,6 +168,21 @@ dotnet run --project src/BetterMail.App
 
 </details>
 
+## Google sign-in
+
+BetterMail ships with its Google OAuth desktop client ID, so normal users can add an account
+without setting environment variables. Custom builds can override the public client ID with
+`BETTERMAIL_GOOGLE_CLIENT_ID`.
+
+BetterMail is a public desktop client and does not use or accept a client secret. It uses PKCE,
+opens the system browser, and receives the callback on a random loopback port. Tokens are saved in
+the encrypted local database.
+
+BetterMail requests `gmail.modify`, plus OpenID email/profile scopes. `gmail.modify` is a
+[restricted Gmail scope](https://developers.google.com/workspace/gmail/api/auth/scopes), so a
+publicly distributed OAuth app must complete Google's consent-screen verification requirements.
+Development users added as OAuth test users can sign in before verification.
+
 ## Shared mailboxes
 
 Microsoft Graph cannot enumerate every shared mailbox or determine all effective Send As and
@@ -200,7 +215,8 @@ dotnet run --project src/BetterMail.App
 Remote images remain blocked until explicitly allowed, scripts are removed from HTML mail, and
 attachment bytes are loaded on demand rather than permanently retained in the database.
 
-Removing an account deletes its local cache only. It does not delete Microsoft 365 data.
+Removing an account deletes its local cache and locally stored token only. It does not delete
+cloud data.
 
 ## Project structure
 
@@ -209,6 +225,7 @@ Removing an account deletes its local cache only. It does not delete Microsoft 3
 | `BetterMail.App` | Avalonia desktop shell, workspaces, views, themes, and desktop integration |
 | `BetterMail.Core` | Provider contracts, encrypted local store, models, draft reconciliation, and sync engine |
 | `BetterMail.Microsoft365` | Microsoft identity, Graph requests, throttling, mail, and workspace adapters |
+| `BetterMail.Google` | Google desktop OAuth and Gmail REST adapter |
 | `BetterMail.Tests` | xUnit regression and behavior checks |
 | `asset-pack` | Canonical logos, desktop icons, web assets, banners, and redacted screenshots |
 

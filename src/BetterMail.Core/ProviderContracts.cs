@@ -5,12 +5,14 @@ public interface IAccountProvider
     string ProviderId { get; }
     ProviderCapabilities Capabilities { get; }
     Task<MailAccount> SignInAsync(CancellationToken cancellationToken = default);
+    Task<MailAccount> ReauthenticateAsync(string accountId, CancellationToken cancellationToken = default);
     Task SignOutAsync(string accountId, CancellationToken cancellationToken = default);
 }
 
 public interface IMailProvider
 {
     bool SupportsCloudDrafts => false;
+    bool SupportsCloudDraftsFor(MailAccount account) => SupportsCloudDrafts;
 
     Task<IReadOnlyList<MailFolder>> GetFoldersAsync(
         MailAccount account,
@@ -467,5 +469,26 @@ public interface IDraftStore
         DateTimeOffset syncedLocalUpdatedAt,
         DateTimeOffset providerUpdatedAt,
         string? providerETag,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed record ProviderToken(
+    string ProviderId,
+    string AccountId,
+    string AccessToken,
+    string RefreshToken,
+    DateTimeOffset ExpiresAt,
+    string Scopes);
+
+public interface IProviderTokenStore
+{
+    Task SaveProviderTokenAsync(ProviderToken token, CancellationToken cancellationToken = default);
+    Task<ProviderToken?> GetProviderTokenAsync(
+        string providerId,
+        string accountId,
+        CancellationToken cancellationToken = default);
+    Task DeleteProviderTokenAsync(
+        string providerId,
+        string accountId,
         CancellationToken cancellationToken = default);
 }

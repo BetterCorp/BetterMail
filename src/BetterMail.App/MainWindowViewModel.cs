@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.Net;
 using System.Windows.Input;
 using BetterMail.Core;
+using BetterMail.Google;
 using BetterMail.Microsoft365;
 
 namespace BetterMail.App;
@@ -33,6 +34,9 @@ public sealed class MainWindowViewModel : ViewModelBase
     private static readonly string[] DefaultMailQuickActionIds = ["read", "flag", "archive", "delete"];
     private static readonly string[] GlobalSearchCategoryOrder =
         ["Mail", "People", "Calendar", "To Do", "OneDrive", "Notes"];
+    private const ProviderCapabilities WorkspaceCapabilities =
+        ProviderCapabilities.Calendar | ProviderCapabilities.Contacts | ProviderCapabilities.Tasks |
+        ProviderCapabilities.Files | ProviderCapabilities.Notes;
 
     private readonly EncryptedMailStore? _store;
     private readonly string _dataDirectory;
@@ -42,7 +46,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     private readonly TimeSpan _markReadDelay;
     private readonly NewMailNotificationCoordinator _newMailNotifications;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _draftSyncLocks = new(StringComparer.Ordinal);
-    private Microsoft365AuthService? _authentication;
+    private readonly Dictionary<string, IAccountProvider> _accountProviders = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IMailProvider> _mailProviders = new(StringComparer.Ordinal);
+    private Microsoft365AuthService? _microsoftAuthentication;
+    private GoogleAuthService? _googleAuthentication;
     private IMailProvider? _provider;
     private IWorkspaceProvider? _workspaceProvider;
     private CalendarWorkspaceViewModel? _calendarWorkspace;
@@ -160,6 +167,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             desktopNotificationService ?? NoOpDesktopNotificationService.Instance);
 
         ConnectCommand = new AsyncCommand(ConnectAsync, () => _store is not null);
+        ConnectGoogleCommand = new AsyncCommand(ConnectGoogleAsync, () => _store is not null);
         AddSharedMailboxForAccountCommand = new AsyncCommand<MailAccount>(RequestSharedMailboxAsync);
         ReauthenticateAccountCommand = new AsyncCommand<MailAccount>(ReauthenticateAccountAsync);
         SyncCommand = new AsyncCommand(SyncAsync, () => Accounts.Count > 0 && _provider is not null && !IsSyncing);
@@ -223,7 +231,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         CancelRemoveAccountCommand = new AsyncCommand(CancelRemoveAccountAsync);
         ConfirmRemoveAccountCommand = new AsyncCommand(RemovePendingAccountAsync, () => _pendingRemovalAccount is not null);
         EditContactCommand = new AsyncCommand<PersonEntry>(EditContactAsync);
-        NewContactCommand = new AsyncCommand(OpenNewContactAsync, () => Accounts.Count > 0 && !_isContactActionRunning);
+        NewContactCommand = new AsyncCommand(OpenNewContactAsync, () => ContactOwners.Count > 0 && !_isContactActionRunning);
         RequestDeleteContactCommand = new AsyncCommand<PersonEntry>(RequestDeleteContactAsync);
         SaveContactCommand = new AsyncCommand(SaveContactAsync, () => IsContactEditorOpen && SelectedContactOwner is not null && !_isContactActionRunning);
         CancelEditContactCommand = new AsyncCommand(CancelEditContactAsync);
@@ -356,10 +364,11 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
     public string MailStatisticsSummary =>
         $"{MailStatistics.Sum(static item => item.SyncedMessages):N0} synced locally ({MailSyncRange}) | " +
-        $"{MailStatistics.Sum(static item => item.CloudMessages):N0} total on Microsoft 365 | " +
+        $"{MailStatistics.Sum(static item => item.CloudMessages):N0} total in cloud | " +
         $"{Folders.Count:N0} folders | {Drafts.Count:N0} local drafts";
 
     public ICommand ConnectCommand { get; }
+    public ICommand ConnectGoogleCommand { get; }
     public ICommand AddSharedMailboxForAccountCommand { get; }
     public ICommand ReauthenticateAccountCommand { get; }
     public ICommand SyncCommand { get; }
@@ -1331,10 +1340,11 @@ public sealed class MainWindowViewModel : ViewModelBase
             {
                 if (_provider is null)
                 {
-                    var options = Microsoft365Options.Create(_dataDirectory);
-                    _authentication = await Microsoft365AuthService.CreateAsync(options);
-                    _provider = new Microsoft365MailProvider(_authentication);
-                    _workspaceProvider = new Microsoft365WorkspaceProvider(_authentication);
+                    foreach (var providerId in Accounts.Select(static account => account.ProviderId).Distinct(StringComparer.Ordinal))
+                    {
+                        await EnsureProviderAsync(providerId);
+                    }
+                    RefreshMailProviderRouter();
                 }
                 ((AsyncCommand)SyncCommand).Refresh();
                 ((AsyncCommand)ToggleReadCommand).Refresh();
@@ -1368,39 +1378,97 @@ public sealed class MainWindowViewModel : ViewModelBase
         MailAccount? connectedAccount = null;
         await RunBusyAsync("Opening Microsoft sign-in…", async () =>
         {
-            _authentication ??= await Microsoft365AuthService.CreateAsync(Microsoft365Options.Create(_dataDirectory));
-            _provider ??= new Microsoft365MailProvider(_authentication);
-            _workspaceProvider ??= new Microsoft365WorkspaceProvider(_authentication);
+            await EnsureProviderAsync(Microsoft365AuthService.Id);
             StartAutoSync();
-            var account = await _authentication.SignInAsync();
-            await _store.SaveAccountAsync(account);
-            var primaryMailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
-            await _store.SaveMailboxAsync(primaryMailbox);
-
-            var existing = Accounts.FirstOrDefault(candidate => candidate.AccountId == account.AccountId);
-            if (existing is not null)
-            {
-                Accounts.Remove(existing);
-            }
-
-            Accounts.Add(account);
-            if (Mailboxes.All(mailbox => mailbox.Id != primaryMailbox.Id))
-            {
-                Mailboxes.Add(primaryMailbox);
-            }
-            RebuildSenderSettings();
-            await RefreshOwnedWorkspaceAccountsIfCreatedAsync();
-            ((AsyncCommand)SyncCommand).Refresh();
-            ((AsyncCommand)ToggleReadCommand).Refresh();
-            RefreshWorkspaceCommands();
-            RaisePropertyChanged(nameof(HasAccounts));
-            RaisePropertyChanged(nameof(ShowOnboarding));
-            RaisePropertyChanged(nameof(SettingsAccounts));
+            var account = await _accountProviders[Microsoft365AuthService.Id].SignInAsync();
+            await AddConnectedAccountAsync(account);
             connectedAccount = account;
         });
         if (connectedAccount is not null)
         {
             _ = SyncAfterConnectAsync();
+        }
+    }
+
+    private async Task ConnectGoogleAsync()
+    {
+        if (_store is null)
+        {
+            return;
+        }
+
+        MailAccount? connectedAccount = null;
+        await RunBusyAsync("Opening Google sign-in...", async () =>
+        {
+            await EnsureProviderAsync(GoogleAuthService.Id);
+            StartAutoSync();
+            var account = await _accountProviders[GoogleAuthService.Id].SignInAsync();
+            await AddConnectedAccountAsync(account);
+            connectedAccount = account;
+        });
+        if (connectedAccount is not null)
+        {
+            _ = SyncAfterConnectAsync();
+        }
+    }
+
+    private async Task AddConnectedAccountAsync(MailAccount account)
+    {
+        await _store!.SaveAccountAsync(account);
+        var primaryMailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+        await _store.SaveMailboxAsync(primaryMailbox);
+        var existing = Accounts.FirstOrDefault(candidate =>
+            candidate.ProviderId == account.ProviderId && candidate.AccountId == account.AccountId);
+        if (existing is not null)
+        {
+            Accounts.Remove(existing);
+        }
+        Accounts.Add(account);
+        if (Mailboxes.All(mailbox => mailbox.Id != primaryMailbox.Id))
+        {
+            Mailboxes.Add(primaryMailbox);
+        }
+        RebuildSenderSettings();
+        await RefreshOwnedWorkspaceAccountsIfCreatedAsync();
+        ((AsyncCommand)SyncCommand).Refresh();
+        ((AsyncCommand)ToggleReadCommand).Refresh();
+        RefreshWorkspaceCommands();
+        RaisePropertyChanged(nameof(HasAccounts));
+        RaisePropertyChanged(nameof(ShowOnboarding));
+        RaisePropertyChanged(nameof(SettingsAccounts));
+    }
+
+    private async Task EnsureProviderAsync(string providerId)
+    {
+        if (_store is null || _accountProviders.ContainsKey(providerId))
+        {
+            return;
+        }
+        switch (providerId)
+        {
+            case Microsoft365AuthService.Id:
+                _microsoftAuthentication = await Microsoft365AuthService.CreateAsync(
+                    Microsoft365Options.Create(_dataDirectory));
+                _accountProviders[providerId] = _microsoftAuthentication;
+                _mailProviders[providerId] = new Microsoft365MailProvider(_microsoftAuthentication);
+                _workspaceProvider ??= new Microsoft365WorkspaceProvider(_microsoftAuthentication);
+                break;
+            case GoogleAuthService.Id:
+                _googleAuthentication = new GoogleAuthService(GoogleOptions.Create(), _store);
+                _accountProviders[providerId] = _googleAuthentication;
+                _mailProviders[providerId] = new GoogleGmailProvider(_googleAuthentication);
+                break;
+            default:
+                throw new InvalidOperationException($"The account provider '{providerId}' is not installed.");
+        }
+        RefreshMailProviderRouter();
+    }
+
+    private void RefreshMailProviderRouter()
+    {
+        if (_mailProviders.Count > 0)
+        {
+            _provider = new MailProviderRouter(_mailProviders.Select(static pair => (pair.Key, pair.Value)));
         }
     }
 
@@ -1499,9 +1567,9 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         await RunBusyAsync("Removing account…", async () =>
         {
-            if (_authentication is not null)
+            if (_accountProviders.TryGetValue(account.ProviderId, out var accountProvider))
             {
-                await _authentication.SignOutAsync(account.AccountId);
+                await accountProvider.SignOutAsync(account.AccountId);
             }
 
             await _store.DeleteAccountAsync(account.ProviderId, account.AccountId);
@@ -1555,8 +1623,8 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         await RunBusyAsync($"Re-authenticating {account.EmailAddress}...", async () =>
         {
-            _authentication ??= await Microsoft365AuthService.CreateAsync(Microsoft365Options.Create(_dataDirectory));
-            var refreshed = await _authentication.ReauthenticateAsync(account.AccountId);
+            await EnsureProviderAsync(account.ProviderId);
+            var refreshed = await _accountProviders[account.ProviderId].ReauthenticateAsync(account.AccountId);
             await _store.SaveAccountAsync(refreshed);
             var index = Accounts.IndexOf(account);
             if (index >= 0)
@@ -1578,7 +1646,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         IsSyncing = true;
-        Status = "Syncing Microsoft 365…";
+        Status = "Syncing mail...";
         Error = null;
         var animation = AnimateSyncIconAsync();
         Exception? mailFailure = null;
@@ -1756,6 +1824,10 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         async Task RefreshContactsAsync(MailAccount account)
         {
+            if (!account.Capabilities.HasFlag(ProviderCapabilities.Contacts))
+            {
+                return;
+            }
             try
             {
                 var contacts = await _workspaceProvider.SearchContactsAsync(account, "");
@@ -1771,6 +1843,10 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         async Task RefreshCalendarsAsync(MailAccount account)
         {
+            if (!account.Capabilities.HasFlag(ProviderCapabilities.Calendar))
+            {
+                return;
+            }
             try
             {
                 var calendars = await _workspaceProvider.GetCalendarsAsync(account);
@@ -1795,6 +1871,10 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         async Task RefreshTasksAsync(MailAccount account)
         {
+            if (!account.Capabilities.HasFlag(ProviderCapabilities.Tasks))
+            {
+                return;
+            }
             try
             {
                 var lists = await _workspaceProvider.GetTaskListsAsync(account);
@@ -1818,6 +1898,10 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         async Task RefreshNotesAsync(MailAccount account)
         {
+            if (!account.Capabilities.HasFlag(ProviderCapabilities.Notes))
+            {
+                return;
+            }
             try
             {
                 var notebooks = await _workspaceProvider.GetNotebooksAsync(account);
@@ -1914,7 +1998,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private async Task<IReadOnlyList<string>> ReconcileAllDraftsAsync()
     {
-        if (_provider?.SupportsCloudDrafts != true || _store is null)
+        if (_provider is null || _store is null)
         {
             return [];
         }
@@ -1922,6 +2006,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         var issues = new List<string>();
         foreach (var account in Accounts.ToArray())
         {
+            if (!_provider.SupportsCloudDraftsFor(account))
+            {
+                continue;
+            }
             foreach (var mailbox in Mailboxes.Where(candidate => candidate.AccountId == account.AccountId).ToArray())
             {
                 var issue = await ReconcileDraftMailboxAsync(account, mailbox);
@@ -1949,7 +2037,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private async Task<string?> ReconcileDraftMailboxAsync(MailAccount account, Mailbox mailbox)
     {
-        if (_provider?.SupportsCloudDrafts != true || _store is null)
+        if (_provider is null || !_provider.SupportsCloudDraftsFor(account) || _store is null)
         {
             return null;
         }
@@ -2429,6 +2517,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         var savedTask = _workspaceProvider is null
             ? Task.FromResult<IReadOnlyList<ContactInfo>>([])
             : SearchAccountsAsync(
+                ProviderCapabilities.Contacts,
                 (account, token) => GetSavedContactsAsync(account, query, token),
                 cancellationToken);
         await Task.WhenAll(discoveredTask, savedTask);
@@ -2452,6 +2541,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
         var now = DateTimeOffset.Now;
         var events = await SearchAccountsAsync(
+            ProviderCapabilities.Calendar,
             (account, token) => _workspaceProvider.GetEventsAsync(
                 account, now.AddYears(-1), now.AddYears(2), token),
             cancellationToken);
@@ -2488,6 +2578,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             return TaskResults(cached, query);
         }
         var tasks = await SearchAccountsAsync(
+            ProviderCapabilities.Tasks,
             (account, token) => _workspaceProvider.GetTasksAsync(account, token),
             cancellationToken);
         foreach (var group in tasks.GroupBy(item => (item.AccountId, item.ListId)))
@@ -2523,6 +2614,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             return DriveResults(cached);
         }
         var files = await SearchAccountsAsync(
+            ProviderCapabilities.Files,
             (account, token) => _workspaceProvider.SearchFilesAsync(account, query, token),
             cancellationToken);
         foreach (var group in files.GroupBy(static item => item.AccountId))
@@ -2553,6 +2645,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             return NoteResults(cached, query);
         }
         var notes = await SearchAccountsAsync(
+            ProviderCapabilities.Notes,
             (account, token) => _workspaceProvider.GetNotesAsync(account, token),
             cancellationToken);
         foreach (var group in notes.GroupBy(static item => item.AccountId))
@@ -2577,12 +2670,14 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 
     private async Task<IReadOnlyList<T>> SearchAccountsAsync<T>(
+        ProviderCapabilities capability,
         Func<MailAccount, CancellationToken, Task<IReadOnlyList<T>>> search,
         CancellationToken cancellationToken)
     {
         var batches = await Task.WhenAll(Accounts
-            .Where(account => SelectedSearchAccountFilter?.AccountId is null ||
-                SelectedSearchAccountFilter.AccountId == account.AccountId)
+            .Where(account => account.Capabilities.HasFlag(capability) &&
+                (SelectedSearchAccountFilter?.AccountId is null ||
+                SelectedSearchAccountFilter.AccountId == account.AccountId))
             .Select(async account =>
         {
             try
@@ -2599,6 +2694,9 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private static bool Contains(string? value, string query) =>
         value?.Contains(query, StringComparison.OrdinalIgnoreCase) == true;
+
+    private MailAccount[] AccountsWith(ProviderCapabilities capability) =>
+        Accounts.Where(account => account.Capabilities.HasFlag(capability)).ToArray();
 
     private async Task<IReadOnlyList<ContactInfo>> GetSavedContactsAsync(
         MailAccount account,
@@ -3131,7 +3229,9 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 
     private bool CanOpenWorkspaceModule() =>
-        Accounts.Count > 0 && _workspaceProvider is not null && !IsWorkspaceLoading;
+        _workspaceProvider is not null &&
+        Accounts.Any(static account => (account.Capabilities & WorkspaceCapabilities) != 0) &&
+        !IsWorkspaceLoading;
 
     private Task RefreshWorkspaceAsync() => IsMailModule
         ? Task.CompletedTask
@@ -3147,8 +3247,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private async Task ShowWorkspaceModuleAsync(string module)
     {
-        var account = Accounts.FirstOrDefault();
-        if (account is null || _workspaceProvider is null || IsWorkspaceLoading)
+        if (_workspaceProvider is null || !CanOpenWorkspaceModule())
         {
             return;
         }
@@ -3257,10 +3356,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         if (CalendarWorkspace is null)
         {
             CalendarWorkspace = new CalendarWorkspaceViewModel(
-                _workspaceProvider, Accounts.ToArray(), store: _store);
+                _workspaceProvider, AccountsWith(ProviderCapabilities.Calendar), store: _store);
             CalendarWorkspace.EventsChanged += () => _ = RefreshNextCalendarEventAsync();
         }
-        await CalendarWorkspace.UpdateAccountsAsync(Accounts.ToArray());
+        await CalendarWorkspace.UpdateAccountsAsync(AccountsWith(ProviderCapabilities.Calendar));
     }
 
     private Task OpenNextCalendarEventAsync()
@@ -3301,8 +3400,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         NotesWorkspace ??= new NotesWorkspaceViewModel(
-            _workspaceProvider, Accounts.ToArray(), _renderer, _store);
-        await NotesWorkspace.UpdateAccountsAsync(Accounts.ToArray());
+            _workspaceProvider, AccountsWith(ProviderCapabilities.Notes), _renderer, _store);
+        await NotesWorkspace.UpdateAccountsAsync(AccountsWith(ProviderCapabilities.Notes));
     }
 
     private async Task LoadDriveWorkspaceAsync()
@@ -3315,11 +3414,11 @@ public sealed class MainWindowViewModel : ViewModelBase
         if (DriveWorkspace is null)
         {
             DriveWorkspace = new DriveWorkspaceViewModel(
-                _workspaceProvider, Accounts.ToArray(), _store);
+                _workspaceProvider, AccountsWith(ProviderCapabilities.Files), _store);
             DriveWorkspace.ItemChosen += HandleDriveItemChosen;
             DriveWorkspace.LinkChosen += HandleDriveLinkChosen;
         }
-        await DriveWorkspace.UpdateAccountsAsync(Accounts.ToArray());
+        await DriveWorkspace.UpdateAccountsAsync(AccountsWith(ProviderCapabilities.Files));
         await DriveWorkspace.InitializeAsync();
     }
 
@@ -3331,27 +3430,27 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         TasksWorkspace ??= new TasksWorkspaceViewModel(
-            _workspaceProvider, Accounts.ToArray(), _store);
-        await TasksWorkspace.UpdateAccountsAsync(Accounts.ToArray());
+            _workspaceProvider, AccountsWith(ProviderCapabilities.Tasks), _store);
+        await TasksWorkspace.UpdateAccountsAsync(AccountsWith(ProviderCapabilities.Tasks));
     }
 
     private async Task RefreshOwnedWorkspaceAccountsIfCreatedAsync()
     {
         if (CalendarWorkspace is not null)
         {
-            await CalendarWorkspace.UpdateAccountsAsync(Accounts.ToArray());
+            await CalendarWorkspace.UpdateAccountsAsync(AccountsWith(ProviderCapabilities.Calendar));
         }
         if (NotesWorkspace is not null)
         {
-            await NotesWorkspace.UpdateAccountsAsync(Accounts.ToArray());
+            await NotesWorkspace.UpdateAccountsAsync(AccountsWith(ProviderCapabilities.Notes));
         }
         if (DriveWorkspace is not null)
         {
-            await DriveWorkspace.UpdateAccountsAsync(Accounts.ToArray());
+            await DriveWorkspace.UpdateAccountsAsync(AccountsWith(ProviderCapabilities.Files));
         }
         if (TasksWorkspace is not null)
         {
-            await TasksWorkspace.UpdateAccountsAsync(Accounts.ToArray());
+            await TasksWorkspace.UpdateAccountsAsync(AccountsWith(ProviderCapabilities.Tasks));
         }
     }
 
@@ -4329,7 +4428,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         if (_provider is null)
         {
-            throw new InvalidOperationException("Connect a Microsoft 365 account before sending mail.");
+            throw new InvalidOperationException("Connect a mail account before sending mail.");
         }
 
         var mailboxLock = _draftSyncLocks.GetOrAdd(sender.Mailbox.Id, static _ => new SemaphoreSlim(1, 1));
@@ -4337,7 +4436,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         try
         {
             var local = await GetStoredDraftAsync(localDraftId);
-            if (_provider.SupportsCloudDrafts &&
+            if (_provider.SupportsCloudDraftsFor(sender.Account) &&
                 local?.ProviderDraftId is { Length: > 0 } providerDraftId &&
                 local.AccountId == sender.Account.AccountId &&
                 local.MailboxId == sender.Mailbox.Id)
@@ -4508,7 +4607,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         Replace(ContactOwners,
             from mailbox in Mailboxes
             join account in Accounts on mailbox.AccountId equals account.AccountId
-            where mailbox.IsShared || mailbox.Address.Equals(account.EmailAddress, StringComparison.OrdinalIgnoreCase)
+            where account.Capabilities.HasFlag(ProviderCapabilities.Contacts) &&
+                  (mailbox.IsShared || mailbox.Address.Equals(account.EmailAddress, StringComparison.OrdinalIgnoreCase))
             orderby mailbox.IsShared, mailbox.DisplayName
             select new ContactOwnerOption(account, mailbox));
         SelectedContactOwner = ContactOwners.FirstOrDefault(owner => owner.Mailbox.Id == selectedMailboxId)
@@ -4776,9 +4876,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         var draft = await GetStoredDraftAsync(id);
-        if (_provider?.SupportsCloudDrafts == true &&
-            draft?.ProviderDraftId is { Length: > 0 } providerDraftId &&
-            TryGetDraftContext(draft, out var account, out var mailbox))
+        if (draft?.ProviderDraftId is { Length: > 0 } providerDraftId &&
+            TryGetDraftContext(draft, out var account, out var mailbox) &&
+            _provider?.SupportsCloudDraftsFor(account) == true)
         {
             var mailboxLock = _draftSyncLocks.GetOrAdd(mailbox.Id, static _ => new SemaphoreSlim(1, 1));
             await mailboxLock.WaitAsync();
@@ -5007,7 +5107,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         if (Accounts.Count == 0)
         {
-            Error = "Connect a Microsoft 365 account before composing mail.";
+            Error = "Connect a mail account before composing mail.";
             return Task.CompletedTask;
         }
 
@@ -5252,6 +5352,9 @@ public sealed record AccountSettingsItem(MailAccount Account, IReadOnlyList<Shar
 {
     public string DisplayName => Account.DisplayName;
     public string EmailAddress => Account.EmailAddress;
+    public string ProviderName => Account.ProviderId == GoogleAuthService.Id ? "Google Workspace" : "Microsoft 365";
+    public string ProviderColor => Account.ProviderId == GoogleAuthService.Id ? "#4285F4" : "#0F6CBD";
+    public bool CanAddSharedMailbox => Account.Capabilities.HasFlag(ProviderCapabilities.SharedMailboxes);
     public bool HasSharedMailboxes => SharedMailboxes.Count > 0;
 }
 
@@ -5340,7 +5443,7 @@ public sealed record MailboxStatisticsItem(
     int FolderCount)
 {
     public string MailboxType => IsShared ? "Shared mailbox" : "Mailbox";
-    public string MessageCounts => $"{SyncedMessages:N0} synced locally | {CloudMessages:N0} on Microsoft 365";
+    public string MessageCounts => $"{SyncedMessages:N0} synced locally | {CloudMessages:N0} in cloud";
     public string DetailCounts =>
         $"Unread: {SyncedUnread:N0} local / {CloudUnread:N0} cloud | {Flagged:N0} flagged | {FolderCount:N0} folders";
 }
