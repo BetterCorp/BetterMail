@@ -6,6 +6,20 @@ namespace BetterMail.Tests;
 public sealed class ConversationThreadTests
 {
     [Fact]
+    public void HidesTheThreadListUntilThereIsSomethingLinked()
+    {
+        var viewModel = new ConversationThreadViewModel();
+        var first = Message("mailbox", "first", "thread", null, 1);
+
+        viewModel.Reconcile([first], first);
+        Assert.False(viewModel.ShowThreadList);
+
+        var second = Message("mailbox", "second", "thread", null, 2);
+        viewModel.Reconcile([first, second], first);
+        Assert.True(viewModel.ShowThreadList);
+    }
+
+    [Fact]
     public void ProjectsProviderNeutralThreadsWithSafeMissingIdFallback()
     {
         var messages = new[]

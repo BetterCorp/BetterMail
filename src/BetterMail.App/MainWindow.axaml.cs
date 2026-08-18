@@ -236,7 +236,14 @@ public sealed partial class MainWindow : Window
         UpdateMailPanes();
     }
 
-    private void MessageListPointerReleased(object? sender, PointerReleasedEventArgs args) => ShowPhoneMessage();
+    private void MessageListPointerReleased(object? sender, PointerReleasedEventArgs args)
+    {
+        if (MessageFrom(args.Source) is { } message)
+        {
+            SelectMessage(message);
+        }
+        ShowPhoneMessage();
+    }
 
     private void MessageSelectionChanged(object? sender, SelectionChangedEventArgs args)
     {
@@ -297,10 +304,9 @@ public sealed partial class MainWindow : Window
 
 
 
-    private void MessageDragPointerPressed(object? sender, PointerPressedEventArgs args)
+    private async void MessageDragPointerPressed(object? sender, PointerPressedEventArgs args)
     {
-        if (args.Source is Visual source &&
-            (source is Button || source.GetVisualAncestors().Any(static ancestor => ancestor is Button)))
+        if (IsButtonSource(args.Source))
         {
             return;
         }
@@ -327,6 +333,13 @@ public sealed partial class MainWindow : Window
         {
             selectedItems.Clear();
             selectedItems.Add(message);
+        }
+        SelectMessage(message);
+        if (args.ClickCount == 2)
+        {
+            args.Handled = true;
+            await OpenMessagePreviewAsync(message);
+            return;
         }
         _mailDragStart = args;
         _mailDragOrigin = args.GetPosition(this);
@@ -552,14 +565,13 @@ public sealed partial class MainWindow : Window
     private void CloseErrorClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
         _viewModel?.DismissError();
 
-    private async void MessageRowDoubleTapped(object? sender, TappedEventArgs args)
+    private async Task OpenMessagePreviewAsync(MailMessage message)
     {
-        if (sender is not Border { DataContext: MailMessage message } || _viewModel is null)
+        if (_viewModel is null)
         {
             return;
         }
 
-        args.Handled = true;
         var session = new PreviewWindowSession(message.MailboxId, message.ProviderId);
         var preview = await _viewModel.GetCachedPreviewAsync(session);
         if (preview is not null)
@@ -774,6 +786,23 @@ public sealed partial class MainWindow : Window
             selectedItems.Add(message);
         }
         _viewModel.SetSelectedMessages(selectedItems.OfType<MailMessage>(), message);
+    }
+
+    private static bool IsButtonSource(object? source) =>
+        source is Visual visual &&
+        (visual is Button || visual.GetVisualAncestors().Any(static ancestor => ancestor is Button));
+
+    private static MailMessage? MessageFrom(object? source)
+    {
+        if (source is not Control control)
+        {
+            return null;
+        }
+        return control.DataContext as MailMessage ??
+            control.GetVisualAncestors().OfType<Control>()
+                .Select(static ancestor => ancestor.DataContext)
+                .OfType<MailMessage>()
+                .FirstOrDefault();
     }
 
     private static void Execute(ICommand? command)

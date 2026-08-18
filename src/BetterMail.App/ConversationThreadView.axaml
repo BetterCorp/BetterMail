@@ -16,7 +16,7 @@
     </Style>
   </UserControl.Styles>
 
-  <Grid RowDefinitions="Auto,Auto,Auto,2*,5*">
+  <Grid RowDefinitions="Auto,Auto,Auto,Auto,*">
     <Border Padding="16,11"
             BorderBrush="{DynamicResource BetterMailDividerBrush}"
             BorderThickness="0,0,0,1">
@@ -114,6 +114,8 @@
     </Border>
 
     <ScrollViewer Grid.Row="3"
+                  MaxHeight="184"
+                  IsVisible="{Binding ShowThreadList}"
                   VerticalScrollBarVisibility="Auto"
                   AutomationProperties.Name="Conversation message headers">
       <StackPanel>

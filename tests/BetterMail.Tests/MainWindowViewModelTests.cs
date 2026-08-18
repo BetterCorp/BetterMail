@@ -1417,6 +1417,27 @@ public sealed class MainWindowViewModelTests
             Assert.Equal(1, provider.DeleteCount);
             Assert.Empty(await store.GetLocalDraftsAsync(cancellationToken));
 
+            var missingRemote = deleteDraft with
+            {
+                Id = "missing-remote",
+                ProviderDraftId = "already-gone",
+                SyncStatus = DraftSyncStatus.MissingRemote
+            };
+            await viewModel.SaveLocalDraftAsync(missingRemote);
+            await viewModel.DeleteLocalDraftAsync(missingRemote.Id);
+            Assert.Equal(1, provider.DeleteCount);
+
+            provider.DeleteAsMissing = true;
+            var staleConflict = missingRemote with
+            {
+                Id = "stale-conflict",
+                SyncStatus = DraftSyncStatus.Conflict
+            };
+            await viewModel.SaveLocalDraftAsync(staleConflict);
+            await viewModel.DeleteLocalDraftAsync(staleConflict.Id);
+            Assert.Equal(2, provider.DeleteCount);
+            Assert.Empty(await store.GetLocalDraftsAsync(cancellationToken));
+
             await viewModel.SaveLocalDraftAsync(local with
             {
                 Id = "invalid-recipient",
@@ -1890,6 +1911,7 @@ public sealed class MainWindowViewModelTests
         public int SendDraftCount { get; private set; }
         public int SendCount { get; private set; }
         public int DeleteCount { get; private set; }
+        public bool DeleteAsMissing { get; set; }
 
         public Task<IReadOnlyList<CloudDraft>> GetDraftsAsync(
             MailAccount account,
@@ -1928,6 +1950,13 @@ public sealed class MainWindowViewModelTests
             CancellationToken cancellationToken = default)
         {
             DeleteCount++;
+            if (DeleteAsMissing)
+            {
+                return Task.FromException(new HttpRequestException(
+                    "The specified object was not found in the store.",
+                    null,
+                    System.Net.HttpStatusCode.NotFound));
+            }
             _drafts.RemoveAll(candidate => candidate.ProviderId == draftId);
             return Task.CompletedTask;
         }

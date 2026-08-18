@@ -178,7 +178,8 @@ public sealed class MainWindowXamlTests
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding Drafts}" + (char)34, conversationXaml);
         Assert.Contains("OpenDraftCommand", conversationXaml);        Assert.DoesNotContain("quickActionsFade", xaml);
         Assert.DoesNotContain("<Border.OpacityMask>", xaml);
-        Assert.Contains("DoubleTapped=" + (char)34 + "MessageRowDoubleTapped" + (char)34, xaml);
+        Assert.DoesNotContain("DoubleTapped=" + (char)34 + "MessageRowDoubleTapped" + (char)34, xaml);
+        Assert.Contains("args.ClickCount == 2", mainWindowSource);
         Assert.Contains("DoubleTapped=" + (char)34 + "CalendarEventDoubleTapped" + (char)34, calendarXaml);
         Assert.Contains(BindingAttribute("IsVisible", "ShowWorkspaceSurface"), xaml);
         Assert.Contains(BindingAttribute("IsVisible", "ShowMailSurface"), xaml);

@@ -538,7 +538,6 @@
                 <Border Height="{ReflectionBinding $parent[Window].DataContext.MessageRowHeight}"
                         BorderBrush="{DynamicResource BetterMailDividerBrush}"
                         BorderThickness="0,0,0,1"
-                        DoubleTapped="MessageRowDoubleTapped"
                         PointerPressed="MessageDragPointerPressed"
                         PointerMoved="MessageDragPointerMoved">
                   <Border.ContextMenu>

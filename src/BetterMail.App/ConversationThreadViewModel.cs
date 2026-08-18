@@ -171,6 +171,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
     public bool HasThread => SelectedThread is not null;
     public bool HasNoThread => !HasThread;
     public bool HasDrafts => Drafts.Count > 0;
+    public bool ShowThreadList => (SelectedThread?.Messages.Count ?? 0) + Drafts.Count > 1;
     public string ThreadItemCountText => $"{(SelectedThread?.Messages.Count ?? 0) + Drafts.Count} items";
 
     public void ReconcileDrafts(IEnumerable<LocalDraft> drafts)
@@ -186,6 +187,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
             .OrderBy(static draft => draft.UpdatedAt)
             .ToArray());
         RaisePropertyChanged(nameof(HasDrafts));
+        RaisePropertyChanged(nameof(ShowThreadList));
         RaisePropertyChanged(nameof(ThreadItemCountText));
     }
 
@@ -232,6 +234,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
         var selected = SelectedThread?.Messages.FirstOrDefault(message => message.Identity == selectedIdentity)
             ?? SelectedThread?.Messages.LastOrDefault();
         Select(selected);
+        RaisePropertyChanged(nameof(ShowThreadList));
         RaisePropertyChanged(nameof(ThreadItemCountText));
     }
 

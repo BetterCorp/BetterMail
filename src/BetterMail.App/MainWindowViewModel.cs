@@ -1525,6 +1525,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         if (_mailProviders.Count > 0)
         {
             _provider = new MailProviderRouter(_mailProviders.Select(static pair => (pair.Key, pair.Value)));
+            RefreshMailActionCommands();
         }
     }
 
@@ -5096,9 +5097,17 @@ public sealed class MainWindowViewModel : ViewModelBase
             try
             {
                 draft = await GetStoredDraftAsync(id);
-                if (draft?.ProviderDraftId is { Length: > 0 } currentProviderDraftId)
+                if (draft?.ProviderDraftId is { Length: > 0 } currentProviderDraftId &&
+                    draft.SyncStatus != DraftSyncStatus.MissingRemote)
                 {
-                    await _provider.DeleteDraftAsync(account, mailbox, currentProviderDraftId);
+                    try
+                    {
+                        await _provider.DeleteDraftAsync(account, mailbox, currentProviderDraftId);
+                    }
+                    catch (HttpRequestException exception) when (exception.StatusCode == HttpStatusCode.NotFound)
+                    {
+                        // The desired server state is already true; remove the stale local draft.
+                    }
                 }
                 await DeleteLocalDraftRecordAsync(id);
             }
