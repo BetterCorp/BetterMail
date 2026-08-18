@@ -53,6 +53,28 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task CancellingSignInReleasesTheLoader()
+    {
+        var viewModel = new MainWindowViewModel(null, "data", _ => { }, _ => { }, null);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var signIn = viewModel.RunSignInAsync("Opening sign-in...", async cancellationToken =>
+        {
+            started.SetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        });
+        await started.Task;
+
+        Assert.True(viewModel.CanCancelSignIn);
+        Assert.True(viewModel.ShowFullScreenLoader);
+        await ((AsyncCommand)viewModel.CancelSignInCommand).ExecuteAsync();
+        await signIn;
+
+        Assert.False(viewModel.CanCancelSignIn);
+        Assert.False(viewModel.IsBusy);
+        Assert.Equal("Sign-in cancelled", viewModel.Status);
+    }
+
+    [Fact]
     public async Task SettingsShowsLocalAndCloudMailboxStatistics()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

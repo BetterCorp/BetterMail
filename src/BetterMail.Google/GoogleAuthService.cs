@@ -159,68 +159,85 @@ public sealed class GoogleAuthService(
 
         using var client = await listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
         var callback = await ReadCallbackAsync(client, cancellationToken).ConfigureAwait(false);
-        var callbackSucceeded = callback.Error is null && callback.State == state &&
-            !string.IsNullOrWhiteSpace(callback.Code);
-        await WriteBrowserResponseAsync(client, callbackSucceeded, cancellationToken).ConfigureAwait(false);
-        if (callback.State != state)
+        try
         {
-            throw new InvalidOperationException("Google sign-in returned an invalid state value.");
-        }
-        if (callback.Error is not null)
-        {
-            throw new InvalidOperationException($"Google sign-in failed: {callback.Error}");
-        }
-        if (string.IsNullOrWhiteSpace(callback.Code))
-        {
-            throw new InvalidOperationException("Google sign-in did not return an authorization code.");
-        }
+            if (callback.State != state)
+            {
+                throw new InvalidOperationException("Google sign-in returned an invalid state value.");
+            }
+            if (callback.Error is not null)
+            {
+                throw new InvalidOperationException($"Google sign-in failed: {callback.Error}");
+            }
+            if (string.IsNullOrWhiteSpace(callback.Code))
+            {
+                throw new InvalidOperationException("Google sign-in did not return an authorization code.");
+            }
 
-        var fields = new Dictionary<string, string>
-        {
-            ["client_id"] = options.ClientId,
-            ["code"] = callback.Code,
-            ["code_verifier"] = verifier,
-            ["grant_type"] = "authorization_code",
-            ["redirect_uri"] = redirectUri
-        };
-        using var tokenResponse = await _http.PostAsync(
-            "https://oauth2.googleapis.com/token",
-            new FormUrlEncodedContent(fields),
-            cancellationToken).ConfigureAwait(false);
-        using var tokenDocument = await ReadJsonAsync(tokenResponse, cancellationToken).ConfigureAwait(false);
-        var tokenRoot = tokenDocument.RootElement;
-        var accessToken = RequiredString(tokenRoot, "access_token");
-        var refreshToken = RequiredString(tokenRoot, "refresh_token");
-        var scopes = RequiredString(tokenRoot, "scope");
-        EnsureScopes(scopes);
+            var fields = new Dictionary<string, string>
+            {
+                ["client_id"] = options.ClientId,
+                ["code"] = callback.Code,
+                ["code_verifier"] = verifier,
+                ["grant_type"] = "authorization_code",
+                ["redirect_uri"] = redirectUri
+            };
+            using var tokenResponse = await _http.PostAsync(
+                "https://oauth2.googleapis.com/token",
+                new FormUrlEncodedContent(fields),
+                cancellationToken).ConfigureAwait(false);
+            using var tokenDocument = await ReadJsonAsync(tokenResponse, cancellationToken).ConfigureAwait(false);
+            var tokenRoot = tokenDocument.RootElement;
+            var accessToken = RequiredString(tokenRoot, "access_token");
+            var refreshToken = RequiredString(tokenRoot, "refresh_token");
+            var scopes = RequiredString(tokenRoot, "scope");
+            EnsureScopes(scopes);
 
-        using var profileRequest = new HttpRequestMessage(
-            HttpMethod.Get, "https://openidconnect.googleapis.com/v1/userinfo");
-        profileRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        using var profileResponse = await _http.SendAsync(profileRequest, cancellationToken).ConfigureAwait(false);
-        using var profileDocument = await ReadJsonAsync(profileResponse, cancellationToken).ConfigureAwait(false);
-        var profile = profileDocument.RootElement;
-        var accountId = RequiredString(profile, "sub");
-        if (expectedAccountId is not null && accountId != expectedAccountId)
-        {
-            throw new InvalidOperationException("Choose the same Google account when re-authenticating.");
+            using var profileRequest = new HttpRequestMessage(
+                HttpMethod.Get, "https://openidconnect.googleapis.com/v1/userinfo");
+            profileRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            using var profileResponse = await _http.SendAsync(profileRequest, cancellationToken).ConfigureAwait(false);
+            using var profileDocument = await ReadJsonAsync(profileResponse, cancellationToken).ConfigureAwait(false);
+            var profile = profileDocument.RootElement;
+            var accountId = RequiredString(profile, "sub");
+            if (expectedAccountId is not null && accountId != expectedAccountId)
+            {
+                throw new InvalidOperationException("Choose the same Google account when re-authenticating.");
+            }
+            var email = RequiredString(profile, "email");
+
+            using var gmailRequest = new HttpRequestMessage(
+                HttpMethod.Get, "https://gmail.googleapis.com/gmail/v1/users/me/profile");
+            gmailRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            using var gmailResponse = await _http.SendAsync(gmailRequest, cancellationToken).ConfigureAwait(false);
+            using var gmailDocument = await ReadJsonAsync(gmailResponse, cancellationToken).ConfigureAwait(false);
+            if (!string.Equals(RequiredString(gmailDocument.RootElement, "emailAddress"), email, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Google returned a different Gmail account than the signed-in profile.");
+            }
+
+            var account = new MailAccount(
+                Id,
+                accountId,
+                profile.TryGetProperty("hd", out var domain) ? domain.GetString() ?? "" : "",
+                email,
+                profile.TryGetProperty("name", out var name) ? name.GetString() ?? email : email,
+                Capabilities);
+            await tokenStore.SaveProviderTokenAsync(new ProviderToken(
+                Id,
+                accountId,
+                accessToken,
+                refreshToken,
+                DateTimeOffset.UtcNow.AddSeconds(tokenRoot.GetProperty("expires_in").GetInt32()),
+                scopes), cancellationToken).ConfigureAwait(false);
+            await TryWriteBrowserResponseAsync(client, success: true, cancellationToken).ConfigureAwait(false);
+            return account;
         }
-        var email = RequiredString(profile, "email");
-        var account = new MailAccount(
-            Id,
-            accountId,
-            profile.TryGetProperty("hd", out var domain) ? domain.GetString() ?? "" : "",
-            email,
-            profile.TryGetProperty("name", out var name) ? name.GetString() ?? email : email,
-            Capabilities);
-        await tokenStore.SaveProviderTokenAsync(new ProviderToken(
-            Id,
-            accountId,
-            accessToken,
-            refreshToken,
-            DateTimeOffset.UtcNow.AddSeconds(tokenRoot.GetProperty("expires_in").GetInt32()),
-            scopes), cancellationToken).ConfigureAwait(false);
-        return account;
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            await TryWriteBrowserResponseAsync(client, success: false, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
     }
 
     private static async Task<OAuthCallback> ReadCallbackAsync(
@@ -250,14 +267,71 @@ public sealed class GoogleAuthService(
         bool success,
         CancellationToken cancellationToken)
     {
-        var body = success
-            ? "<html><body><h2>BetterMail is connected.</h2><p>You can close this window.</p></body></html>"
-            : "<html><body><h2>BetterMail could not connect.</h2><p>Return to the app for details.</p></body></html>";
+        var body = BrowserResponseHtml(success);
         var bytes = Encoding.UTF8.GetBytes(body);
         var header = Encoding.ASCII.GetBytes(
             $"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {bytes.Length}\r\nConnection: close\r\n\r\n");
         await client.GetStream().WriteAsync(header, cancellationToken).ConfigureAwait(false);
         await client.GetStream().WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task TryWriteBrowserResponseAsync(
+        TcpClient client,
+        bool success,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await WriteBrowserResponseAsync(client, success, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or SocketException or ObjectDisposedException)
+        {
+            // The app connection is complete even if the browser closed before rendering the result page.
+        }
+    }
+
+    internal static string BrowserResponseHtml(bool success)
+    {
+        var title = success ? "You're connected" : "Connection unsuccessful";
+        var message = success
+            ? "Google Workspace is now connected to BetterMail. Your inbox will begin syncing securely."
+            : "BetterMail could not finish connecting Google Workspace. Return to the app for details and try again.";
+        var mark = success ? "✓" : "!";
+        var accent = success ? "#55d6a0" : "#ff8a80";
+        return $$"""
+            <!doctype html>
+            <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>{{title}} · BetterMail</title>
+              <style>
+                :root { color-scheme: dark; font-family: "Segoe UI", Inter, system-ui, sans-serif; }
+                * { box-sizing: border-box; }
+                body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; color: #f7f9fc; background: radial-gradient(circle at 20% 10%, #173f68 0, transparent 38%), radial-gradient(circle at 85% 85%, #263a73 0, transparent 34%), #0b1422; }
+                main { width: min(100%, 520px); padding: 42px; text-align: center; border: 1px solid rgba(255,255,255,.12); border-radius: 22px; background: rgba(17,29,47,.82); box-shadow: 0 28px 80px rgba(0,0,0,.38); backdrop-filter: blur(18px); }
+                .brand { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 30px; font-size: 15px; font-weight: 650; letter-spacing: .02em; color: #dceaff; }
+                .logo { width: 30px; height: 24px; position: relative; overflow: hidden; border-radius: 6px; background: linear-gradient(145deg, #60aef5, #4776e6); box-shadow: 0 8px 22px rgba(69,130,230,.35); }
+                .logo::after { content: ""; position: absolute; inset: 4px 3px auto; height: 12px; border: solid rgba(255,255,255,.9); border-width: 0 2px 2px; transform: rotate(45deg); }
+                .mark { width: 72px; height: 72px; display: grid; place-items: center; margin: 0 auto 22px; border-radius: 50%; color: {{accent}}; background: color-mix(in srgb, {{accent}} 13%, transparent); border: 1px solid color-mix(in srgb, {{accent}} 45%, transparent); font-size: 36px; font-weight: 500; }
+                h1 { margin: 0 0 12px; font-size: clamp(28px, 7vw, 38px); line-height: 1.12; letter-spacing: -.035em; }
+                p { margin: 0; color: #b9c8dc; font-size: 16px; line-height: 1.65; }
+                .hint { margin-top: 28px; padding: 11px 15px; border-radius: 999px; background: rgba(255,255,255,.055); color: #91a6bf; font-size: 13px; }
+                @media (prefers-color-scheme: light) { :root { color-scheme: light; } body { color: #172338; background: radial-gradient(circle at 20% 10%, #d9ecff 0, transparent 40%), radial-gradient(circle at 85% 85%, #e4e7ff 0, transparent 36%), #f4f7fb; } main { background: rgba(255,255,255,.86); border-color: rgba(36,74,114,.12); box-shadow: 0 28px 80px rgba(43,72,104,.16); } .brand { color: #21466f; } p { color: #53677f; } .hint { color: #647990; background: rgba(35,70,110,.055); } }
+                @media (max-width: 520px) { main { padding: 32px 24px; } }
+              </style>
+            </head>
+            <body>
+              <main>
+                <div class="brand"><span class="logo" aria-hidden="true"></span>BetterMail</div>
+                <div class="mark" aria-hidden="true">{{mark}}</div>
+                <h1>{{title}}</h1>
+                <p>{{message}}</p>
+                <div class="hint">You can close this tab and return to BetterMail.</div>
+              </main>
+            </body>
+            </html>
+            """;
     }
 
     private static Dictionary<string, string> ParseQuery(string query) => query

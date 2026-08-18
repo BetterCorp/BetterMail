@@ -82,6 +82,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private int _selectionVersion;
     private CancellationTokenSource? _selectionWorkCancellation;
     private CancellationTokenSource? _globalSearchCancellation;
+    private CancellationTokenSource? _signInCancellation;
     // ponytail: one small shared result set; use UI-thread dispatch if search mutation grows.
     private readonly object _globalSearchResultsGate = new();
     private string? _dismissedSearchText;
@@ -173,6 +174,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         ConnectCommand = new AsyncCommand(ConnectAsync, () => _store is not null);
         ConnectGoogleCommand = new AsyncCommand(ConnectGoogleAsync, () => _store is not null);
+        CancelSignInCommand = new AsyncCommand(CancelSignInAsync, () => CanCancelSignIn);
         AddSharedMailboxForAccountCommand = new AsyncCommand<MailAccount>(RequestSharedMailboxAsync);
         ReauthenticateAccountCommand = new AsyncCommand<MailAccount>(ReauthenticateAccountAsync);
         SyncCommand = new AsyncCommand(SyncAsync, () => Accounts.Count > 0 && _provider is not null && !IsSyncing);
@@ -379,6 +381,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public ICommand ConnectCommand { get; }
     public ICommand ConnectGoogleCommand { get; }
+    public ICommand CancelSignInCommand { get; }
     public ICommand AddSharedMailboxForAccountCommand { get; }
     public ICommand ReauthenticateAccountCommand { get; }
     public ICommand SyncCommand { get; }
@@ -684,6 +687,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public bool HasAccounts => Accounts.Count > 0;
     public bool ShowOnboarding => _initializationComplete && !HasAccounts;
     public bool ShowFullScreenLoader => !_initializationComplete || IsBusy;
+    public bool CanCancelSignIn => _signInCancellation is { IsCancellationRequested: false };
     public bool IsDraftsView
     {
         get => _isDraftsView;
@@ -1432,11 +1436,11 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         MailAccount? connectedAccount = null;
-        await RunBusyAsync("Opening Microsoft sign-in…", async () =>
+        await RunSignInAsync("Opening Microsoft sign-in…", async cancellationToken =>
         {
-            await EnsureProviderAsync(Microsoft365AuthService.Id);
+            await EnsureProviderAsync(Microsoft365AuthService.Id, cancellationToken);
             StartAutoSync();
-            var account = await _accountProviders[Microsoft365AuthService.Id].SignInAsync();
+            var account = await _accountProviders[Microsoft365AuthService.Id].SignInAsync(cancellationToken);
             await AddConnectedAccountAsync(account);
             connectedAccount = account;
         });
@@ -1454,11 +1458,11 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         MailAccount? connectedAccount = null;
-        await RunBusyAsync("Opening Google sign-in...", async () =>
+        await RunSignInAsync("Opening Google sign-in...", async cancellationToken =>
         {
-            await EnsureProviderAsync(GoogleAuthService.Id);
+            await EnsureProviderAsync(GoogleAuthService.Id, cancellationToken);
             StartAutoSync();
-            var account = await _accountProviders[GoogleAuthService.Id].SignInAsync();
+            var account = await _accountProviders[GoogleAuthService.Id].SignInAsync(cancellationToken);
             await AddConnectedAccountAsync(account);
             connectedAccount = account;
         });
@@ -1485,6 +1489,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             Mailboxes.Add(primaryMailbox);
         }
         RebuildSenderSettings();
+        await LoadFoldersAsync();
         await RefreshOwnedWorkspaceAccountsIfCreatedAsync();
         ((AsyncCommand)SyncCommand).Refresh();
         ((AsyncCommand)ToggleReadCommand).Refresh();
@@ -1494,7 +1499,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(SettingsAccounts));
     }
 
-    private async Task EnsureProviderAsync(string providerId)
+    private async Task EnsureProviderAsync(string providerId, CancellationToken cancellationToken = default)
     {
         if (_store is null || _accountProviders.ContainsKey(providerId))
         {
@@ -1504,12 +1509,13 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             case Microsoft365AuthService.Id:
                 _microsoftAuthentication = await Microsoft365AuthService.CreateAsync(
-                    Microsoft365Options.Create(_dataDirectory));
+                    Microsoft365Options.Create(_dataDirectory), cancellationToken);
                 _accountProviders[providerId] = _microsoftAuthentication;
                 _mailProviders[providerId] = new Microsoft365MailProvider(_microsoftAuthentication);
                 _workspaceProvider ??= new Microsoft365WorkspaceProvider(_microsoftAuthentication);
                 break;
             case GoogleAuthService.Id:
+                cancellationToken.ThrowIfCancellationRequested();
                 _googleAuthentication = new GoogleAuthService(GoogleOptions.Create(), _store);
                 _accountProviders[providerId] = _googleAuthentication;
                 _mailProviders[providerId] = new GoogleGmailProvider(_googleAuthentication);
@@ -1678,10 +1684,10 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        await RunBusyAsync($"Re-authenticating {account.EmailAddress}...", async () =>
+        await RunSignInAsync($"Re-authenticating {account.EmailAddress}...", async cancellationToken =>
         {
-            await EnsureProviderAsync(account.ProviderId);
-            var refreshed = await _accountProviders[account.ProviderId].ReauthenticateAsync(account.AccountId);
+            await EnsureProviderAsync(account.ProviderId, cancellationToken);
+            var refreshed = await _accountProviders[account.ProviderId].ReauthenticateAsync(account.AccountId, cancellationToken);
             await _store.SaveAccountAsync(refreshed);
             var index = Accounts.IndexOf(account);
             if (index >= 0)
@@ -5378,6 +5384,10 @@ public sealed class MainWindowViewModel : ViewModelBase
             await work();
             Status = "Up to date";
         }
+        catch (OperationCanceledException)
+        {
+            Status = "Action cancelled";
+        }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             Error = exception.Message;
@@ -5387,6 +5397,56 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             IsBusy = false;
         }
+    }
+
+    internal async Task RunSignInAsync(string status, Func<CancellationToken, Task> work)
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        using var cancellation = new CancellationTokenSource();
+        _signInCancellation = cancellation;
+        RefreshSignInCancellationState();
+        var completed = false;
+        try
+        {
+            await RunBusyAsync(status, async () =>
+            {
+                await work(cancellation.Token);
+                completed = true;
+            });
+            if (cancellation.IsCancellationRequested && !completed)
+            {
+                Status = "Sign-in cancelled";
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(_signInCancellation, cancellation))
+            {
+                _signInCancellation = null;
+                RefreshSignInCancellationState();
+            }
+        }
+    }
+
+    private Task CancelSignInAsync()
+    {
+        if (_signInCancellation is { IsCancellationRequested: false } cancellation)
+        {
+            cancellation.Cancel();
+            Status = "Cancelling sign-in...";
+            RefreshSignInCancellationState();
+        }
+        return Task.CompletedTask;
+    }
+
+    private void RefreshSignInCancellationState()
+    {
+        RaisePropertyChanged(nameof(CanCancelSignIn));
+        ((AsyncCommand)CancelSignInCommand).Refresh();
     }
 
     private void RaiseMessageState()

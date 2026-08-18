@@ -1059,6 +1059,16 @@
         <Image Source="/Assets/BetterMail.png" Width="48" Height="48" HorizontalAlignment="Center" />
         <ProgressBar IsIndeterminate="True" Width="220" />
         <TextBlock Text="{Binding Status}" HorizontalAlignment="Center" />
+        <Button Classes="command"
+                Content="Cancel sign-in"
+                Command="{Binding CancelSignInCommand}"
+                IsVisible="{Binding CanCancelSignIn}"
+                Background="{DynamicResource BetterMailNeutralItemBrush}"
+                BorderBrush="{DynamicResource BetterMailDividerBrush}"
+                BorderThickness="1"
+                Opacity="0.84"
+                HorizontalAlignment="Center"
+                AutomationProperties.Name="Cancel sign-in" />
       </StackPanel>
     </Border>
 

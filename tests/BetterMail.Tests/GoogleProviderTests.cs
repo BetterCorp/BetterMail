@@ -46,6 +46,18 @@ public sealed class GoogleProviderTests
     }
 
     [Fact]
+    public void RendersBrandedBrowserCompletionPages()
+    {
+        var success = GoogleAuthService.BrowserResponseHtml(true);
+        var failure = GoogleAuthService.BrowserResponseHtml(false);
+
+        Assert.Contains("You're connected", success);
+        Assert.Contains("BetterMail", success);
+        Assert.Contains("prefers-color-scheme", success);
+        Assert.Contains("Connection unsuccessful", failure);
+    }
+
+    [Fact]
     public void MapsGmailPayloadAndPrimaryFolder()
     {
         var body = Convert.ToBase64String(Encoding.UTF8.GetBytes("<p>Hello</p>"))
