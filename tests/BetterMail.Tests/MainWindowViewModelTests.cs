@@ -1599,8 +1599,17 @@ public sealed class MainWindowViewModelTests
             Assert.True(shared.IsShared);
             Assert.True(shared.CanSendAs);
             var setting = Assert.Single(Assert.Single(viewModel.SettingsAccounts).SharedMailboxes);
+            var permissionChanged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            viewModel.PropertyChanged += (_, args) =>
+            {
+                if (args.PropertyName == nameof(MainWindowViewModel.SettingsAccounts))
+                {
+                    permissionChanged.TrySetResult();
+                }
+            };
             setting.SelectedPermission = "Send on behalf";
-            await WaitUntilAsync(() => viewModel.Mailboxes.Single(mailbox => mailbox.Id == shared.Id).CanSendOnBehalf, cancellationToken);
+            await permissionChanged.Task.WaitAsync(cancellationToken);
+            Assert.True(viewModel.Mailboxes.Single(mailbox => mailbox.Id == shared.Id).CanSendOnBehalf);
             Assert.False(viewModel.Mailboxes.Single(mailbox => mailbox.Id == shared.Id).CanSendAs);
         }
         finally
