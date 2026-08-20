@@ -22,6 +22,48 @@ public sealed class MainWindowViewModelTests
         Assert.Equal(expected, MainWindow.UsesInlineMailActions(width));
 
     [Theory]
+    [InlineData(KeyModifiers.None, false)]
+    [InlineData(KeyModifiers.Control, true)]
+    [InlineData(KeyModifiers.Shift, true)]
+    public void PreservesMultipleMailSelectionOnlyWithASelectionModifier(
+        KeyModifiers modifiers,
+        bool expected) =>
+        Assert.Equal(expected, MainWindow.PreservesMultiSelection(modifiers));
+
+    [Fact]
+    public void AccountDraftFolderShowsOnlyThatMailboxesEditableDrafts()
+    {
+        var viewModel = new MainWindowViewModel(null, "data", _ => { }, _ => { }, null);
+        var first = new LocalDraft(
+            "first", "account-one", "mailbox-one", "one@example.com", "", "", "First", "Body", [],
+            DateTimeOffset.UtcNow);
+        var second = first with
+        {
+            Id = "second",
+            AccountId = "account-two",
+            MailboxId = "mailbox-two",
+            Subject = "Second"
+        };
+        viewModel.Drafts.Add(first);
+        viewModel.Drafts.Add(second);
+        var accountDrafts = new MailFolderItem(
+            new MailFolder(first.MailboxId, "provider-drafts", "Drafts", 0, 1, "drafts"),
+            "First account");
+
+        viewModel.SelectFolderCommand.Execute(accountDrafts);
+
+        Assert.True(viewModel.IsDraftsView);
+        Assert.False(viewModel.IsAllDraftsView);
+        Assert.True(accountDrafts.IsSelected);
+        Assert.Equal(first.Id, Assert.Single(viewModel.VisibleDrafts).Id);
+
+        viewModel.ShowDraftsCommand.Execute(null);
+
+        Assert.True(viewModel.IsAllDraftsView);
+        Assert.Equal(2, viewModel.VisibleDrafts.Count);
+    }
+
+    [Theory]
     [InlineData(Key.Escape, false, true, false, false, 1)]
     [InlineData(Key.Escape, true, false, true, false, 2)]
     [InlineData(Key.Escape, false, false, true, false, 0)]

@@ -238,7 +238,7 @@ public sealed partial class MainWindow : Window
 
     private void MessageListPointerReleased(object? sender, PointerReleasedEventArgs args)
     {
-        if (MessageFrom(args.Source) is { } message)
+        if (!PreservesMultiSelection(args.KeyModifiers) && MessageFrom(args.Source) is { } message)
         {
             SelectMessage(message);
         }
@@ -304,7 +304,7 @@ public sealed partial class MainWindow : Window
 
 
 
-    private async void MessageDragPointerPressed(object? sender, PointerPressedEventArgs args)
+    private void MessageDragPointerPressed(object? sender, PointerPressedEventArgs args)
     {
         if (IsButtonSource(args.Source))
         {
@@ -315,34 +315,39 @@ public sealed partial class MainWindow : Window
             return;
         }
         var properties = args.GetCurrentPoint(this).Properties;
+        var selectedItems = MessageList.SelectedItems;
+        if (selectedItems is null)
+        {
+            return;
+        }
         if (properties.IsRightButtonPressed)
         {
-            SelectMessage(message);
+            SelectMessage(message, selectedItems.Contains(message));
             return;
         }
         if (!properties.IsLeftButtonPressed)
         {
             return;
         }
-        var selectedItems = MessageList.SelectedItems;
-        if (selectedItems is null)
-        {
-            return;
-        }
-        if (!selectedItems.Contains(message))
+        if (!PreservesMultiSelection(args.KeyModifiers) && !selectedItems.Contains(message))
         {
             selectedItems.Clear();
             selectedItems.Add(message);
         }
-        SelectMessage(message);
-        if (args.ClickCount == 2)
-        {
-            args.Handled = true;
-            await OpenMessagePreviewAsync(message);
-            return;
-        }
         _mailDragStart = args;
         _mailDragOrigin = args.GetPosition(this);
+    }
+
+    private async void MessageRowDoubleTapped(object? sender, TappedEventArgs args)
+    {
+        if (IsButtonSource(args.Source) || sender is not Border { DataContext: MailMessage message })
+        {
+            return;
+        }
+        args.Handled = true;
+        _mailDragStart = null;
+        SelectMessage(message);
+        await OpenMessagePreviewAsync(message);
     }
 
     private async void MessageDragPointerMoved(object? sender, PointerEventArgs args)
@@ -663,11 +668,11 @@ public sealed partial class MainWindow : Window
                 var hydrated = await viewModel.LoadAttachmentContentAsync(message, attachment);
                 if (hydrated is not null && window is not null)
                 {
-                    new FilePreviewWindow(
+                    IndependentWindow.Show(new FilePreviewWindow(
                         hydrated.Name,
                         hydrated.ContentType,
                         hydrated.Size,
-                        hydrated.ContentBytes).Show(window);
+                        hydrated.ContentBytes));
                 }
             });
         previewViewModel.Reconcile(preview.Messages, preview.Selected);
@@ -769,7 +774,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void SelectMessage(MailMessage message)
+    private void SelectMessage(MailMessage message, bool preserveExisting = false)
     {
         if (_viewModel is null)
         {
@@ -780,13 +785,16 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
-        if (!selectedItems.Contains(message))
+        if (!preserveExisting && (selectedItems.Count != 1 || !selectedItems.Contains(message)))
         {
             selectedItems.Clear();
             selectedItems.Add(message);
         }
         _viewModel.SetSelectedMessages(selectedItems.OfType<MailMessage>(), message);
     }
+
+    internal static bool PreservesMultiSelection(KeyModifiers modifiers) =>
+        modifiers.HasFlag(KeyModifiers.Control) || modifiers.HasFlag(KeyModifiers.Shift);
 
     private static bool IsButtonSource(object? source) =>
         source is Visual visual &&
@@ -923,7 +931,7 @@ public sealed partial class MainWindow : Window
         };
         SaveWindowSessions();
         _ = composeViewModel.FlushDraftAsync();
-        _ = window.ShowDialog<bool>(this);
+        IndependentWindow.Show(window);
     }
 
     private void SaveWindowSessions() => _windowSessions?.Save(new WindowSessionState(
@@ -978,11 +986,11 @@ public sealed partial class MainWindow : Window
         }
 
         var window = new SharedMailboxWindow(account, _viewModel.AddSharedMailboxAsync);
-        _ = window.ShowDialog<bool>(this);
+        IndependentWindow.Show(window);
     }
 
     private void OpenHeaders(MailHeadersDocument document) =>
-        new MailHeadersWindow(document).Show(this);
+        IndependentWindow.Show(new MailHeadersWindow(document));
 
     private async void PreviewAttachmentClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
@@ -995,11 +1003,11 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
-        new FilePreviewWindow(
+        IndependentWindow.Show(new FilePreviewWindow(
             hydrated.Name,
             hydrated.ContentType,
             hydrated.Size,
-            hydrated.ContentBytes).Show(this);
+            hydrated.ContentBytes));
     }
 
 }

@@ -1,4 +1,3 @@
-using Avalonia.Controls;
 using Velopack;
 using Velopack.Sources;
 
@@ -33,18 +32,18 @@ internal sealed class AppUpdater : IDisposable
         return null;
     }
 
-    public async Task StartAsync(Window owner)
+    public async Task StartAsync()
     {
         var update = await CheckQuietlyAsync();
         if (update is not null)
         {
-            await OfferUpdateAsync(owner, update);
+            await OfferUpdateAsync(update);
         }
 
         _ = MonitorAsync();
     }
 
-    public async Task CheckNowAsync(Window owner)
+    public async Task CheckNowAsync()
     {
         UpdateInfo? update;
         try
@@ -54,7 +53,6 @@ internal sealed class AppUpdater : IDisposable
         catch (Exception exception)
         {
             await UpdateWindow.MessageAsync(
-                owner,
                 "Update check failed",
                 $"BetterMail could not check for updates. {exception.Message}");
             return;
@@ -63,13 +61,12 @@ internal sealed class AppUpdater : IDisposable
         if (update is null)
         {
             await UpdateWindow.MessageAsync(
-                owner,
                 "BetterMail is up to date",
                 "You already have the latest available version.");
             return;
         }
 
-        await OfferUpdateAsync(owner, update);
+        await OfferUpdateAsync(update);
     }
 
     public void Dispose()
@@ -111,13 +108,13 @@ internal sealed class AppUpdater : IDisposable
         }
     }
 
-    private async Task OfferUpdateAsync(Window owner, UpdateInfo update)
+    private async Task OfferUpdateAsync(UpdateInfo update)
     {
         _releases.Observe(update.TargetFullRelease.Version.ToString());
         var download = StartStaging(update);
-        if (await UpdateWindow.PromptAsync(owner, update.TargetFullRelease.Version.ToString()))
+        if (await UpdateWindow.PromptAsync(update.TargetFullRelease.Version.ToString()))
         {
-            await FinishUpdateNowAsync(owner, update.TargetFullRelease, download);
+            await FinishUpdateNowAsync(update.TargetFullRelease, download);
         }
     }
 
@@ -139,14 +136,13 @@ internal sealed class AppUpdater : IDisposable
     }
 
     private async Task FinishUpdateNowAsync(
-        Window owner,
         VelopackAsset release,
         UpdateDownload download)
     {
         var progressWindow = new UpdateWindow(release.Version.ToString());
         download.ProgressChanged += progressWindow.ReportProgress;
         progressWindow.ReportProgress(download.Progress);
-        var closed = progressWindow.ShowDialog(owner);
+        var closed = IndependentWindow.ShowAsync(progressWindow);
         var error = await download.Completion;
         if (error is not null)
         {

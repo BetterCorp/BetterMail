@@ -31,7 +31,7 @@ public sealed class Microsoft365MailProvider(
     {
         var folders = new List<MailFolder>();
         var endpoints = new Queue<(string Endpoint, string? ParentId)>();
-        endpoints.Enqueue(($"{MailboxPath(account, mailbox)}/mailFolders?$select=id,displayName,unreadItemCount,totalItemCount,childFolderCount&$top=100", null));
+        endpoints.Enqueue(($"{MailboxPath(account, mailbox)}/mailFolders?$select=id,displayName,unreadItemCount,totalItemCount,childFolderCount,wellKnownName&$top=100", null));
         while (endpoints.Count > 0)
         {
             var (endpoint, parentId) = endpoints.Dequeue();
@@ -45,10 +45,11 @@ public sealed class Microsoft365MailProvider(
                     RequiredString(folder, "displayName"),
                     folder.GetProperty("unreadItemCount").GetInt32(),
                     folder.GetProperty("totalItemCount").GetInt32(),
+                    folder.TryGetProperty("wellKnownName", out var wellKnownName) ? wellKnownName.GetString() : null,
                     ParentProviderId: parentId));
                 if (folder.TryGetProperty("childFolderCount", out var childCount) && childCount.GetInt32() > 0)
                 {
-                    endpoints.Enqueue(($"{MailboxPath(account, mailbox)}/mailFolders/{Uri.EscapeDataString(folderId)}/childFolders?$select=id,displayName,unreadItemCount,totalItemCount,childFolderCount&$top=100", folderId));
+                    endpoints.Enqueue(($"{MailboxPath(account, mailbox)}/mailFolders/{Uri.EscapeDataString(folderId)}/childFolders?$select=id,displayName,unreadItemCount,totalItemCount,childFolderCount,wellKnownName&$top=100", folderId));
                 }
             }
 

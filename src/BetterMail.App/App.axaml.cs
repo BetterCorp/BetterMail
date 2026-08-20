@@ -177,8 +177,8 @@ public sealed partial class App : Application
         if (_updater is not null)
         {
             var updater = _updater;
-            mainWindow.CheckForUpdatesAsync = () => updater.CheckNowAsync(mainWindow);
-            await _updater.StartAsync(mainWindow);
+            mainWindow.CheckForUpdatesAsync = updater.CheckNowAsync;
+            await _updater.StartAsync();
         }
     }
 
@@ -266,7 +266,7 @@ public sealed partial class App : Application
         };
         try
         {
-            await dialog.ShowDialog(owner);
+            await IndependentWindow.ShowAsync(dialog);
         }
         finally
         {

@@ -10,7 +10,6 @@ namespace BetterMail.App;
 public sealed partial class ComposeWindow : Window
 {
     private bool _closeAfterSave;
-    private bool _dialogResult;
     private IFilesProvider? _filesProvider;
 
     public ComposeWindow()
@@ -36,15 +35,11 @@ public sealed partial class ComposeWindow : Window
             accounts, mailboxes, request, send, saveDraft, deleteDraft,
             signatureForSender: signatureForSender,
             searchRecipients: searchRecipients);
-        viewModel.Sent += (_, _) =>
-        {
-            _dialogResult = true;
-            Close();
-        };
+        viewModel.Sent += (_, _) => Close();
         viewModel.Deleted += (_, _) =>
         {
             _closeAfterSave = true;
-            Close(false);
+            Close();
         };
         DataContext = viewModel;
     }
@@ -113,7 +108,7 @@ public sealed partial class ComposeWindow : Window
         await CaptureEditorBodyAsync();
         await viewModel.FlushDraftAsync();
         _closeAfterSave = true;
-        Close(_dialogResult);
+        Close();
     }
 
     private async void SendClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -171,13 +166,14 @@ public sealed partial class ComposeWindow : Window
         }
     }
 
-    private async void AttachDriveClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void AttachDriveClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is not ComposeWindowViewModel viewModel)
         {
             return;
         }
-        if (_filesProvider is null)
+        var provider = _filesProvider;
+        if (provider is null)
         {
             viewModel.ReportError("OneDrive is unavailable.");
             return;
@@ -185,9 +181,18 @@ public sealed partial class ComposeWindow : Window
 
         var accounts = viewModel.Senders.Select(static sender => sender.Account)
             .DistinctBy(static account => account.AccountId).ToArray();
-        var selection = await new DrivePickerWindow(_filesProvider, accounts)
-            .ShowDialog<DriveProviderSelection?>(this);
-        if (selection is null || !viewModel.ValidateAttachmentSize(selection.Item.Name, selection.Item.Size))
+        var picker = new DrivePickerWindow(provider, accounts);
+        picker.Completed += selection => _ = AttachDriveSelectionAsync(viewModel, provider, selection);
+        IndependentWindow.Show(picker);
+    }
+
+    private async Task AttachDriveSelectionAsync(
+        ComposeWindowViewModel viewModel,
+        IFilesProvider provider,
+        DriveProviderSelection? selection)
+    {
+        if (!IsVisible || selection is null ||
+            !viewModel.ValidateAttachmentSize(selection.Item.Name, selection.Item.Size))
         {
             return;
         }
@@ -195,7 +200,7 @@ public sealed partial class ComposeWindow : Window
         try
         {
             await using var content = new LimitedMemoryStream(DraftAttachment.MaximumSizeBytes);
-            await _filesProvider.DownloadFileAsync(selection.Account, selection.Item, content);
+            await provider.DownloadFileAsync(selection.Account, selection.Item, content);
             viewModel.AddAttachment(new DraftAttachment(
                 selection.Item.Name,
                 selection.Item.ContentType ?? "application/octet-stream",

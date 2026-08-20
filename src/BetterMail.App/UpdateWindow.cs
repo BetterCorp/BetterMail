@@ -10,6 +10,7 @@ internal sealed class UpdateWindow : Window
 {
     private readonly ProgressBar? _progress;
     private readonly TextBlock? _message;
+    private bool _accepted;
 
     public UpdateWindow(string version)
     {
@@ -48,8 +49,12 @@ internal sealed class UpdateWindow : Window
         var later = new Button { Content = "Later", MinWidth = 90 };
         var now = new Button { Content = "Update now", MinWidth = 110 };
         now.Classes.Add("primary");
-        later.Click += (_, _) => Close(false);
-        now.Click += (_, _) => Close(true);
+        later.Click += (_, _) => Close();
+        now.Click += (_, _) =>
+        {
+            _accepted = true;
+            Close();
+        };
         Content = Layout(
             new TextBlock
             {
@@ -71,13 +76,17 @@ internal sealed class UpdateWindow : Window
             });
     }
 
-    public static Task<bool> PromptAsync(Window owner, string version) =>
-        new UpdateWindow(version, prompt: true).ShowDialog<bool>(owner);
+    public static async Task<bool> PromptAsync(string version)
+    {
+        var window = new UpdateWindow(version, prompt: true);
+        await IndependentWindow.ShowAsync(window);
+        return window._accepted;
+    }
 
-    public static Task MessageAsync(Window owner, string title, string message)
+    public static Task MessageAsync(string title, string message)
     {
         var window = new UpdateWindow(title, message);
-        return window.ShowDialog(owner);
+        return IndependentWindow.ShowAsync(window);
     }
 
     private UpdateWindow(string title, string message)

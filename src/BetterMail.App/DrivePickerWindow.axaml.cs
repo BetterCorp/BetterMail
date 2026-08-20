@@ -17,12 +17,20 @@ public sealed partial class DrivePickerWindow : Window
     public DrivePickerWindow(IFilesProvider provider, IReadOnlyList<MailAccount> accounts) : this()
     {
         _viewModel = new DriveWorkspaceViewModel(provider, accounts);
-        _viewModel.ItemChosen += selection => Close(selection);
+        _viewModel.ItemChosen += Complete;
         DataContext = _viewModel;
         Opened += async (_, _) => await _viewModel.InitializeAsync();
     }
 
-    private void CancelClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => Close(null);
+    public event Action<DriveProviderSelection?>? Completed;
+
+    private void CancelClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => Complete(null);
+
+    private void Complete(DriveProviderSelection? selection)
+    {
+        Completed?.Invoke(selection);
+        Close();
+    }
 
     private void SearchKeyDown(object? sender, KeyEventArgs e)
     {

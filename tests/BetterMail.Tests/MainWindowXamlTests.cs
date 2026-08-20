@@ -6,6 +6,19 @@ namespace BetterMail.Tests;
 public sealed class MainWindowXamlTests
 {
     [Fact]
+    public void BetterMailWindowsAreIndependent()
+    {
+        var appDirectory = Path.Combine(FindRepositoryRoot(), "src", "BetterMail.App");
+        var windows = string.Join('\n', Directory.EnumerateFiles(appDirectory)
+            .Where(path => Path.GetExtension(path) is ".cs" or ".axaml")
+            .Select(File.ReadAllText));
+
+        Assert.DoesNotContain("ShowDialog", windows);
+        Assert.Contains("window.ShowInTaskbar = true", windows);
+        Assert.Contains("window.WindowStartupLocation = WindowStartupLocation.CenterScreen", windows);
+    }
+
+    [Fact]
     public void SettingsIncludesDiscoverableBrandedAboutInformation()
     {
         var root = FindRepositoryRoot();
@@ -178,8 +191,8 @@ public sealed class MainWindowXamlTests
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding Drafts}" + (char)34, conversationXaml);
         Assert.Contains("OpenDraftCommand", conversationXaml);        Assert.DoesNotContain("quickActionsFade", xaml);
         Assert.DoesNotContain("<Border.OpacityMask>", xaml);
-        Assert.DoesNotContain("DoubleTapped=" + (char)34 + "MessageRowDoubleTapped" + (char)34, xaml);
-        Assert.Contains("args.ClickCount == 2", mainWindowSource);
+        Assert.Contains("DoubleTapped=" + (char)34 + "MessageRowDoubleTapped" + (char)34, xaml);
+        Assert.DoesNotContain("args.ClickCount == 2", mainWindowSource);
         Assert.Contains("DoubleTapped=" + (char)34 + "CalendarEventDoubleTapped" + (char)34, calendarXaml);
         Assert.Contains(BindingAttribute("IsVisible", "ShowWorkspaceSurface"), xaml);
         Assert.Contains(BindingAttribute("IsVisible", "ShowMailSurface"), xaml);

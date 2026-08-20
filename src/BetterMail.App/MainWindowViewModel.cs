@@ -94,6 +94,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _isWorkspaceLoading;
     private bool _isDraftsView;
     private DraftListFilter _draftListFilter;
+    private string? _draftMailboxId;
     private MailMessageFilter _unifiedFilter;
     private int _pinnedMessageCount;
     private int _flaggedMessageCount;
@@ -145,7 +146,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     internal string MailListContextKey => IsSearchResultsView
         ? $"search:{SearchText}"
         : IsDraftsView
-            ? "drafts"
+            ? _draftMailboxId is null ? "drafts" : $"drafts:{_draftMailboxId}"
             : _selectedFolder is null
                 ? "unified"
                 : $"{_selectedFolder.MailboxId}:{_selectedFolder.ProviderId}";
@@ -715,7 +716,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public bool IsUnifiedSection => _selectedFolder is null && !IsDraftsView && !IsSearchResultsView;
     public bool IsPinnedView => IsUnifiedSection && _unifiedFilter == MailMessageFilter.Pinned;
     public bool IsFlaggedView => IsUnifiedSection && _unifiedFilter == MailMessageFilter.Flagged;
-    public bool IsAllDraftsView => IsDraftsView && _draftListFilter == DraftListFilter.All;
+    public bool IsAllDraftsView => IsDraftsView && _draftListFilter == DraftListFilter.All && _draftMailboxId is null;
     public bool IsSyncIssuesView => IsDraftsView && _draftListFilter == DraftListFilter.SyncIssues;
     public bool IsDraftConflictsView => IsDraftsView && _draftListFilter == DraftListFilter.Conflicts;
     public bool ShowEmptyState => IsMessageListView && Messages.Count == 0 && !IsBusy;
@@ -3296,9 +3297,15 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private async Task SelectFolderAsync(MailFolderItem folder)
     {
+        if (IsDraftFolder(folder))
+        {
+            await ShowDraftListAsync(DraftListFilter.All, folder);
+            return;
+        }
         IsSettingsOpen = false;
         ActiveModule = "Mail";
         IsDraftsView = false;
+        _draftMailboxId = null;
         IsSearchResultsView = false;
         _unifiedFilter = MailMessageFilter.All;
         SetSelectedFolder(folder);
@@ -3312,15 +3319,16 @@ public sealed class MainWindowViewModel : ViewModelBase
     private Task ShowDraftsAsync()
         => ShowDraftListAsync(DraftListFilter.All);
 
-    private Task ShowDraftListAsync(DraftListFilter filter)
+    private Task ShowDraftListAsync(DraftListFilter filter, MailFolderItem? folder = null)
     {
         IsSettingsOpen = false;
         ActiveModule = "Mail";
         IsDraftsView = true;
         IsSearchResultsView = false;
         _draftListFilter = filter;
+        _draftMailboxId = folder?.MailboxId;
         SelectedMessage = null;
-        SetSelectedFolder(null);
+        SetSelectedFolder(folder);
         RebuildVisibleDrafts();
         RaisePropertyChanged(nameof(IsAllDraftsView));
         RaisePropertyChanged(nameof(IsSyncIssuesView));
@@ -3328,6 +3336,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(CurrentFolderName));
         return Task.CompletedTask;
     }
+
+    private static bool IsDraftFolder(MailFolderItem folder) =>
+        string.Equals(folder.WellKnownName, "drafts", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(folder.DisplayName, "Drafts", StringComparison.OrdinalIgnoreCase);
 
     private bool CanOpenWorkspaceModule() =>
         _workspaceProvider is not null &&
@@ -5591,11 +5603,14 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void RebuildVisibleDrafts()
     {
-        var visible = _draftListFilter switch
+        IEnumerable<LocalDraft> visible = _draftMailboxId is null
+            ? Drafts
+            : Drafts.Where(draft => draft.MailboxId == _draftMailboxId);
+        visible = _draftListFilter switch
         {
-            DraftListFilter.SyncIssues => Drafts.Where(static draft => draft.HasSyncIssue),
-            DraftListFilter.Conflicts => Drafts.Where(static draft => draft.HasSyncConflict),
-            _ => Drafts.AsEnumerable()
+            DraftListFilter.SyncIssues => visible.Where(static draft => draft.HasSyncIssue),
+            DraftListFilter.Conflicts => visible.Where(static draft => draft.HasSyncConflict),
+            _ => visible
         };
         Replace(VisibleDrafts, visible.OrderByDescending(static draft => draft.UpdatedAt));
         ConversationThread.ReconcileDrafts(Drafts);
