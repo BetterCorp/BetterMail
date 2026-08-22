@@ -8,5 +8,6 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="BetterMail.Tests" />
+    <AssemblyMetadata Include="BETTERMAIL_MICROSOFT_CLIENT_ID" Value="$(BETTERMAIL_MICROSOFT_CLIENT_ID)" />
   </ItemGroup>
 </Project>

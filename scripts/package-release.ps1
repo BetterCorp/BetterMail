@@ -19,6 +19,16 @@ $icon = switch ($Runtime) {
     "linux-x64" { Join-Path $repositoryRoot "asset-pack/04-desktop/linux/hicolor/512x512/apps/bettermail.png" }
     "osx-arm64" { Join-Path $repositoryRoot "asset-pack/04-desktop/macos/BetterMail.icns" }
 }
+$requiredCredentials = @(
+    "BETTERMAIL_MICROSOFT_CLIENT_ID",
+    "BETTERMAIL_GOOGLE_CLIENT_ID",
+    "BETTERMAIL_GOOGLE_CLIENT_SECRET"
+)
+foreach ($name in $requiredCredentials) {
+    if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+        throw "Required build credential '$name' is not configured."
+    }
+}
 
 Remove-Item -Recurse -Force $publishDirectory -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $releaseDirectory -ErrorAction SilentlyContinue

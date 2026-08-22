@@ -86,6 +86,7 @@ public sealed class Microsoft365AuthService : IAccountProvider
         var result = await _client.AcquireTokenInteractive(Scopes)
             .WithPrompt(Prompt.SelectAccount)
             .WithUseEmbeddedWebView(false)
+            .WithSystemWebViewOptions(CreateSystemWebViewOptions())
             .ExecuteAsync(cancellationToken)
             .ConfigureAwait(false);
         EnsureAllScopesGranted(result.Scopes);
@@ -113,7 +114,8 @@ public sealed class Microsoft365AuthService : IAccountProvider
             .FirstOrDefault(candidate => candidate.HomeAccountId.Identifier == accountId);
         var request = _client.AcquireTokenInteractive(Scopes)
             .WithPrompt(Prompt.SelectAccount)
-            .WithUseEmbeddedWebView(false);
+            .WithUseEmbeddedWebView(false)
+            .WithSystemWebViewOptions(CreateSystemWebViewOptions());
         if (account is not null)
         {
             request = request.WithAccount(account);
@@ -157,6 +159,12 @@ public sealed class Microsoft365AuthService : IAccountProvider
     internal static InvalidOperationException ReauthenticationRequired(Exception? innerException = null) =>
         new("Microsoft permissions need to be refreshed. Open Settings > Accounts and choose Re-authenticate for this account.", innerException);
 
+    internal static SystemWebViewOptions CreateSystemWebViewOptions() => new()
+    {
+        HtmlMessageSuccess = OAuthBrowserPage.Html("Microsoft 365", success: true),
+        HtmlMessageError = EscapeCompositeFormat(OAuthBrowserPage.Html("Microsoft 365", success: false))
+    };
+
     internal static void EnsureAllScopesGranted(IEnumerable<string> grantedScopes)
     {
         var granted = grantedScopes.ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -175,4 +183,7 @@ public sealed class Microsoft365AuthService : IAccountProvider
         result.Account.Username,
         result.ClaimsPrincipal?.Identity?.Name ?? result.Account.Username,
         Capabilities);
+
+    private static string EscapeCompositeFormat(string value) =>
+        value.Replace("{", "{{", StringComparison.Ordinal).Replace("}", "}}", StringComparison.Ordinal);
 }

@@ -1043,6 +1043,109 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task SendingDuringSyncQueuesOneFollowUpSync()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-send-sync-{Guid.NewGuid():N}");
+        var store = new EncryptedMailStore(
+            Path.Combine(directory, "mail.db"),
+            Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+        try
+        {
+            await store.InitializeAsync(cancellationToken);
+            var account = new MailAccount(
+                "microsoft365", "account", "tenant", "person@example.com", "Person",
+                ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+            var sent = new MailFolder(mailbox.Id, "sentitems", "Sent Items", 0, 1, "sentitems");
+            await store.SaveAccountAsync(account, cancellationToken);
+            await store.SaveMailboxAsync(mailbox, cancellationToken);
+            await store.SaveFoldersAsync(mailbox.Id, [sent], cancellationToken);
+
+            var provider = new BlockingSyncProvider(
+                sent,
+                Message(mailbox.Id, sent.ProviderId, "Sent message", "Body"));
+            var viewModel = new MainWindowViewModel(
+                store, directory, _ => { }, _ => { }, null, provider);
+            await viewModel.InitializeAsync();
+
+            viewModel.SyncCommand.Execute(null);
+            await provider.Entered.Task.WaitAsync(cancellationToken);
+            await viewModel.SendDraftAsync(
+                new ComposeSender(account, mailbox),
+                "missing-local-draft",
+                new DraftMessage(
+                    "Sent message",
+                    [new MailAddress("Recipient", "recipient@example.com")],
+                    "Body",
+                    false));
+
+            provider.Release.TrySetResult();
+            await WaitUntilAsync(
+                () => provider.SyncCalls == 2 && !viewModel.IsSyncing,
+                cancellationToken);
+
+            Assert.Equal(2, provider.SyncCalls);
+            Assert.Equal(1, provider.MaxConcurrent);
+        }
+        finally
+        {
+            await store.DisposeAsync();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task SyncsPrimaryAndSharedMailboxesInParallelAndKeepsFolderFailuresLocal()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-mailbox-sync-{Guid.NewGuid():N}");
+        var store = new EncryptedMailStore(
+            Path.Combine(directory, "mail.db"),
+            Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+        var provider = new ParallelMailboxProvider();
+        try
+        {
+            await store.InitializeAsync(cancellationToken);
+            var account = new MailAccount(
+                "microsoft365", "account", "tenant", "person@example.com", "Person",
+                ProviderCapabilities.Mail);
+            var primary = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+            var shared = new Mailbox(
+                account.AccountId, "shared@example.com", "Shared", IsShared: true);
+            await store.SaveAccountAsync(account, cancellationToken);
+            await store.SaveMailboxAsync(primary, cancellationToken);
+            await store.SaveMailboxAsync(shared, cancellationToken);
+
+            var viewModel = new MainWindowViewModel(
+                store, directory, _ => { }, _ => { }, null, provider);
+            await viewModel.InitializeAsync();
+            viewModel.SyncCommand.Execute(null);
+            await WaitUntilAsync(() => provider.EnteredCount == 2, cancellationToken);
+            provider.Release.TrySetResult();
+            await WaitUntilAsync(() => !viewModel.IsSyncing, cancellationToken);
+
+            Assert.Equal(2, provider.MaxConcurrent);
+            Assert.Single(await store.GetMessagesAsync(primary.Id, "sentitems", cancellationToken: cancellationToken));
+            Assert.Single(await store.GetMessagesAsync(shared.Id, "inbox", cancellationToken: cancellationToken));
+            Assert.Equal("Sync completed with issues", viewModel.Status);
+            Assert.Contains("Broken folder", viewModel.Error);
+        }
+        finally
+        {
+            provider.Release.TrySetResult();
+            await store.DisposeAsync();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task NavigatesFoldersSelectsMessagesAndRendersTheirBody()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -1887,6 +1990,80 @@ public sealed class MainWindowViewModelTests
             Task.FromResult<IReadOnlyList<MailAttachment>>([]);
         public Task SendAsync(MailAccount account, Mailbox mailbox, DraftMessage draft, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
+    }
+
+    private sealed class ParallelMailboxProvider : IMailProvider
+    {
+        private int _concurrent;
+        private int _enteredCount;
+        public int EnteredCount => Volatile.Read(ref _enteredCount);
+        public int MaxConcurrent { get; private set; }
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<IReadOnlyList<MailFolder>> GetFoldersAsync(
+            MailAccount account,
+            Mailbox mailbox,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MailFolder>>(mailbox.IsShared
+                ? [new MailFolder(mailbox.Id, "inbox", "Inbox", 0, 1, "inbox")]
+                :
+                [
+                    new MailFolder(mailbox.Id, "broken", "Broken folder", 0, 1),
+                    new MailFolder(mailbox.Id, "sentitems", "Sent Items", 0, 1, "sentitems")
+                ]);
+
+        public async Task<MailSyncPage> SyncFolderAsync(
+            MailAccount account,
+            Mailbox mailbox,
+            string folderId,
+            string? cursor,
+            CancellationToken cancellationToken = default)
+        {
+            if (folderId == "broken")
+            {
+                throw new InvalidOperationException("Folder unavailable");
+            }
+
+            var concurrent = Interlocked.Increment(ref _concurrent);
+            lock (this)
+            {
+                MaxConcurrent = Math.Max(MaxConcurrent, concurrent);
+            }
+            Interlocked.Increment(ref _enteredCount);
+            try
+            {
+                await Release.Task.WaitAsync(cancellationToken);
+                return new MailSyncPage(
+                    [Message(mailbox.Id, folderId, $"{mailbox.DisplayName} message", "Body")],
+                    cursor,
+                    false);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _concurrent);
+            }
+        }
+
+        public Task MarkReadAsync(
+            MailAccount account, Mailbox mailbox, string messageId, bool isRead,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<MailMessage> GetMessageAsync(
+            MailAccount account, Mailbox mailbox, string messageId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Message(mailbox.Id, "inbox", "Message", "Body"));
+        public Task MoveMessageAsync(
+            MailAccount account, Mailbox mailbox, string messageId, string destinationFolderId,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task SetFlaggedAsync(
+            MailAccount account, Mailbox mailbox, string messageId, bool isFlagged,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<MailAttachment>> GetAttachmentsAsync(
+            MailAccount account, Mailbox mailbox, string messageId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MailAttachment>>([]);
+        public Task SendAsync(
+            MailAccount account, Mailbox mailbox, DraftMessage draft,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class FakeWorkspaceProvider : IWorkspaceProvider

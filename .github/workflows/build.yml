@@ -36,3 +36,7 @@ jobs:
     uses: ./.github/workflows/platform-builds.yml
     with:
       version: ${{ needs.version.outputs.version }}
+    secrets:
+      BETTERMAIL_MICROSOFT_CLIENT_ID: ${{ secrets.BETTERMAIL_MICROSOFT_CLIENT_ID }}
+      BETTERMAIL_GOOGLE_CLIENT_ID: ${{ secrets.BETTERMAIL_GOOGLE_CLIENT_ID }}
+      BETTERMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.BETTERMAIL_GOOGLE_CLIENT_SECRET }}

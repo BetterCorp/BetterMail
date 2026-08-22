@@ -8,21 +8,26 @@ namespace BetterMail.Tests;
 public sealed class GoogleProviderTests
 {
     [Fact]
-    public void UsesBundledClientIdUnlessEnvironmentOverridesIt()
+    public void UsesEnvironmentCredentialOverrides()
     {
-        const string variable = "BETTERMAIL_GOOGLE_CLIENT_ID";
-        var original = Environment.GetEnvironmentVariable(variable);
+        const string clientIdVariable = "BETTERMAIL_GOOGLE_CLIENT_ID";
+        const string clientSecretVariable = "BETTERMAIL_GOOGLE_CLIENT_SECRET";
+        var originalClientId = Environment.GetEnvironmentVariable(clientIdVariable);
+        var originalClientSecret = Environment.GetEnvironmentVariable(clientSecretVariable);
         try
         {
-            Environment.SetEnvironmentVariable(variable, " ");
-            Assert.Equal(GoogleOptions.DefaultClientId, GoogleOptions.Create().ClientId);
+            Environment.SetEnvironmentVariable(clientIdVariable, " developer-client-id ");
+            Environment.SetEnvironmentVariable(clientSecretVariable, " developer-client-secret ");
 
-            Environment.SetEnvironmentVariable(variable, "developer-client-id");
-            Assert.Equal("developer-client-id", GoogleOptions.Create().ClientId);
+            var options = GoogleOptions.Create();
+
+            Assert.Equal("developer-client-id", options.ClientId);
+            Assert.Equal("developer-client-secret", options.ClientSecret);
         }
         finally
         {
-            Environment.SetEnvironmentVariable(variable, original);
+            Environment.SetEnvironmentVariable(clientIdVariable, originalClientId);
+            Environment.SetEnvironmentVariable(clientSecretVariable, originalClientSecret);
         }
     }
 
@@ -46,6 +51,20 @@ public sealed class GoogleProviderTests
     }
 
     [Fact]
+    public void SendsDesktopCredentialOnlyToTokenEndpoint()
+    {
+        var options = new GoogleOptions("client-id", "client-secret");
+        var authorization = GoogleAuthService.AuthorizationCodeTokenFields(
+            options, "code", "verifier", "http://127.0.0.1:4567/");
+        var refresh = GoogleAuthService.RefreshTokenFields(options, "refresh-token");
+
+        Assert.Equal("client-secret", authorization["client_secret"]);
+        Assert.Equal("client-secret", refresh["client_secret"]);
+        Assert.Equal("verifier", authorization["code_verifier"]);
+        Assert.Equal("refresh-token", refresh["refresh_token"]);
+    }
+
+    [Fact]
     public void RendersBrandedBrowserCompletionPages()
     {
         var success = GoogleAuthService.BrowserResponseHtml(true);
@@ -54,6 +73,9 @@ public sealed class GoogleProviderTests
         Assert.Contains("You're connected", success);
         Assert.Contains("BetterMail", success);
         Assert.Contains("prefers-color-scheme", success);
+        Assert.Contains("<link rel=\"icon\" type=\"image/png\" href=\"data:image/png;base64,", success);
+        Assert.Contains("<img class=\"logo\" src=\"data:image/png;base64,", success);
+        Assert.DoesNotContain(".logo::after", success);
         Assert.Contains("Connection unsuccessful", failure);
     }
 

@@ -7,6 +7,13 @@ on:
         description: Exact package version
         required: true
         type: string
+    secrets:
+      BETTERMAIL_MICROSOFT_CLIENT_ID:
+        required: true
+      BETTERMAIL_GOOGLE_CLIENT_ID:
+        required: true
+      BETTERMAIL_GOOGLE_CLIENT_SECRET:
+        required: true
 
 permissions:
   contents: read
@@ -25,6 +32,10 @@ jobs:
       - run: dotnet tool restore
       - name: Package Windows
         shell: pwsh
+        env:
+          BETTERMAIL_MICROSOFT_CLIENT_ID: ${{ secrets.BETTERMAIL_MICROSOFT_CLIENT_ID }}
+          BETTERMAIL_GOOGLE_CLIENT_ID: ${{ secrets.BETTERMAIL_GOOGLE_CLIENT_ID }}
+          BETTERMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.BETTERMAIL_GOOGLE_CLIENT_SECRET }}
         run: ./scripts/package-release.ps1 -Runtime win-x64 -Version '${{ inputs.version }}'
       - uses: actions/upload-artifact@v4
         with:
@@ -49,6 +60,10 @@ jobs:
         run: dotnet test --solution BetterMail.slnx --configuration Release --no-restore
       - name: Package Linux
         shell: pwsh
+        env:
+          BETTERMAIL_MICROSOFT_CLIENT_ID: ${{ secrets.BETTERMAIL_MICROSOFT_CLIENT_ID }}
+          BETTERMAIL_GOOGLE_CLIENT_ID: ${{ secrets.BETTERMAIL_GOOGLE_CLIENT_ID }}
+          BETTERMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.BETTERMAIL_GOOGLE_CLIENT_SECRET }}
         run: ./scripts/package-release.ps1 -Runtime linux-x64 -Version '${{ inputs.version }}'
       - uses: actions/upload-artifact@v4
         with:
@@ -70,6 +85,10 @@ jobs:
       - run: dotnet tool restore
       - name: Package macOS
         shell: pwsh
+        env:
+          BETTERMAIL_MICROSOFT_CLIENT_ID: ${{ secrets.BETTERMAIL_MICROSOFT_CLIENT_ID }}
+          BETTERMAIL_GOOGLE_CLIENT_ID: ${{ secrets.BETTERMAIL_GOOGLE_CLIENT_ID }}
+          BETTERMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.BETTERMAIL_GOOGLE_CLIENT_SECRET }}
         run: ./scripts/package-release.ps1 -Runtime osx-arm64 -Version '${{ inputs.version }}'
       - uses: actions/upload-artifact@v4
         with:
