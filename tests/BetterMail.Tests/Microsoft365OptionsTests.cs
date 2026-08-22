@@ -5,17 +5,14 @@ namespace BetterMail.Tests;
 public sealed class Microsoft365OptionsTests
 {
     [Fact]
-    public void UsesBundledClientIdUnlessEnvironmentOverridesIt()
+    public void UsesEnvironmentClientIdOverride()
     {
         const string variable = "BETTERMAIL_MICROSOFT_CLIENT_ID";
         var original = Environment.GetEnvironmentVariable(variable);
 
         try
         {
-            Environment.SetEnvironmentVariable(variable, " ");
-            Assert.Equal(Microsoft365Options.DefaultClientId, Microsoft365Options.Create("data").ClientId);
-
-            Environment.SetEnvironmentVariable(variable, "developer-client-id");
+            Environment.SetEnvironmentVariable(variable, " developer-client-id ");
             Assert.Equal("developer-client-id", Microsoft365Options.Create("data").ClientId);
         }
         finally
@@ -64,5 +61,17 @@ public sealed class Microsoft365OptionsTests
             () => Microsoft365AuthService.EnsureAllScopesGranted(partialGrant));
 
         Assert.Contains("Notes.ReadWrite", exception.Message);
+    }
+
+    [Fact]
+    public void UsesBrandedBrowserCompletionPages()
+    {
+        var options = Microsoft365AuthService.CreateSystemWebViewOptions();
+        var error = string.Format(options.HtmlMessageError, "error", "details");
+
+        Assert.Contains("Microsoft 365 is now connected", options.HtmlMessageSuccess);
+        Assert.Contains("Microsoft 365 could not finish connecting", error);
+        Assert.Contains("<link rel=\"icon\" type=\"image/png\" href=\"data:image/png;base64,", options.HtmlMessageSuccess);
+        Assert.Contains("<img class=\"logo\" src=\"data:image/png;base64,", error);
     }
 }

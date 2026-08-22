@@ -71,6 +71,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _isLoadingAttachments;
     private bool _isSyncing;
     private int _syncRunning;
+    private int _syncPending;
     private int _workspaceSyncRunning;
     private int _storageMaintenanceRunning;
     private DateTimeOffset _lastWorkspaceSyncAt = DateTimeOffset.MinValue;
@@ -1703,8 +1704,14 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private async Task SyncAsync()
     {
-        if (IsBusy || _provider is null || Accounts.Count == 0 ||
-            Interlocked.CompareExchange(ref _syncRunning, 1, 0) != 0)
+        var provider = _provider;
+        var store = _store;
+        if (IsBusy || provider is null || store is null || Accounts.Count == 0)
+        {
+            return;
+        }
+        Interlocked.Exchange(ref _syncPending, 1);
+        if (Interlocked.CompareExchange(ref _syncRunning, 1, 0) != 0)
         {
             return;
         }
@@ -1713,41 +1720,49 @@ public sealed class MainWindowViewModel : ViewModelBase
         Status = "Syncing mail...";
         Error = null;
         var animation = AnimateSyncIconAsync();
-        Exception? mailFailure = null;
+        ConcurrentQueue<string> mailFailures;
         try
         {
-            try
+            do
             {
-                foreach (var account in Accounts.ToArray())
-                {
-                    await SyncAccountAsync(account);
-                }
+                Interlocked.Exchange(ref _syncPending, 0);
+                mailFailures = new ConcurrentQueue<string>();
+                var engine = new SyncEngine(provider, store);
+                var mailboxes = Mailboxes.ToArray();
+                await Task.WhenAll(
+                    from account in Accounts.ToArray()
+                    join mailbox in mailboxes on account.AccountId equals mailbox.AccountId
+                    select SyncMailboxAsync(provider, store, engine, account, mailbox, mailFailures));
 
-                await LoadFoldersAsync();
-                if (!IsGlobalSearchOpen && !IsSearchResultsView)
+                try
                 {
-                    await LoadMessagesAsync();
+                    await LoadFoldersAsync();
+                    if (!IsGlobalSearchOpen && !IsSearchResultsView)
+                    {
+                        await LoadMessagesAsync();
+                    }
+                    if (SelectedMessage is { } selected)
+                    {
+                        await LoadConversationAsync(selected, _selectionVersion, CancellationToken.None);
+                    }
+                    if (IsSettingsOpen)
+                    {
+                        await LoadMailStatisticsAsync();
+                    }
                 }
-                if (SelectedMessage is { } selected)
+                catch (Exception exception) when (exception is not OperationCanceledException)
                 {
-                    await LoadConversationAsync(selected, _selectionVersion, CancellationToken.None);
-                }
-                if (IsSettingsOpen)
-                {
-                    await LoadMailStatisticsAsync();
+                    mailFailures.Enqueue(exception.Message);
                 }
             }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                mailFailure = exception;
-            }
+            while (Volatile.Read(ref _syncPending) != 0);
 
             await ReconcileAllDraftsAsync();
             _ = RefreshWorkspaceCacheAsync();
-            if (mailFailure is not null)
+            if (!mailFailures.IsEmpty)
             {
-                Error = mailFailure.Message;
-                Status = "Sync failed";
+                Error = string.Join(Environment.NewLine, mailFailures.Distinct(StringComparer.Ordinal));
+                Status = "Sync completed with issues";
             }
             else
             {
@@ -1760,6 +1775,10 @@ public sealed class MainWindowViewModel : ViewModelBase
             IsSyncing = false;
             await animation;
             _ = RunStorageMaintenanceAsync();
+            if (Volatile.Read(ref _syncPending) != 0)
+            {
+                _ = SyncAsync();
+            }
         }
     }
 
@@ -2004,19 +2023,29 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private async Task SyncAccountAsync(MailAccount account)
+    private async Task SyncMailboxAsync(
+        IMailProvider provider,
+        EncryptedMailStore store,
+        SyncEngine engine,
+        MailAccount account,
+        Mailbox mailbox,
+        ConcurrentQueue<string> failures)
     {
-        if (_provider is null || _store is null)
+        IReadOnlyList<MailFolder> folders;
+        try
         {
+            folders = await provider.GetFoldersAsync(account, mailbox);
+            await store.SaveFoldersAsync(mailbox.Id, folders);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            failures.Enqueue($"{mailbox.Address}: {exception.Message}");
             return;
         }
 
-        var engine = new SyncEngine(_provider, _store);
-        foreach (var mailbox in Mailboxes.Where(mailbox => mailbox.AccountId == account.AccountId))
+        foreach (var folder in folders.Where(static folder => folder.TotalCount > 0))
         {
-            var folders = await _provider.GetFoldersAsync(account, mailbox);
-            await _store.SaveFoldersAsync(mailbox.Id, folders);
-            foreach (var folder in folders.Where(static folder => folder.TotalCount > 0))
+            try
             {
                 InboxNotificationContext? notificationContext = null;
                 var notifyThisCycle = false;
@@ -2048,11 +2077,22 @@ public sealed class MainWindowViewModel : ViewModelBase
                     }
                 }
             }
-            if (MailSyncHistoryDays > 0)
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                await _store.PruneMessagesBeforeAsync(
+                failures.Enqueue($"{mailbox.Address} / {folder.DisplayName}: {exception.Message}");
+            }
+        }
+        if (MailSyncHistoryDays > 0)
+        {
+            try
+            {
+                await store.PruneMessagesBeforeAsync(
                     mailbox.Id,
                     DateTimeOffset.UtcNow.AddDays(-MailSyncHistoryDays));
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                failures.Enqueue($"{mailbox.Address}: {exception.Message}");
             }
         }
     }

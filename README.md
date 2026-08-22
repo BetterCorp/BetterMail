@@ -67,9 +67,9 @@ appears in mail views, but not in Microsoft-only workspace modules.
 - Windows 10/11, or a glibc Linux desktop supported by Avalonia.
 - A Microsoft 365 work or school account, or a Google account with Gmail enabled.
 
-BetterMail ships with its Microsoft Entra public-client application ID. End users do not need to
-create an app registration, configure redirect URLs, or provide a client secret: install the app,
-add an account, and sign in.
+BetterMail release builds include the Microsoft and Google OAuth credentials supplied by the build
+pipeline. End users do not need to create app registrations or configure redirect URLs: install
+the app, add an account, and sign in.
 
 From the repository root:
 
@@ -158,8 +158,8 @@ multi-tenant public-client registration. Configure it with:
 | Notes | `Notes.ReadWrite` |
 | OneDrive | `Files.ReadWrite` |
 
-Do **not** create or ship a client secret. BetterMail is a public desktop client. Override the
-bundled registration for a custom build with:
+Microsoft uses a public desktop client and has no client secret. Configure a local or custom build
+with:
 
 ```powershell
 $env:BETTERMAIL_MICROSOFT_CLIENT_ID = "00000000-0000-0000-0000-000000000000"
@@ -170,13 +170,18 @@ dotnet run --project src/BetterMail.App
 
 ## Google sign-in
 
-BetterMail ships with its Google OAuth desktop client ID, so normal users can add an account
-without setting environment variables. Custom builds can override the public client ID with
-`BETTERMAIL_GOOGLE_CLIENT_ID`.
+BetterMail uses Google's desktop OAuth flow with PKCE, the system browser, and a random loopback
+callback port. Configure local or custom builds with `BETTERMAIL_GOOGLE_CLIENT_ID` and
+`BETTERMAIL_GOOGLE_CLIENT_SECRET`. Release builds inject those values from GitHub Actions secrets;
+they are not committed to this repository. A desktop client credential embedded at build time is
+recoverable from the shipped application and must not be treated as a confidential server secret.
+User tokens are saved in the encrypted local database.
 
-BetterMail is a public desktop client and does not use or accept a client secret. It uses PKCE,
-opens the system browser, and receives the callback on a random loopback port. Tokens are saved in
-the encrypted local database.
+The release repository must define these Actions secrets before packaging:
+
+- `BETTERMAIL_MICROSOFT_CLIENT_ID`
+- `BETTERMAIL_GOOGLE_CLIENT_ID`
+- `BETTERMAIL_GOOGLE_CLIENT_SECRET`
 
 BetterMail requests `gmail.modify`, plus OpenID email/profile scopes. `gmail.modify` is a
 [restricted Gmail scope](https://developers.google.com/workspace/gmail/api/auth/scopes), so a

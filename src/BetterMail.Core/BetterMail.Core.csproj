@@ -4,4 +4,9 @@
     <PackageReference Include="SQLite3MC.PCLRaw.bundle" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="../../asset-pack/02-web/favicon-48x48.png"
+                      Link="Assets/BetterMailLogo.png"
+                      LogicalName="BetterMail.Core.Assets.BetterMailLogo.png" />
+  </ItemGroup>
 </Project>

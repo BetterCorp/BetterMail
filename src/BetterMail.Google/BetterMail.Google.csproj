@@ -4,5 +4,7 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="BetterMail.Tests" />
+    <AssemblyMetadata Include="BETTERMAIL_GOOGLE_CLIENT_ID" Value="$(BETTERMAIL_GOOGLE_CLIENT_ID)" />
+    <AssemblyMetadata Include="BETTERMAIL_GOOGLE_CLIENT_SECRET" Value="$(BETTERMAIL_GOOGLE_CLIENT_SECRET)" />
   </ItemGroup>
 </Project>
