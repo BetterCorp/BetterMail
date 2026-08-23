@@ -1720,13 +1720,12 @@ public sealed class MainWindowViewModel : ViewModelBase
         Status = "Syncing mail...";
         Error = null;
         var animation = AnimateSyncIconAsync();
-        ConcurrentQueue<string> mailFailures;
+        var mailFailures = new ConcurrentQueue<string>();
         try
         {
             do
             {
                 Interlocked.Exchange(ref _syncPending, 0);
-                mailFailures = new ConcurrentQueue<string>();
                 var engine = new SyncEngine(provider, store);
                 var mailboxes = Mailboxes.ToArray();
                 await Task.WhenAll(
@@ -2040,10 +2039,21 @@ public sealed class MainWindowViewModel : ViewModelBase
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             failures.Enqueue($"{mailbox.Address}: {exception.Message}");
-            return;
+            folders = await store.GetFoldersAsync(mailbox.Id);
+            if (folders.Count == 0)
+            {
+                return;
+            }
         }
 
-        foreach (var folder in folders.Where(static folder => folder.TotalCount > 0))
+        foreach (var folder in folders
+                     .Where(static folder => folder.TotalCount > 0)
+                     .OrderBy(static folder => folder.WellKnownName switch
+                     {
+                         "inbox" => 0,
+                         "sentitems" => 1,
+                         _ => 2
+                     }))
         {
             try
             {

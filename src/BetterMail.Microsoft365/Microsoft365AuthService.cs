@@ -83,10 +83,11 @@ public sealed class Microsoft365AuthService : IAccountProvider
 
     public async Task<MailAccount> SignInAsync(CancellationToken cancellationToken = default)
     {
+        await using var browserPage = OAuthBrowserRedirectServer.Start("Microsoft 365");
         var result = await _client.AcquireTokenInteractive(Scopes)
             .WithPrompt(Prompt.SelectAccount)
             .WithUseEmbeddedWebView(false)
-            .WithSystemWebViewOptions(CreateSystemWebViewOptions())
+            .WithSystemWebViewOptions(CreateSystemWebViewOptions(browserPage))
             .ExecuteAsync(cancellationToken)
             .ConfigureAwait(false);
         EnsureAllScopesGranted(result.Scopes);
@@ -110,12 +111,13 @@ public sealed class Microsoft365AuthService : IAccountProvider
         string accountId,
         CancellationToken cancellationToken = default)
     {
+        await using var browserPage = OAuthBrowserRedirectServer.Start("Microsoft 365");
         var account = (await _client.GetAccountsAsync().ConfigureAwait(false))
             .FirstOrDefault(candidate => candidate.HomeAccountId.Identifier == accountId);
         var request = _client.AcquireTokenInteractive(Scopes)
             .WithPrompt(Prompt.SelectAccount)
             .WithUseEmbeddedWebView(false)
-            .WithSystemWebViewOptions(CreateSystemWebViewOptions());
+            .WithSystemWebViewOptions(CreateSystemWebViewOptions(browserPage));
         if (account is not null)
         {
             request = request.WithAccount(account);
@@ -159,8 +161,10 @@ public sealed class Microsoft365AuthService : IAccountProvider
     internal static InvalidOperationException ReauthenticationRequired(Exception? innerException = null) =>
         new("Microsoft permissions need to be refreshed. Open Settings > Accounts and choose Re-authenticate for this account.", innerException);
 
-    internal static SystemWebViewOptions CreateSystemWebViewOptions() => new()
+    internal static SystemWebViewOptions CreateSystemWebViewOptions(OAuthBrowserRedirectServer browserPage) => new()
     {
+        BrowserRedirectSuccess = browserPage.SuccessUri,
+        BrowserRedirectError = browserPage.ErrorUri,
         HtmlMessageSuccess = OAuthBrowserPage.Html("Microsoft 365", success: true),
         HtmlMessageError = EscapeCompositeFormat(OAuthBrowserPage.Html("Microsoft 365", success: false))
     };

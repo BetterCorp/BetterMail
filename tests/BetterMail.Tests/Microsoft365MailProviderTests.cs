@@ -9,6 +9,13 @@ namespace BetterMail.Tests;
 public sealed class Microsoft365MailProviderTests
 {
     [Fact]
+    public void RequestsOnlySupportedMailFolderProperties()
+    {
+        Assert.DoesNotContain("wellKnownName", Microsoft365MailProvider.FolderSelect);
+        Assert.Contains("displayName", Microsoft365MailProvider.FolderSelect);
+    }
+
+    [Fact]
     public void PreservesTheGraphReceivedInstantForDeviceLocalDisplay()
     {
         using var document = JsonDocument.Parse(

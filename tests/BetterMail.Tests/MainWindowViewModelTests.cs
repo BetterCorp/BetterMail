@@ -1146,6 +1146,49 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task SyncsCachedFoldersWhenFolderDiscoveryFails()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-cached-sync-{Guid.NewGuid():N}");
+        var store = new EncryptedMailStore(
+            Path.Combine(directory, "mail.db"),
+            Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+        try
+        {
+            await store.InitializeAsync(cancellationToken);
+            var account = new MailAccount(
+                "microsoft365", "account", "tenant", "person@example.com", "Person",
+                ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+            var inbox = new MailFolder(mailbox.Id, "inbox", "Inbox", 0, 1, "inbox");
+            await store.SaveAccountAsync(account, cancellationToken);
+            await store.SaveMailboxAsync(mailbox, cancellationToken);
+            await store.SaveFoldersAsync(mailbox.Id, [inbox], cancellationToken);
+
+            var provider = new DiscoveryFailureProvider(
+                Message(mailbox.Id, inbox.ProviderId, "Recovered message", "Body"));
+            var viewModel = new MainWindowViewModel(
+                store, directory, _ => { }, _ => { }, null, provider);
+            await viewModel.InitializeAsync();
+            viewModel.SyncCommand.Execute(null);
+            await WaitUntilAsync(() => provider.SyncCalls == 1 && !viewModel.IsSyncing, cancellationToken);
+
+            Assert.Single(await store.GetMessagesAsync(
+                mailbox.Id, inbox.ProviderId, cancellationToken: cancellationToken));
+            Assert.Equal("Sync completed with issues", viewModel.Status);
+            Assert.Contains("Folder discovery unavailable", viewModel.Error);
+        }
+        finally
+        {
+            await store.DisposeAsync();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task NavigatesFoldersSelectsMessagesAndRendersTheirBody()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -2051,6 +2094,44 @@ public sealed class MainWindowViewModelTests
             MailAccount account, Mailbox mailbox, string messageId,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(Message(mailbox.Id, "inbox", "Message", "Body"));
+        public Task MoveMessageAsync(
+            MailAccount account, Mailbox mailbox, string messageId, string destinationFolderId,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task SetFlaggedAsync(
+            MailAccount account, Mailbox mailbox, string messageId, bool isFlagged,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<MailAttachment>> GetAttachmentsAsync(
+            MailAccount account, Mailbox mailbox, string messageId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MailAttachment>>([]);
+        public Task SendAsync(
+            MailAccount account, Mailbox mailbox, DraftMessage draft,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class DiscoveryFailureProvider(MailMessage message) : IMailProvider
+    {
+        public int SyncCalls { get; private set; }
+
+        public Task<IReadOnlyList<MailFolder>> GetFoldersAsync(
+            MailAccount account, Mailbox mailbox, CancellationToken cancellationToken = default) =>
+            Task.FromException<IReadOnlyList<MailFolder>>(
+                new HttpRequestException("Folder discovery unavailable"));
+
+        public Task<MailSyncPage> SyncFolderAsync(
+            MailAccount account, Mailbox mailbox, string folderId, string? cursor,
+            CancellationToken cancellationToken = default)
+        {
+            SyncCalls++;
+            return Task.FromResult(new MailSyncPage([message], cursor, false));
+        }
+
+        public Task MarkReadAsync(
+            MailAccount account, Mailbox mailbox, string messageId, bool isRead,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<MailMessage> GetMessageAsync(
+            MailAccount account, Mailbox mailbox, string messageId,
+            CancellationToken cancellationToken = default) => Task.FromResult(message);
         public Task MoveMessageAsync(
             MailAccount account, Mailbox mailbox, string messageId, string destinationFolderId,
             CancellationToken cancellationToken = default) => Task.CompletedTask;

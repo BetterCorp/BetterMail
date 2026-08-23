@@ -1,3 +1,4 @@
+using BetterMail.Core;
 using BetterMail.Microsoft365;
 
 namespace BetterMail.Tests;
@@ -64,14 +65,19 @@ public sealed class Microsoft365OptionsTests
     }
 
     [Fact]
-    public void UsesBrandedBrowserCompletionPages()
+    public async Task UsesBrandedBrowserCompletionPages()
     {
-        var options = Microsoft365AuthService.CreateSystemWebViewOptions();
-        var error = string.Format(options.HtmlMessageError, "error", "details");
+        await using var browserPage = OAuthBrowserRedirectServer.Start("Microsoft 365");
+        var options = Microsoft365AuthService.CreateSystemWebViewOptions(browserPage);
+        using var client = new HttpClient();
+        using var response = await client.GetAsync(
+            options.BrowserRedirectSuccess, TestContext.Current.CancellationToken);
+        var success = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
-        Assert.Contains("Microsoft 365 is now connected", options.HtmlMessageSuccess);
-        Assert.Contains("Microsoft 365 could not finish connecting", error);
-        Assert.Contains("<link rel=\"icon\" type=\"image/png\" href=\"data:image/png;base64,", options.HtmlMessageSuccess);
-        Assert.Contains("<img class=\"logo\" src=\"data:image/png;base64,", error);
+        Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("utf-8", response.Content.Headers.ContentType?.CharSet);
+        Assert.Contains("Microsoft 365 is now connected", success);
+        Assert.Contains("<link rel=\"icon\" type=\"image/png\" href=\"data:image/png;base64,", success);
+        Assert.Equal(browserPage.ErrorUri, options.BrowserRedirectError);
     }
 }

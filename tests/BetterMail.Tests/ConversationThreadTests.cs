@@ -6,13 +6,19 @@ namespace BetterMail.Tests;
 public sealed class ConversationThreadTests
 {
     [Fact]
-    public void HidesTheThreadListUntilThereIsSomethingLinked()
+    public void AlwaysShowsMessageMetadataForTheSelectedConversation()
     {
         var viewModel = new ConversationThreadViewModel();
-        var first = Message("mailbox", "first", "thread", null, 1);
+        var first = Message("mailbox", "first", "thread", null, 1) with
+        {
+            Cc = [new("Copy", "copy@example.com")]
+        };
 
         viewModel.Reconcile([first], first);
-        Assert.False(viewModel.ShowThreadList);
+        Assert.True(viewModel.ShowThreadList);
+        Assert.Equal("1 item", viewModel.ThreadItemCountText);
+        Assert.Contains("To: Recipient <recipient@example.com>", viewModel.SelectedMessage?.Recipients);
+        Assert.Contains("Cc: Copy <copy@example.com>", viewModel.SelectedMessage?.Recipients);
 
         var second = Message("mailbox", "second", "thread", null, 2);
         viewModel.Reconcile([first, second], first);

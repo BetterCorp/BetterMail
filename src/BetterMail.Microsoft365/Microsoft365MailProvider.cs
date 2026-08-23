@@ -18,6 +18,8 @@ public sealed class Microsoft365MailProvider(
         "id,conversationId,internetMessageId,parentFolderId,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,isRead,hasAttachments,importance,categories,flag";
     internal const string DraftSelect =
         "id,conversationId,subject,toRecipients,ccRecipients,bccRecipients,body,lastModifiedDateTime,hasAttachments";
+    internal const string FolderSelect =
+        "id,displayName,unreadItemCount,totalItemCount,childFolderCount";
 
     private readonly HttpClient _httpClient = httpClient ?? new HttpClient
     {
@@ -31,7 +33,7 @@ public sealed class Microsoft365MailProvider(
     {
         var folders = new List<MailFolder>();
         var endpoints = new Queue<(string Endpoint, string? ParentId)>();
-        endpoints.Enqueue(($"{MailboxPath(account, mailbox)}/mailFolders?$select=id,displayName,unreadItemCount,totalItemCount,childFolderCount,wellKnownName&$top=100", null));
+        endpoints.Enqueue(($"{MailboxPath(account, mailbox)}/mailFolders?$select={FolderSelect}&$top=100", null));
         while (endpoints.Count > 0)
         {
             var (endpoint, parentId) = endpoints.Dequeue();
@@ -45,11 +47,11 @@ public sealed class Microsoft365MailProvider(
                     RequiredString(folder, "displayName"),
                     folder.GetProperty("unreadItemCount").GetInt32(),
                     folder.GetProperty("totalItemCount").GetInt32(),
-                    folder.TryGetProperty("wellKnownName", out var wellKnownName) ? wellKnownName.GetString() : null,
+                    null,
                     ParentProviderId: parentId));
                 if (folder.TryGetProperty("childFolderCount", out var childCount) && childCount.GetInt32() > 0)
                 {
-                    endpoints.Enqueue(($"{MailboxPath(account, mailbox)}/mailFolders/{Uri.EscapeDataString(folderId)}/childFolders?$select=id,displayName,unreadItemCount,totalItemCount,childFolderCount,wellKnownName&$top=100", folderId));
+                    endpoints.Enqueue(($"{MailboxPath(account, mailbox)}/mailFolders/{Uri.EscapeDataString(folderId)}/childFolders?$select={FolderSelect}&$top=100", folderId));
                 }
             }
 
@@ -59,12 +61,25 @@ public sealed class Microsoft365MailProvider(
             }
         }
 
-        using var inboxDocument = await GetJsonAsync(
-            account,
-            $"{MailboxPath(account, mailbox)}/mailFolders/inbox?$select=id",
-            cancellationToken).ConfigureAwait(false);
-        var inboxId = RequiredString(inboxDocument.RootElement, "id");
-        return folders.Select(folder => folder.ProviderId == inboxId ? folder with { WellKnownName = "inbox" } : folder).ToArray();
+        var wellKnownIds = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var name in new[] { "inbox", "sentitems" })
+        {
+            try
+            {
+                using var document = await GetJsonAsync(
+                    account,
+                    $"{MailboxPath(account, mailbox)}/mailFolders/{name}?$select=id",
+                    cancellationToken).ConfigureAwait(false);
+                wellKnownIds[RequiredString(document.RootElement, "id")] = name;
+            }
+            catch (HttpRequestException)
+            {
+                // Folder discovery still works if this mailbox cannot resolve an optional alias.
+            }
+        }
+        return folders.Select(folder => wellKnownIds.TryGetValue(folder.ProviderId, out var name)
+            ? folder with { WellKnownName = name }
+            : folder).ToArray();
     }
 
     public Task<MailSyncPage> SyncFolderAsync(

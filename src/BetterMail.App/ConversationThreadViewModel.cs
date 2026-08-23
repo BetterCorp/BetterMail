@@ -171,8 +171,15 @@ public sealed class ConversationThreadViewModel : ViewModelBase
     public bool HasThread => SelectedThread is not null;
     public bool HasNoThread => !HasThread;
     public bool HasDrafts => Drafts.Count > 0;
-    public bool ShowThreadList => (SelectedThread?.Messages.Count ?? 0) + Drafts.Count > 1;
-    public string ThreadItemCountText => $"{(SelectedThread?.Messages.Count ?? 0) + Drafts.Count} items";
+    public bool ShowThreadList => HasThread;
+    public string ThreadItemCountText
+    {
+        get
+        {
+            var count = (SelectedThread?.Messages.Count ?? 0) + Drafts.Count;
+            return $"{count} {(count == 1 ? "item" : "items")}";
+        }
+    }
 
     public void ReconcileDrafts(IEnumerable<LocalDraft> drafts)
     {
@@ -527,7 +534,16 @@ public sealed class ConversationMessageItem : ViewModelBase
     public MailMessage Message => _message;
     public string Sender => _message.SenderDisplayName;
     public string SenderAddress => _message.From.Address;
-    public string Recipients => $"To: {string.Join(", ", _message.To.Select(address => address.ToString()))}";
+    public string Recipients
+    {
+        get
+        {
+            var to = $"To: {string.Join(", ", _message.To.Select(address => address.ToString()))}";
+            return _message.Cc is { Count: > 0 }
+                ? $"{to}  |  Cc: {string.Join(", ", _message.Cc.Select(address => address.ToString()))}"
+                : to;
+        }
+    }
     public string ReceivedText => _message.ReceivedAt.ToLocalTime().ToString("ddd, MMM d, yyyy HH:mm");
     public string Location => _location(_message);
     public string Preview => _message.Preview;
