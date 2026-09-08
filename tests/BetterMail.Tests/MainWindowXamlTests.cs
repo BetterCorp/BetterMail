@@ -301,7 +301,11 @@ public sealed class MainWindowXamlTests
             Assert.Contains(accessibleName, xaml + settingsXaml);
         }
         Assert.Contains("Load blocked pictures for the selected message", conversationXaml);
-        Assert.Contains("PreviewAttachmentClicked", xaml);
+        Assert.Contains("OpenAttachmentCommand", conversationXaml);
+        Assert.Contains("SaveAttachmentsCommand", conversationXaml);
+        Assert.Contains("Command=\"{Binding ShowOutboxCommand}\" Click=\"FolderSelectedClicked\" IsVisible=\"{Binding HasOutbox}\"", xaml);
+        Assert.True(xaml.IndexOf("{Binding ShowOutboxCommand}", StringComparison.Ordinal) >
+                    xaml.IndexOf("{Binding ShowDraftsCommand}", StringComparison.Ordinal));
         Assert.Contains("&#x1F4CE;", xaml);
         Assert.Contains("IsVisible=" + (char)34 + "{Binding IsMailActionRunning}" + (char)34, commandBar);
         Assert.DoesNotContain("IsVisible=" + (char)34 + "{Binding IsMailActionRunning}" + (char)34,

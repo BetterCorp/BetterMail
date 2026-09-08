@@ -9,6 +9,23 @@ public sealed class DraftSynchronizationServiceTests
     private static readonly Mailbox Mailbox = new(Account.AccountId, Account.EmailAddress, Account.DisplayName);
 
     [Fact]
+    public async Task QueuedMessagesAreNeitherSyncedAsDraftsNorImportedAgain()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var queued = Local("queued", "Ready", now) with { ProviderDraftId = "mapped", IsQueued = true };
+        var store = new DraftStore([queued, queued with { Id = "new", ProviderDraftId = null }]);
+        var provider = new DraftProvider { RemoteDrafts = [Cloud("mapped", "Server version", now)] };
+
+        var result = await new DraftSynchronizationService(provider, store)
+            .SynchronizeAsync(Account, Mailbox, TestContext.Current.CancellationToken);
+
+        Assert.Empty(result.Items);
+        Assert.Equal(2, store.Drafts.Count);
+        Assert.Equal(0, store.HydrationCount);
+        Assert.All(store.Drafts, draft => Assert.True(draft.IsQueued));
+    }
+
+    [Fact]
     public async Task CreatesRemoteDraftsAndKeepsEveryLocalDraftWhenOneFails()
     {
         var now = DateTimeOffset.UtcNow;

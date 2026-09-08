@@ -58,7 +58,7 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
             .ToHashSet(StringComparer.Ordinal);
         var results = new List<DraftSyncItem>();
 
-        foreach (var local in localDrafts)
+        foreach (var local in localDrafts.Where(static draft => !draft.IsQueued))
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
@@ -66,6 +66,10 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
                 if (string.IsNullOrWhiteSpace(local.ProviderDraftId))
                 {
                     var full = await GetFullDraftAsync(local, cancellationToken).ConfigureAwait(false);
+                    if (full.IsQueued)
+                    {
+                        continue;
+                    }
                     var created = await provider.CreateDraftAsync(
                         account, mailbox, ToMessage(full), cancellationToken).ConfigureAwait(false);
                     ValidateOwner(account, mailbox, created);
@@ -111,6 +115,10 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
                 else if (localChanged)
                 {
                     var full = await GetFullDraftAsync(local, cancellationToken).ConfigureAwait(false);
+                    if (full.IsQueued)
+                    {
+                        continue;
+                    }
                     var updated = await provider.UpdateDraftAsync(
                         account, mailbox, remote.ProviderId, ToMessage(full), cancellationToken).ConfigureAwait(false);
                     ValidateOwner(account, mailbox, updated);

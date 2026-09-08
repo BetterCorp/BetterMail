@@ -259,6 +259,10 @@ public sealed class ComposeWindowViewModel : ViewModelBase
             _sent = true;
             Sent?.Invoke(this, EventArgs.Empty);
         }
+        catch (OperationCanceledException)
+        {
+            Error = "The message could not be queued. Your draft is still open; try again.";
+        }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             Error = exception.Message;
@@ -413,7 +417,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
             DraftStatus = "";
             Deleted?.Invoke(this, EventArgs.Empty);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception)
         {
             _sent = false;
             Error = $"Draft could not be deleted: {exception.Message}";

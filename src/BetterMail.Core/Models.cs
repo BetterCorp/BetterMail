@@ -203,8 +203,11 @@ public sealed record LocalDraft(
     string? ProviderETag = null,
     string? ConversationIdentity = null,
     DraftSyncStatus? SyncStatus = null,
-    string? SyncError = null)
+    string? SyncError = null,
+    bool IsQueued = false,
+    bool SendAccepted = false)
 {
+    public string KindText => IsQueued ? "Queued" : "Draft";
     public string DisplaySubject => string.IsNullOrWhiteSpace(Subject) ? "(no subject)" : Subject;
     public DateTimeOffset LocalUpdatedAt => UpdatedAt.ToLocalTime();
     public bool HasSyncIssue => SyncStatus is DraftSyncStatus.Conflict or

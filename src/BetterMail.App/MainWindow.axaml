@@ -364,6 +364,15 @@
                 <TextBlock Grid.Column="1" Text="{Binding Drafts.Count}" FontWeight="SemiBold" Foreground="#0F6CBD" Margin="6,0,1,0" VerticalAlignment="Center" />
               </Grid>
             </Button>
+            <Button Classes="folder" Classes.selected="{Binding IsOutboxView}"
+                    Command="{Binding ShowOutboxCommand}" Click="FolderSelectedClicked" IsVisible="{Binding HasOutbox}"
+                    AutomationProperties.Name="Open Outbox">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="Outbox" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{Binding OutboxCountText}" FontWeight="SemiBold"
+                           Foreground="#0F6CBD" Margin="6,0,1,0" />
+              </Grid>
+            </Button>
             <Expander Margin="0,1" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
               <Expander.Header>
                 <Grid ColumnDefinitions="*,Auto" HorizontalAlignment="Stretch">
@@ -536,6 +545,8 @@
             <ListBox.ItemTemplate>
               <DataTemplate x:DataType="core:MailMessage" x:CompileBindings="True">
                 <Border Height="{ReflectionBinding $parent[Window].DataContext.MessageRowHeight}"
+                        Background="Transparent"
+                        HorizontalAlignment="Stretch"
                         BorderBrush="{DynamicResource BetterMailDividerBrush}"
                         BorderThickness="0,0,0,1"
                         DoubleTapped="MessageRowDoubleTapped"
@@ -715,7 +726,7 @@
                    IsVisible="{Binding IsDraftsView}"
                    Background="Transparent"
                    BorderThickness="0"
-                   AutomationProperties.Name="Draft messages">
+                   AutomationProperties.Name="{Binding CurrentFolderName}">
             <ListBox.Styles>
               <Style Selector="ListBoxItem">
                 <Setter Property="Padding" Value="0" />
@@ -737,10 +748,10 @@
                         Padding="14,4,9,5"
                         Command="{Binding $parent[Window].DataContext.OpenDraftCommand}"
                         CommandParameter="{Binding}"
-                        AutomationProperties.Name="{Binding DisplaySubject, StringFormat='Open draft {0}'}">
+                        AutomationProperties.Name="{Binding DisplaySubject}">
                   <Grid ColumnDefinitions="*,Auto" RowDefinitions="18,18,18" RowSpacing="1">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                      <TextBlock Text="Draft" FontWeight="SemiBold" Foreground="{DynamicResource BetterMailAccentBrush}" />
+                      <TextBlock Text="{Binding KindText}" FontWeight="SemiBold" Foreground="{DynamicResource BetterMailAccentBrush}" />
                       <Border Background="#22D13438" CornerRadius="2" Padding="5,1" IsVisible="{Binding HasSyncIssue}">
                         <TextBlock Text="{Binding SyncStatusText}" Foreground="#D13438" FontSize="10" FontWeight="SemiBold" />
                       </Border>
@@ -759,8 +770,8 @@
             <TextBlock Text="This folder is empty." TextAlignment="Center" Opacity="0.65" />
           </StackPanel>
           <StackPanel IsVisible="{Binding ShowDraftEmptyState}" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
-            <TextBlock Text="No drafts" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" />
-            <TextBlock Text="Saved drafts will appear here." Opacity="0.62" />
+            <TextBlock Text="{Binding DraftEmptyTitle}" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" />
+            <TextBlock Text="{Binding DraftEmptyDescription}" Opacity="0.62" />
           </StackPanel>
         </Grid>
       </Grid>
@@ -770,7 +781,7 @@
     <Grid x:Name="ReadingPane"
           Grid.Row="2"
           Grid.Column="3"
-          RowDefinitions="Auto,Auto,*"
+          RowDefinitions="Auto,*"
           Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
       <Button x:Name="PhoneBack"
               Classes="command"
@@ -784,41 +795,10 @@
               ToolTip.Tip="Back to messages"
               AutomationProperties.Name="Back to messages" />
 
-      <Border Grid.Row="1" Padding="20,8" Background="#0A0F6CBD" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1" IsVisible="{Binding HasSelectedAttachments}">
-        <StackPanel Spacing="6">
-          <Grid ColumnDefinitions="*,Auto">
-            <TextBlock Text="{Binding AttachmentSummary}" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center" />
-            <Button Grid.Column="1" Classes="command" Content="Save all" IsVisible="{Binding HasMultipleAttachments}"
-                    Click="SaveAllAttachmentsClicked" AutomationProperties.Name="Save all attachments to a folder" />
-          </Grid>
-          <ItemsControl ItemsSource="{Binding Attachments}">
-            <ItemsControl.ItemsPanel>
-              <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate>
-            </ItemsControl.ItemsPanel>
-            <ItemsControl.ItemTemplate>
-              <DataTemplate x:DataType="core:MailAttachment">
-                <Button Classes="command"
-                        CommandParameter="{Binding}"
-                        Click="PreviewAttachmentClicked"
-                        ToolTip.Tip="Preview attachment"
-                        AutomationProperties.Name="{Binding Name, StringFormat='Preview attachment {0}'}"
-                        Padding="8,5"
-                        Margin="0,0,6,2">
-                  <StackPanel Orientation="Horizontal" Spacing="5">
-                    <TextBlock Text="&#x1F4CE;" FontFamily="Segoe UI Symbol" Opacity="0.65" />
-                    <TextBlock Text="{Binding Name}" MaxWidth="220" TextTrimming="CharacterEllipsis" />
-                  </StackPanel>
-                </Button>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
-        </StackPanel>
-      </Border>
-
-      <app:ConversationThreadView Grid.Row="2"
+      <app:ConversationThreadView Grid.Row="1"
                                   DataContext="{Binding ConversationThread}"
                                   IsVisible="{Binding ShowMessageBody}" />
-      <StackPanel Grid.Row="2"
+      <StackPanel Grid.Row="1"
                   IsVisible="{Binding HasNoSelectedMessage}"
                   HorizontalAlignment="Center"
                   VerticalAlignment="Center"

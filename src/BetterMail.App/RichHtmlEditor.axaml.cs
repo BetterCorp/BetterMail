@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
+using BetterMail.Core;
 
 namespace BetterMail.App;
 
@@ -13,6 +14,8 @@ public sealed partial class RichHtmlEditor : UserControl
     private bool _ready;
     private bool _updatingFromEditor;
     private bool _initialized;
+    private const string AttachmentMessagePrefix = "bettermail:attachment:";
+    public event Action<DraftAttachment>? AttachmentDropped;
 
     public static readonly StyledProperty<string> HtmlProperty = AvaloniaProperty.Register<RichHtmlEditor, string>(
         nameof(Html), "", defaultBindingMode: BindingMode.TwoWay);
@@ -96,6 +99,29 @@ public sealed partial class RichHtmlEditor : UserControl
             <script>
               editor.innerHTML={{JsonSerializer.Serialize(Html)}};
               editor.addEventListener('input',()=>invokeCSharpAction(editor.innerHTML));
+              document.addEventListener('dragover',e=>{
+                if(!Array.from(e.dataTransfer.types).includes('Files')) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect=editor.contentEditable==='true' && {{(AttachmentDropped is not null ? "true" : "false")}} ? 'copy' : 'none';
+              });
+              document.addEventListener('drop',async e=>{
+                if(!Array.from(e.dataTransfer.types).includes('Files')) return;
+                e.preventDefault();
+                if(editor.contentEditable!=='true' || !{{(AttachmentDropped is not null ? "true" : "false")}}) return;
+                for(const file of Array.from(e.dataTransfer.files)){
+                  const message={Name:file.name,ContentType:file.type||'application/octet-stream'};
+                  try {
+                    if(file.size>{{DraftAttachment.MaximumSizeBytes}}) throw new Error('Files must be 150 MB or smaller.');
+                    message.ContentBase64=await new Promise((resolve,reject)=>{
+                      const reader=new FileReader();
+                      reader.onload=()=>resolve(reader.result.slice(reader.result.indexOf(',')+1));
+                      reader.onerror=()=>reject(new Error('The file could not be read.'));
+                      reader.readAsDataURL(file);
+                    });
+                  } catch(error) { message.Error=error.message; }
+                  invokeCSharpAction('{{AttachmentMessagePrefix}}'+JSON.stringify(message));
+                }
+              });
               if(editor.contentEditable==='true') editor.focus();
             </script></html>
             """;
@@ -106,9 +132,47 @@ public sealed partial class RichHtmlEditor : UserControl
 
     private void EditorWebMessageReceived(object? sender, WebMessageReceivedEventArgs e)
     {
+        if (e.Body?.StartsWith(AttachmentMessagePrefix, StringComparison.Ordinal) == true)
+        {
+            if (!IsReadOnly && AttachmentDropped is not null)
+            {
+                try
+                {
+                    AttachmentDropped.Invoke(ParseDroppedAttachment(e.Body[AttachmentMessagePrefix.Length..]));
+                    EditorError.IsVisible = false;
+                }
+                catch (Exception exception)
+                {
+                    ShowError($"File could not be attached: {exception.Message}");
+                }
+            }
+            return;
+        }
         _updatingFromEditor = true;
         Html = e.Body ?? "";
         _updatingFromEditor = false;
+    }
+
+    internal static DraftAttachment ParseDroppedAttachment(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (root.TryGetProperty("Error", out var error))
+        {
+            throw new InvalidOperationException(error.GetString());
+        }
+        var name = root.GetProperty("Name").GetString();
+        var content = root.GetProperty("ContentBase64").GetString() ?? "";
+        if (string.IsNullOrWhiteSpace(name) || content.Length > (DraftAttachment.MaximumSizeBytes + 2) / 3 * 4)
+        {
+            throw new InvalidOperationException("A file name and content of at most 150 MB are required.");
+        }
+        var bytes = Convert.FromBase64String(content);
+        if (bytes.LongLength > DraftAttachment.MaximumSizeBytes)
+        {
+            throw new InvalidOperationException("Files must be 150 MB or smaller.");
+        }
+        return new DraftAttachment(name, root.GetProperty("ContentType").GetString() ?? "application/octet-stream", bytes);
     }
 
     private async void FormatClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

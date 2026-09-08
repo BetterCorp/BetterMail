@@ -6,6 +6,42 @@ namespace BetterMail.Tests;
 public sealed class ComposeWindowViewModelTests
 {
     [Fact]
+    public void DroppedFilesKeepTheirContentAndRejectInvalidPayloads()
+    {
+        var file = RichHtmlEditor.ParseDroppedAttachment(
+            """{"Name":"notes.txt","ContentType":"text/plain","ContentBase64":"aGVsbG8="}""");
+        Assert.Equal("notes.txt", file.Name);
+        Assert.Equal("text/plain", file.ContentType);
+        Assert.Equal("hello"u8.ToArray(), file.ContentBytes);
+        Assert.Throws<FormatException>(() => RichHtmlEditor.ParseDroppedAttachment(
+            """{"Name":"bad.txt","ContentType":"text/plain","ContentBase64":"!"}"""));
+        Assert.Throws<InvalidOperationException>(() => RichHtmlEditor.ParseDroppedAttachment(
+            """{"Error":"Files must be 150 MB or smaller."}"""));
+    }
+
+    [Fact]
+    public async Task FailedQueueKeepsDraftAndRestoresSendButton()
+    {
+        var account = new MailAccount("microsoft365", "account", "tenant", "person@example.com", "Person", ProviderCapabilities.Mail);
+        var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+        LocalDraft? saved = null;
+        var sent = false;
+        var viewModel = new ComposeWindowViewModel(
+            [account], [mailbox], new ComposeRequest("to@example.com", "Subject", "Body"),
+            (_, _, _) => Task.FromCanceled(new CancellationToken(true)),
+            draft => { saved = draft; return Task.CompletedTask; });
+        viewModel.Sent += (_, _) => sent = true;
+
+        await ((AsyncCommand)viewModel.SendCommand).ExecuteAsync();
+
+        Assert.NotNull(saved);
+        Assert.False(sent);
+        Assert.False(viewModel.IsSending);
+        Assert.True(viewModel.SendCommand.CanExecute(null));
+        Assert.Contains("could not be queued", viewModel.Error);
+    }
+
+    [Fact]
     public async Task RecipientPickerSearchesAddsAndRemovesBadges()
     {
         var account = new MailAccount("microsoft365", "account", "tenant", "person@example.com", "Person", ProviderCapabilities.Mail);

@@ -7,13 +7,13 @@
         Width="820" Height="720" MinWidth="560" MinHeight="500"
         KeyDown="ComposeWindowKeyDown" WindowStartupLocation="CenterOwner">
   <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto" Margin="18">
-    <Grid ColumnDefinitions="80,*" Margin="0,0,0,10">
+    <Grid ColumnDefinitions="80,*" Margin="0,0,0,10" IsEnabled="{Binding !IsSending}">
       <TextBlock Text="From" VerticalAlignment="Center" Opacity="0.7" />
       <ComboBox Grid.Column="1" ItemsSource="{Binding Senders}" SelectedItem="{Binding SelectedSender}">
         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding DisplayName}" /></DataTemplate></ComboBox.ItemTemplate>
       </ComboBox>
     </Grid>
-    <ItemsControl Grid.Row="1" ItemsSource="{Binding RecipientFields}">
+    <ItemsControl Grid.Row="1" ItemsSource="{Binding RecipientFields}" IsEnabled="{Binding !IsSending}">
       <ItemsControl.ItemTemplate>
         <DataTemplate>
           <Grid ColumnDefinitions="80,*" Margin="0,0,0,8">
@@ -65,12 +65,12 @@
         </DataTemplate>
       </ItemsControl.ItemTemplate>
     </ItemsControl>
-    <Grid Grid.Row="2" ColumnDefinitions="80,*" Margin="0,0,0,10">
+    <Grid Grid.Row="2" ColumnDefinitions="80,*" Margin="0,0,0,10" IsEnabled="{Binding !IsSending}">
       <TextBlock Text="Subject" VerticalAlignment="Center" Opacity="0.7" />
       <TextBox Grid.Column="1" Text="{Binding Subject}" />
     </Grid>
 
-    <Grid Grid.Row="3" ColumnDefinitions="Auto,Auto,*" Margin="0,0,0,10">
+    <Grid Grid.Row="3" ColumnDefinitions="Auto,Auto,*" Margin="0,0,0,10" IsEnabled="{Binding !IsSending}">
       <Button Classes="command" Content="Attach file" Click="AttachFileClicked" />
       <Button Grid.Column="1" Classes="command" Content="Attach from OneDrive" Click="AttachDriveClicked" Margin="4,0,0,0" />
       <ItemsControl Grid.Column="2" ItemsSource="{Binding Attachments}" Margin="10,0,0,0">
@@ -92,6 +92,7 @@
 
     <app:RichHtmlEditor x:Name="Composer" Grid.Row="4"
                         Html="{Binding Body, Mode=TwoWay}"
+                        IsReadOnly="{Binding IsSending}"
                         Placeholder="Write something useful…"
                         AutomationProperties.Name="Rich text message body" />
 
@@ -107,7 +108,7 @@
           <TextBlock Text="Send" HorizontalAlignment="Center" IsVisible="{Binding !IsSending}" />
           <StackPanel Orientation="Horizontal" Spacing="7" HorizontalAlignment="Center" IsVisible="{Binding IsSending}">
             <ProgressBar Width="24" Height="3" IsIndeterminate="True" VerticalAlignment="Center" />
-            <TextBlock Text="Sending..." />
+            <TextBlock Text="Queueing..." />
           </StackPanel>
         </Grid>
       </Button>

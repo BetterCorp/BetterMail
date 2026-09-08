@@ -216,6 +216,22 @@ public sealed class ConversationThreadTests
     }
 
     [Fact]
+    public void AddingAThreadMessagePreservesExistingRowsWithoutResettingTheList()
+    {
+        var viewModel = new ConversationThreadViewModel();
+        var first = Message("mailbox", "first", "thread", null, 1);
+        viewModel.Reconcile([first], first);
+        var selected = viewModel.SelectedMessage;
+        var changes = new List<System.Collections.Specialized.NotifyCollectionChangedAction>();
+        viewModel.SelectedThread!.Messages.CollectionChanged += (_, e) => changes.Add(e.Action);
+
+        viewModel.Reconcile([first, Message("mailbox", "second", "thread", null, 2)]);
+
+        Assert.Same(selected, viewModel.SelectedMessage);
+        Assert.Equal([System.Collections.Specialized.NotifyCollectionChangedAction.Add], changes);
+    }
+
+    [Fact]
     public async Task LargeCachedBodiesFinishRenderingAfterSelectionReturns()
     {
         var viewModel = new ConversationThreadViewModel();
@@ -278,6 +294,7 @@ public sealed class ConversationThreadTests
             viewModel.SelectedThread!.Messages.Single(item => item.Message.ProviderId == "second"));
 
         await WaitUntilAsync(() => viewModel.Attachments.Count == 1);
+        Assert.True(viewModel.ShowAttachmentArea);
         firstResult.SetResult(
             [new MailAttachment("first-file", "first.txt", "text/plain", 4, false, null, null)]);
         await Task.Delay(20, TestContext.Current.CancellationToken);
@@ -286,6 +303,9 @@ public sealed class ConversationThreadTests
         viewModel.OpenAttachmentCommand.Execute(secondAttachment);
         await WaitUntilAsync(() => openedMessage is not null);
         Assert.Equal("second", openedMessage!.ProviderId);
+        viewModel.SelectMessage(null);
+        Assert.Empty(viewModel.Attachments);
+        Assert.False(viewModel.ShowAttachmentArea);
     }
 
     [Fact]

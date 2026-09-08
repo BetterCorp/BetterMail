@@ -500,15 +500,9 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void SaveAllAttachmentsClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    private async void SaveAllAttachments(MailMessage message, IReadOnlyList<MailAttachment> attachments)
     {
-        if (_viewModel is null || !_viewModel.HasMultipleAttachments)
-        {
-            return;
-        }
-        var message = _viewModel.SelectedMessage;
-        var attachments = _viewModel.Attachments.ToArray();
-        if (message is null)
+        if (_viewModel is null)
         {
             return;
         }
@@ -846,6 +840,8 @@ public sealed partial class MainWindow : Window
             _viewModel.SharedMailboxRequested -= OpenSharedMailbox;
             _viewModel.SearchFocusRequested -= FocusMailSearch;
             _viewModel.HeadersRequested -= OpenHeaders;
+            _viewModel.AttachmentPreviewRequested -= PreviewAttachment;
+            _viewModel.SaveAttachmentsRequested -= SaveAllAttachments;
             _viewModel.CalendarEventDetailsRequested -= ShowCalendarEventWindow;
             _viewModel.PropertyChanged -= ViewModelPropertyChanged;
             _viewModel.Messages.CollectionChanged -= MessagesCollectionChanged;
@@ -860,6 +856,8 @@ public sealed partial class MainWindow : Window
             _viewModel.SharedMailboxRequested += OpenSharedMailbox;
             _viewModel.SearchFocusRequested += FocusMailSearch;
             _viewModel.HeadersRequested += OpenHeaders;
+            _viewModel.AttachmentPreviewRequested += PreviewAttachment;
+            _viewModel.SaveAttachmentsRequested += SaveAllAttachments;
             _viewModel.CalendarEventDetailsRequested += ShowCalendarEventWindow;
             _viewModel.PropertyChanged += ViewModelPropertyChanged;
             _viewModel.Messages.CollectionChanged += MessagesCollectionChanged;
@@ -904,7 +902,7 @@ public sealed partial class MainWindow : Window
             _viewModel.Accounts,
             _viewModel.Mailboxes,
             request,
-            _viewModel.SendDraftAsync,
+            _viewModel.QueueSendAsync,
             _viewModel.SaveLocalDraftAsync,
             _viewModel.DeleteLocalDraftAsync,
             _viewModel.SignatureForSender,
@@ -992,22 +990,13 @@ public sealed partial class MainWindow : Window
     private void OpenHeaders(MailHeadersDocument document) =>
         IndependentWindow.Show(new MailHeadersWindow(document));
 
-    private async void PreviewAttachmentClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void PreviewAttachment(MailAttachment attachment)
     {
-        if (_viewModel is null || sender is not Button { CommandParameter: MailAttachment attachment })
-        {
-            return;
-        }
-        var hydrated = await _viewModel.LoadAttachmentContentAsync(attachment);
-        if (hydrated is null)
-        {
-            return;
-        }
         IndependentWindow.Show(new FilePreviewWindow(
-            hydrated.Name,
-            hydrated.ContentType,
-            hydrated.Size,
-            hydrated.ContentBytes));
+            attachment.Name,
+            attachment.ContentType,
+            attachment.Size,
+            attachment.ContentBytes));
     }
 
 }

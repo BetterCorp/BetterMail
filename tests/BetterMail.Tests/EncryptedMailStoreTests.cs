@@ -7,6 +7,55 @@ namespace BetterMail.Tests;
 public sealed class EncryptedMailStoreTests
 {
     [Fact]
+    public async Task OutboxContentIsFrozenAndAcceptanceSurvivesRestart()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-outbox-store-{Guid.NewGuid():N}");
+        var key = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        var path = Path.Combine(directory, "mail.db");
+        try
+        {
+            await using (var store = new EncryptedMailStore(path, key))
+            {
+                await store.InitializeAsync(cancellationToken);
+                var draft = new LocalDraft("queued", "account", "mailbox", "to@example.com", "", "",
+                    "Draft", "Body", [new("notes.txt", "text/plain", "secret"u8.ToArray())], DateTimeOffset.UtcNow,
+                    ProviderDraftId: "remote", SyncStatus: DraftSyncStatus.Failed, SyncError: "old error");
+                await store.SaveLocalDraftAsync(draft, cancellationToken);
+                await store.SaveLocalDraftAsync(draft with { Subject = "Ready", ProviderDraftId = null, IsQueued = true }, cancellationToken);
+                await store.SaveLocalDraftAsync(draft with { Subject = "Stale autosave", Body = "Stale" }, cancellationToken);
+                await store.UpdateLocalDraftSyncIssueAsync(draft.Id, DraftSyncStatus.MissingRemote, "Late sync", cancellationToken);
+                await store.MarkOutboxSendAcceptedAsync(draft.Id, cancellationToken);
+            }
+            await using (var store = new EncryptedMailStore(path, key))
+            {
+                await store.InitializeAsync(cancellationToken);
+                var queued = Assert.Single(await store.GetLocalDraftsAsync(cancellationToken));
+                Assert.True(queued.IsQueued);
+                Assert.True(queued.SendAccepted);
+                Assert.Equal("Ready", queued.Subject);
+                Assert.Equal("Body", queued.Body);
+                Assert.Equal("remote", queued.ProviderDraftId);
+                Assert.Equal("secret"u8.ToArray(), Assert.Single(queued.Attachments).ContentBytes);
+                Assert.False(queued.HasSyncIssue);
+                Assert.Null(queued.SyncError);
+                var summary = Assert.Single(await store.GetLocalDraftSummariesAsync(cancellationToken));
+                Assert.True(summary.IsQueued);
+                Assert.True(summary.SendAccepted);
+                Assert.Empty(summary.Body);
+                Assert.Empty(summary.Attachments);
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task PersistsProviderTokensInsideEncryptedStore()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

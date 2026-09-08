@@ -83,12 +83,17 @@
       </Grid>
     </Border>
 
-    <Border Grid.Row="2" Padding="12,7" Background="#0A0F6CBD"
+    <Border Grid.Row="3" Padding="12,7" Background="#0A0F6CBD"
             BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1"
             IsVisible="{Binding ShowAttachmentArea}">
       <StackPanel Spacing="5">
-        <TextBlock Text="{Binding AttachmentSummary}" FontSize="11" FontWeight="SemiBold"
-                   IsVisible="{Binding !IsLoadingAttachments}" />
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Text="{Binding AttachmentSummary}" FontSize="11" FontWeight="SemiBold"
+                     IsVisible="{Binding !IsLoadingAttachments}" />
+          <Button Grid.Column="1" Classes="command" Content="Save all"
+                  Command="{Binding SaveAttachmentsCommand}" IsVisible="{Binding CanSaveAttachments}"
+                  AutomationProperties.Name="Save all attachments to a folder" />
+        </Grid>
         <ProgressBar Width="90" Height="3" IsIndeterminate="True" HorizontalAlignment="Left"
                      IsVisible="{Binding IsLoadingAttachments}" />
         <ItemsControl ItemsSource="{Binding Attachments}" IsVisible="{Binding !IsLoadingAttachments}">
@@ -113,10 +118,11 @@
       </StackPanel>
     </Border>
 
-    <ScrollViewer Grid.Row="3"
+    <ScrollViewer Grid.Row="2"
                   MaxHeight="184"
                   IsVisible="{Binding ShowThreadList}"
                   VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
                   AutomationProperties.Name="Conversation message headers">
       <StackPanel>
         <ItemsControl x:Name="ThreadMessages"
@@ -131,11 +137,12 @@
                 <Button Grid.Column="1"
                         Classes="command"
                         Padding="12,8"
+                        HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Stretch"
                         Command="{Binding $parent[UserControl].DataContext.ToggleMessageCommand}"
                         CommandParameter="{Binding}"
                         AutomationProperties.Name="{Binding Sender, StringFormat='Select message from {0}'}"
-                        AutomationProperties.HelpText="Expands or collapses this message without changing the mail-list selection">
+                        AutomationProperties.HelpText="Selects this message without changing the mail-list selection">
                   <Grid ColumnDefinitions="*,Auto"
                         RowDefinitions="Auto,Auto,Auto"
                         ColumnSpacing="10">
@@ -178,6 +185,7 @@
             <DataTemplate x:DataType="core:LocalDraft">
               <Button Classes="command"
                       Padding="12,9"
+                      HorizontalAlignment="Stretch"
                       HorizontalContentAlignment="Stretch"
                       Command="{Binding $parent[UserControl].DataContext.OpenDraftCommand}"
                       CommandParameter="{Binding}"

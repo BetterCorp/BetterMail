@@ -36,12 +36,14 @@ public sealed class ConversationThreadViewModel : ViewModelBase
     private readonly Func<MailMessage, IReadOnlyList<MailFolderItem>>? _moveFolders;
     private readonly Func<MailMessage, Task<IReadOnlyList<MailAttachment>>>? _loadAttachments;
     private readonly Func<MailMessage, MailAttachment, Task>? _openAttachment;
+    private readonly Func<MailMessage, IReadOnlyList<MailAttachment>, Task>? _saveAttachments;
     private IReadOnlyList<LocalDraft> _drafts = [];
     private ConversationThreadItem? _selectedThread;
     private ConversationMessageItem? _selectedMessage;
     private readonly Dictionary<string, ConversationMessageItem> _messageCache = new(StringComparer.Ordinal);
     private bool _isActionRunning;
     private bool _isLoadingAttachments;
+    private int _attachmentVersion;
 
     public ConversationThreadViewModel(
         MailContentRenderer? renderer = null,
@@ -53,7 +55,8 @@ public sealed class ConversationThreadViewModel : ViewModelBase
         Func<MailMessage, IReadOnlyList<MailFolderItem>>? moveFolders = null,
         bool showActions = false,
         Func<MailMessage, Task<IReadOnlyList<MailAttachment>>>? loadAttachments = null,
-        Func<MailMessage, MailAttachment, Task>? openAttachment = null)
+        Func<MailMessage, MailAttachment, Task>? openAttachment = null,
+        Func<MailMessage, IReadOnlyList<MailAttachment>, Task>? saveAttachments = null)
     {
         _renderer = renderer ?? new MailContentRenderer();
         _action = action;
@@ -64,6 +67,9 @@ public sealed class ConversationThreadViewModel : ViewModelBase
         _moveFolders = moveFolders;
         _loadAttachments = loadAttachments;
         _openAttachment = openAttachment;
+        _saveAttachments = saveAttachments;
+        SaveAttachmentsCommand = new AsyncCommand(() => SelectedMessage is null || _saveAttachments is null
+            ? Task.CompletedTask : _saveAttachments(SelectedMessage.Message, Attachments.ToArray()));
         ShowActions = showActions;
         ToggleMessageCommand = new AsyncCommand<ConversationMessageItem>(ToggleMessageAsync);
         AllowRemoteContentCommand = new AsyncCommand<ConversationMessageItem>(AllowRemoteContentAsync);
@@ -104,6 +110,8 @@ public sealed class ConversationThreadViewModel : ViewModelBase
     public ICommand MoveToFolderCommand { get; }
     public ICommand OpenDraftCommand { get; }
     public ICommand OpenAttachmentCommand { get; }
+    public ICommand SaveAttachmentsCommand { get; }
+    public bool CanSaveAttachments => _saveAttachments is not null && Attachments.Count > 1;
     public bool ShowActions { get; }
     public bool IsLoadingAttachments
     {
@@ -116,7 +124,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
             }
         }
     }
-    public bool ShowAttachmentArea => ShowActions && (IsLoadingAttachments || Attachments.Count > 0);
+    public bool ShowAttachmentArea => IsLoadingAttachments || Attachments.Count > 0;
     public string AttachmentSummary => Attachments.Count == 1
         ? "1 attachment"
         : $"{Attachments.Count} attachments";
@@ -228,7 +236,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
             thread.Reconcile(projection);
             reconciled.Add(thread);
         }
-        Replace(Threads, reconciled);
+        CollectionUpdates.Reconcile(Threads, reconciled, static thread => thread.Identity);
 
         var selectedIdentity = selectedMessage is null
             ? SelectedMessage?.Identity
@@ -277,6 +285,13 @@ public sealed class ConversationThreadViewModel : ViewModelBase
         Threads.SelectMany(static thread => thread.Messages)
             .FirstOrDefault(item => item.Identity == identity)
             ?.SetAttachments(attachments);
+        if (SelectedMessage?.Identity == identity)
+        {
+            Replace(Attachments, attachments);
+            RaisePropertyChanged(nameof(AttachmentSummary));
+            RaisePropertyChanged(nameof(ShowAttachmentArea));
+            RaisePropertyChanged(nameof(CanSaveAttachments));
+        }
     }
 
     private async Task SelectMessageAsync(ConversationMessageItem item)
@@ -304,20 +319,25 @@ public sealed class ConversationThreadViewModel : ViewModelBase
         {
             SelectedThread.SetSelection(item);
         }
-        if (changed && item is not null)
+        if (changed)
         {
-            _selectionChanged?.Invoke(item.Message);
+            if (item is not null)
+            {
+                _selectionChanged?.Invoke(item.Message);
+            }
             _ = LoadAttachmentsAsync(item);
         }
     }
 
-    private async Task LoadAttachmentsAsync(ConversationMessageItem item)
+    private async Task LoadAttachmentsAsync(ConversationMessageItem? item)
     {
+        var version = ++_attachmentVersion;
         IsLoadingAttachments = false;
         Replace(Attachments, []);
         RaisePropertyChanged(nameof(AttachmentSummary));
         RaisePropertyChanged(nameof(ShowAttachmentArea));
-        if (_loadAttachments is null || (!item.Message.HasAttachments &&
+        RaisePropertyChanged(nameof(CanSaveAttachments));
+        if (item is null || _loadAttachments is null || (!item.Message.HasAttachments &&
             item.Message.Body?.Contains("cid:", StringComparison.OrdinalIgnoreCase) != true))
         {
             return;
@@ -327,7 +347,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
         try
         {
             var attachments = await _loadAttachments(item.Message);
-            if (SelectedMessage?.Identity != item.Identity)
+            if (version != _attachmentVersion)
             {
                 return;
             }
@@ -335,10 +355,11 @@ public sealed class ConversationThreadViewModel : ViewModelBase
             item.SetAttachments(attachments);
             RaisePropertyChanged(nameof(AttachmentSummary));
             RaisePropertyChanged(nameof(ShowAttachmentArea));
+            RaisePropertyChanged(nameof(CanSaveAttachments));
         }
         finally
         {
-            if (SelectedMessage?.Identity == item.Identity)
+            if (version == _attachmentVersion)
             {
                 IsLoadingAttachments = false;
             }
@@ -352,8 +373,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
 
     private Task ToggleMessageAsync(ConversationMessageItem item)
     {
-        // Thread headers already reference locally cached messages. Selecting one must
-        // never reselect the mail-list row or start provider work.
+        // Thread selection is independent of the mail-list row.
         return SelectMessageAsync(item);
     }
 
@@ -479,7 +499,7 @@ public sealed class ConversationThreadItem(
             }
             reconciled.Add(item);
         }
-        ConversationThreadViewModel.Replace(Messages, reconciled);
+        CollectionUpdates.Reconcile(Messages, reconciled, static message => message.Identity);
         _selected = Messages.FirstOrDefault(message => message.Identity == _selected?.Identity);
         SetSelection(_selected ?? Newest);
         RaisePropertyChanged(nameof(Newest));

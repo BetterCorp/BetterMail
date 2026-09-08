@@ -503,6 +503,17 @@ public sealed class MainWindowViewModelTests
         Assert.Same(first, viewModel.SelectedMessage);
         Assert.Same(secondItem, viewModel.ConversationThread.SelectedMessage);
 
+        // A delayed read/flag update must not take the reading pane back to the mail-list row.
+        viewModel.SelectedMessage = first with { IsFlagged = true };
+        Assert.Same(secondItem, viewModel.ConversationThread.SelectedMessage);
+        Assert.Same(thread, viewModel.ConversationThread.SelectedThread);
+
+        // An explicit click on another mail-list row still selects that message.
+        viewModel.SelectedMessage = second;
+        viewModel.SelectedMessage = first;
+        Assert.Equal(first.ProviderId, viewModel.ConversationThread.SelectedMessage!.Message.ProviderId);
+        viewModel.ConversationThread.SelectMessageCommand.Execute(secondItem);
+
         ComposeRequest? request = null;
         viewModel.ComposeRequested += value => request = value;
         viewModel.ConversationThread.ForwardCommand.Execute(null);
@@ -1071,7 +1082,7 @@ public sealed class MainWindowViewModelTests
 
             viewModel.SyncCommand.Execute(null);
             await provider.Entered.Task.WaitAsync(cancellationToken);
-            await viewModel.SendDraftAsync(
+            await viewModel.QueueSendAsync(
                 new ComposeSender(account, mailbox),
                 "missing-local-draft",
                 new DraftMessage(
@@ -1594,7 +1605,7 @@ public sealed class MainWindowViewModelTests
             Assert.Equal(selected.ProviderId, viewModel.SelectedMessage.ProviderId);
 
             var sender = new ComposeSender(account, mailbox);
-            await viewModel.SendDraftAsync(
+            await viewModel.QueueSendAsync(
                 sender,
                 local.Id,
                 new DraftMessage(
@@ -1602,6 +1613,7 @@ public sealed class MainWindowViewModelTests
                     [new("Recipient", "recipient@example.com")],
                     "Body",
                     false));
+            await WaitUntilAsync(() => !viewModel.IsSyncing && viewModel.Outbox.Count == 0, cancellationToken);
             Assert.Equal(1, provider.SendDraftCount);
             Assert.Equal(0, provider.SendCount);
             Assert.Empty(viewModel.Drafts);
@@ -1848,6 +1860,87 @@ public sealed class MainWindowViewModelTests
         Assert.True(condition());
     }
 
+    [Fact]
+    public async Task SendClosesComposerAndRetriesFailedOutboxOnlyOnTheNextSync()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-outbox-{Guid.NewGuid():N}");
+        var key = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), key);
+        try
+        {
+            await store.InitializeAsync(cancellationToken);
+            var account = new MailAccount("microsoft365", "account", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+            await store.SaveAccountAsync(account, cancellationToken);
+            await store.SaveMailboxAsync(mailbox, cancellationToken);
+            var provider = new RecordingProvider
+            {
+                SendRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
+                SyncRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
+                FolderResults = [new MailFolder(mailbox.Id, "inbox", "Inbox", 0, 0, "inbox")]
+            };
+            var viewModel = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
+            viewModel.Accounts.Add(account);
+            viewModel.Mailboxes.Add(mailbox);
+            var composer = new ComposeWindowViewModel(
+                [account], [mailbox], new ComposeRequest("to@example.com", "Queued subject", "Queued body"),
+                viewModel.QueueSendAsync, viewModel.SaveLocalDraftAsync);
+            composer.AddAttachment(new DraftAttachment("notes.txt", "text/plain", "content"u8.ToArray()));
+            var closed = false;
+            composer.Sent += (_, _) => closed = true;
+            Assert.False(viewModel.HasOutbox);
+
+            await ((AsyncCommand)composer.SendCommand).ExecuteAsync();
+            Assert.True(closed);
+            Assert.False(composer.IsSending);
+            Assert.False(composer.HasError);
+            Assert.Empty(viewModel.Drafts);
+            Assert.Single(viewModel.Outbox);
+            Assert.True(viewModel.HasOutbox);
+            Assert.Equal(0, provider.SendCalls);
+            viewModel.ShowOutboxCommand.Execute(null);
+            Assert.Equal("Outbox", viewModel.CurrentFolderName);
+            Assert.False(viewModel.OpenDraftCommand.CanExecute(Assert.Single(viewModel.VisibleDrafts)));
+
+            // Delivery must wait for the normal incoming-mail sync to finish.
+            provider.SyncRelease.SetResult();
+            await WaitUntilAsync(() => provider.SendCalls == 1, cancellationToken);
+            provider.SendRelease.SetException(new HttpRequestException("Offline"));
+            await WaitUntilAsync(() => !viewModel.IsSyncing, cancellationToken);
+            Assert.Null(viewModel.Error);
+            Assert.Single(viewModel.Outbox);
+            Assert.Equal(1, provider.SendCalls);
+            var queued = Assert.Single(await store.GetLocalDraftsAsync(cancellationToken));
+            Assert.True(queued.IsQueued);
+            Assert.Contains("Queued body", queued.Body);
+            Assert.Equal("content"u8.ToArray(), Assert.Single(queued.Attachments).ContentBytes);
+            await store.SaveLocalDraftAsync(queued with { Id = "accepted-before-restart", SendAccepted = true }, cancellationToken);
+
+            // A later app session can deliver the persisted queue without reopening a composer.
+            await using var reopened = new EncryptedMailStore(Path.Combine(directory, "mail.db"), key);
+            await reopened.InitializeAsync(cancellationToken);
+            provider.SendRelease = null;
+            var restarted = new MainWindowViewModel(reopened, directory, _ => { }, _ => { }, null, provider);
+            restarted.Accounts.Add(account);
+            restarted.Mailboxes.Add(mailbox);
+            await ((AsyncCommand)restarted.SyncCommand).ExecuteAsync();
+            Assert.Equal(2, provider.SendCalls);
+            Assert.Empty(await reopened.GetLocalDraftsAsync(cancellationToken));
+            Assert.Empty(restarted.Outbox);
+            Assert.False(restarted.HasOutbox);
+            Assert.Null(restarted.Error);
+        }
+        finally
+        {
+            await store.DisposeAsync();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
     private sealed class RecordingProvider : IMailProvider, ISharedMailboxProvider
     {
         public bool MarkedRead { get; private set; }
@@ -1860,6 +1953,8 @@ public sealed class MainWindowViewModelTests
         public TaskCompletionSource? SearchRelease { get; set; }
         public TaskCompletionSource? MoveRelease { get; set; }
         public TaskCompletionSource? SyncRelease { get; set; }
+        public TaskCompletionSource? SendRelease { get; set; }
+        public int SendCalls { get; private set; }
         public IReadOnlyList<MailFolder> FolderResults { get; set; } = [];
         public IReadOnlyList<MailAttachment> AttachmentResults { get; set; } = [];
         public MailAttachment? HydratedAttachmentResult { get; set; }
@@ -1974,12 +2069,18 @@ public sealed class MainWindowViewModelTests
                 AttachmentResults.FirstOrDefault(attachment => attachment.ProviderId == attachmentId));
         }
 
-        public Task SendAsync(
+        public async Task SendAsync(
             MailAccount account,
             Mailbox mailbox,
             DraftMessage draft,
-            CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
+            CancellationToken cancellationToken = default)
+        {
+            SendCalls++;
+            if (SendRelease is not null)
+            {
+                await SendRelease.Task.WaitAsync(cancellationToken);
+            }
+        }
     }
 
     private sealed class BlockingSyncProvider(MailFolder folder, params MailMessage[] messages) : IMailProvider

@@ -192,6 +192,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         ShowPinnedCommand = new AsyncCommand(() => ShowUnifiedFilterAsync(MailMessageFilter.Pinned));
         ShowFlaggedCommand = new AsyncCommand(() => ShowUnifiedFilterAsync(MailMessageFilter.Flagged));
         ShowDraftsCommand = new AsyncCommand(ShowDraftsAsync);
+        ShowOutboxCommand = new AsyncCommand(() => ShowDraftListAsync(DraftListFilter.Outbox));
         ShowSyncIssuesCommand = new AsyncCommand(() => ShowDraftListAsync(DraftListFilter.SyncIssues));
         ShowDraftConflictsCommand = new AsyncCommand(() => ShowDraftListAsync(DraftListFilter.Conflicts));
         ShowCalendarCommand = new AsyncCommand(() => ShowWorkspaceModuleAsync("Calendar"), CanOpenWorkspaceModule);
@@ -213,7 +214,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         ComposeCommand = new AsyncCommand(() => RequestComposeAsync(new ComposeRequest()));
         OpenNextCalendarEventCommand = new AsyncCommand(OpenNextCalendarEventAsync, () => NextCalendarEvent is not null);
         ChooseDefaultMailAppCommand = new AsyncCommand(ChooseDefaultMailAppAsync);
-        OpenDraftCommand = new AsyncCommand<LocalDraft>(OpenLocalDraftAsync);
+        OpenDraftCommand = new AsyncCommand<LocalDraft>(OpenLocalDraftAsync, static draft => !draft.IsQueued);
         SetDefaultSenderCommand = new AsyncCommand<SenderSettingsItem>(SetDefaultSenderAsync);
         NewSignatureCommand = new AsyncCommand(OpenSignatureTemplatesAsync);
         CreateSignatureFromTemplateCommand = new AsyncCommand(
@@ -256,7 +257,21 @@ public sealed class MainWindowViewModel : ViewModelBase
             HandleConversationAction,
             loadMessage: message => GetCachedMessageAsync(message),
             location: MailLocation,
-            openDraft: OpenLocalDraftAsync);
+            openDraft: OpenLocalDraftAsync,
+            loadAttachments: message => LoadAttachmentsAsync(message, _selectionWorkCancellation?.Token ?? default),
+            openAttachment: async (message, attachment) =>
+            {
+                var hydrated = await LoadAttachmentContentAsync(message, attachment);
+                if (hydrated is not null)
+                {
+                    AttachmentPreviewRequested?.Invoke(hydrated);
+                }
+            },
+            saveAttachments: (message, attachments) =>
+            {
+                SaveAttachmentsRequested?.Invoke(message, attachments);
+                return Task.CompletedTask;
+            });
         SearchAccountFilters.Add(new SearchAccountFilter("All accounts", null));
         SearchFolderFilters.Add(new SearchFolderFilter("All mail folders", null, null));
         _selectedSearchAccountFilter = SearchAccountFilters[0];
@@ -291,6 +306,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     public event Action? SearchFocusRequested;
     public event Action<MailAccount>? SharedMailboxRequested;
     public event Action<MailHeadersDocument>? HeadersRequested;
+    public event Action<MailAttachment>? AttachmentPreviewRequested;
+    public event Action<MailMessage, IReadOnlyList<MailAttachment>>? SaveAttachmentsRequested;
     public event Action<CalendarEventSource>? CalendarEventDetailsRequested;
     public ObservableCollection<MailAccount> Accounts { get; } = [];
     public ObservableCollection<Mailbox> Mailboxes { get; } = [];
@@ -311,6 +328,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ObservableCollection<MailboxFolderGroup> FolderGroups { get; } = [];
     public ObservableCollection<MailAttachment> Attachments { get; } = [];
     public ObservableCollection<LocalDraft> Drafts { get; } = [];
+    public ObservableCollection<LocalDraft> Outbox { get; } = [];
     public ObservableCollection<LocalDraft> VisibleDrafts { get; } = [];
     public ObservableCollection<MailboxStatisticsItem> MailStatistics { get; } = [];
     public ObservableCollection<GlobalSearchResult> GlobalSearchResults { get; } = [];
@@ -399,6 +417,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ICommand ShowPinnedCommand { get; }
     public ICommand ShowFlaggedCommand { get; }
     public ICommand ShowDraftsCommand { get; }
+    public ICommand ShowOutboxCommand { get; }
     public ICommand ShowSyncIssuesCommand { get; }
     public ICommand ShowDraftConflictsCommand { get; }
     public ICommand ShowCalendarCommand { get; }
@@ -546,7 +565,7 @@ public sealed class MainWindowViewModel : ViewModelBase
                 RaisePropertyChanged(nameof(HasSelectedAttachments));
                 Attachments.Clear();
                 RaisePropertyChanged(nameof(HasMultipleAttachments));
-                ReconcileConversation(value);
+                ReconcileConversation(value, selectMessage: true);
                 RaisePropertyChanged(nameof(AttachmentSummary));
                 IsLoadingAttachments = false;
                 ((AsyncCommand)ReplyCommand).Refresh();
@@ -557,7 +576,6 @@ public sealed class MainWindowViewModel : ViewModelBase
                 ((AsyncCommand)ToggleReadCommand).Refresh();
                 RefreshMailActionCommands();
                 _ = LoadConversationAsync(value, selectionVersion, selectionToken);
-                _ = LoadAttachmentsAsync(value, selectionToken);
                 _ = MarkReadAfterDelayAsync(value, selectionVersion, selectionToken);
             }
         }
@@ -704,6 +722,7 @@ public sealed class MainWindowViewModel : ViewModelBase
                 RaisePropertyChanged(nameof(IsPinnedView));
                 RaisePropertyChanged(nameof(IsFlaggedView));
                 RaisePropertyChanged(nameof(IsAllDraftsView));
+                RaisePropertyChanged(nameof(IsOutboxView));
                 RaisePropertyChanged(nameof(IsSyncIssuesView));
                 RaisePropertyChanged(nameof(IsDraftConflictsView));
                 RaisePropertyChanged(nameof(CurrentItemCountText));
@@ -718,6 +737,11 @@ public sealed class MainWindowViewModel : ViewModelBase
     public bool IsPinnedView => IsUnifiedSection && _unifiedFilter == MailMessageFilter.Pinned;
     public bool IsFlaggedView => IsUnifiedSection && _unifiedFilter == MailMessageFilter.Flagged;
     public bool IsAllDraftsView => IsDraftsView && _draftListFilter == DraftListFilter.All && _draftMailboxId is null;
+    public bool IsOutboxView => IsDraftsView && _draftListFilter == DraftListFilter.Outbox;
+    public bool HasOutbox => Outbox.Count > 0;
+    public string OutboxCountText => Outbox.Count > 0 ? Outbox.Count.ToString("N0") : "";
+    public string DraftEmptyTitle => IsOutboxView ? "Outbox is empty" : "No drafts";
+    public string DraftEmptyDescription => IsOutboxView ? "Queued messages will appear here until sent." : "Saved drafts will appear here.";
     public bool IsSyncIssuesView => IsDraftsView && _draftListFilter == DraftListFilter.SyncIssues;
     public bool IsDraftConflictsView => IsDraftsView && _draftListFilter == DraftListFilter.Conflicts;
     public bool ShowEmptyState => IsMessageListView && Messages.Count == 0 && !IsBusy;
@@ -725,7 +749,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string MessageCountText => $"{Messages.Count:N0} messages";
     public bool HasMoreMessages => _messagePageCursor is not null && !IsSearchResultsView;
     public string CurrentItemCountText => IsDraftsView
-        ? $"{VisibleDrafts.Count:N0} draft{(VisibleDrafts.Count == 1 ? "" : "s")}"
+        ? IsOutboxView ? $"{VisibleDrafts.Count:N0} queued" : $"{VisibleDrafts.Count:N0} draft{(VisibleDrafts.Count == 1 ? "" : "s")}"
         : MessageCountText;
     public string DraftCountText => Drafts.Count == 0 ? "Drafts" : $"Drafts ({Drafts.Count:N0})";
     public bool HasDrafts => Drafts.Count > 0;
@@ -802,6 +826,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             {
                 DraftListFilter.SyncIssues => "Sync issues",
                 DraftListFilter.Conflicts => "Draft conflicts",
+                DraftListFilter.Outbox => "Outbox",
                 _ => "Drafts"
             }
             : _unifiedFilter switch
@@ -1385,8 +1410,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             await _store.InitializeAsync();
             Replace(Accounts, await _store.GetAccountsAsync());
             Replace(Mailboxes, await _store.GetMailboxesAsync());
-            Replace(Drafts, await _store.GetLocalDraftSummariesAsync());
-            RebuildVisibleDrafts();
+            await RefreshDraftsAsync();
             foreach (var account in Accounts.Where(account => Mailboxes.All(mailbox => mailbox.AccountId != account.AccountId || mailbox.IsShared)))
             {
                 var primary = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
@@ -1645,6 +1669,10 @@ public sealed class MainWindowViewModel : ViewModelBase
             {
                 Drafts.Remove(draft);
             }
+            foreach (var draft in Outbox.Where(candidate => candidate.AccountId == account.AccountId).ToArray())
+            {
+                Outbox.Remove(draft);
+            }
             RebuildVisibleDrafts();
             foreach (var mailbox in Mailboxes.Where(candidate => candidate.AccountId == account.AccountId).ToArray())
             {
@@ -1758,6 +1786,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
             await ReconcileAllDraftsAsync();
             _ = RefreshWorkspaceCacheAsync();
+            await ProcessOutboxAsync();
             if (!mailFailures.IsEmpty)
             {
                 Error = string.Join(Environment.NewLine, mailFailures.Distinct(StringComparer.Ordinal));
@@ -2157,11 +2186,15 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         var mailboxLock = _draftSyncLocks.GetOrAdd(mailbox.Id, static _ => new SemaphoreSlim(1, 1));
-        await mailboxLock.WaitAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        if (!await mailboxLock.WaitAsync(0, timeout.Token))
+        {
+            return null;
+        }
         try
         {
             var result = await new DraftSynchronizationService(_provider, _store)
-                .SynchronizeAsync(account, mailbox);
+                .SynchronizeAsync(account, mailbox, timeout.Token);
             var issue = result.Items.FirstOrDefault(static item =>
                 item.Status is DraftSyncStatus.Conflict or
                     DraftSyncStatus.MissingRemote or
@@ -2170,6 +2203,10 @@ public sealed class MainWindowViewModel : ViewModelBase
             return issue is null
                 ? null
                 : $"{mailbox.Address}: {issue.Error ?? issue.Status.ToString()}";
+        }
+        catch (OperationCanceledException)
+        {
+            return $"{mailbox.Address}: Draft sync timed out; local drafts were kept.";
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -2187,7 +2224,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             return;
         }
-        Replace(Drafts, await _store.GetLocalDraftSummariesAsync());
+        var drafts = await _store.GetLocalDraftSummariesAsync();
+        Replace(Drafts, drafts.Where(static draft => !draft.IsQueued));
+        Replace(Outbox, drafts.Where(static draft => draft.IsQueued && !draft.SendAccepted));
         RebuildVisibleDrafts();
     }
 
@@ -3347,6 +3386,11 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private async Task SelectFolderAsync(MailFolderItem folder)
     {
+        if (string.Equals(folder.WellKnownName, "outbox", StringComparison.OrdinalIgnoreCase))
+        {
+            await ShowDraftListAsync(DraftListFilter.Outbox, folder);
+            return;
+        }
         if (IsDraftFolder(folder))
         {
             await ShowDraftListAsync(DraftListFilter.All, folder);
@@ -3381,6 +3425,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         SetSelectedFolder(folder);
         RebuildVisibleDrafts();
         RaisePropertyChanged(nameof(IsAllDraftsView));
+        RaisePropertyChanged(nameof(IsOutboxView));
+        RaisePropertyChanged(nameof(DraftEmptyTitle));
+        RaisePropertyChanged(nameof(DraftEmptyDescription));
         RaisePropertyChanged(nameof(IsSyncIssuesView));
         RaisePropertyChanged(nameof(IsDraftConflictsView));
         RaisePropertyChanged(nameof(CurrentFolderName));
@@ -4516,14 +4563,14 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private static string MessageKey(MailMessage message) => $"{message.MailboxId}\n{message.ProviderId}";
 
-    private async Task LoadAttachmentsAsync(
+    private async Task<IReadOnlyList<MailAttachment>> LoadAttachmentsAsync(
         MailMessage? message,
         CancellationToken cancellationToken = default)
     {
         var hasCidImages = message?.Body?.Contains("cid:", StringComparison.OrdinalIgnoreCase) == true;
         if (message is null || (!message.HasAttachments && !hasCidImages) || _provider is null)
         {
-            return;
+            return [];
         }
 
         IsLoadingAttachments = true;
@@ -4532,7 +4579,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             var attachments = await GetAttachmentsAsync(message, cancellationToken);
             if (!IsCurrentMessage(message))
             {
-                return;
+                return attachments;
             }
 
             Replace(Attachments, attachments);
@@ -4540,10 +4587,11 @@ public sealed class MainWindowViewModel : ViewModelBase
             ConversationThread.SetAttachments(message, attachments);
             RaisePropertyChanged(nameof(SelectedMessageBodyUri));
             RaisePropertyChanged(nameof(AttachmentSummary));
+            return attachments;
         }
         catch (OperationCanceledException)
         {
-            return;
+            return [];
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -4551,6 +4599,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             {
                 Error = $"Attachments could not be loaded: {exception.Message}";
             }
+            return [];
         }
         finally
         {
@@ -4698,47 +4747,93 @@ public sealed class MainWindowViewModel : ViewModelBase
         return string.Concat(parts.Take(2).Select(static part => char.ToUpperInvariant(part[0])));
     }
 
-    public async Task SendDraftAsync(ComposeSender sender, string localDraftId, DraftMessage draft)
+    public async Task QueueSendAsync(ComposeSender sender, string localDraftId, DraftMessage message)
     {
-        if (_provider is null)
+        if (_store is null)
         {
-            throw new InvalidOperationException("Connect a mail account before sending mail.");
+            throw new InvalidOperationException("The encrypted outbox is unavailable. Your message has not been queued.");
+        }
+        if (sender.Mailbox.AccountId != sender.Account.AccountId || message.To.Count == 0)
+        {
+            throw new InvalidOperationException("Choose a sending account and add at least one recipient.");
         }
 
-        var mailboxLock = _draftSyncLocks.GetOrAdd(sender.Mailbox.Id, static _ => new SemaphoreSlim(1, 1));
-        await mailboxLock.WaitAsync();
-        try
+        var local = await GetStoredDraftAsync(localDraftId);
+        await _store.SaveLocalDraftAsync(new LocalDraft(
+            localDraftId, sender.Account.AccountId, sender.Mailbox.Id,
+            string.Join("; ", message.To), string.Join("; ", message.Cc ?? []), string.Join("; ", message.Bcc ?? []),
+            message.Subject, message.Body, message.Attachments ?? [], DateTimeOffset.UtcNow,
+            message.IsHtml, ConversationIdentity: local?.ConversationIdentity, IsQueued: true));
+        await RefreshDraftsAsync();
+        _ = SyncAsync();
+    }
+
+    private async Task ProcessOutboxAsync()
+    {
+        if (_store is null || _provider is null)
         {
-            var local = await GetStoredDraftAsync(localDraftId);
-            if (_provider.SupportsCloudDraftsFor(sender.Account) &&
-                local?.ProviderDraftId is { Length: > 0 } providerDraftId &&
-                local.AccountId == sender.Account.AccountId &&
-                local.MailboxId == sender.Mailbox.Id)
+            return;
+        }
+        var queued = (await _store.GetLocalDraftSummariesAsync())
+            .Where(static draft => draft.IsQueued).OrderBy(static draft => draft.UpdatedAt);
+        foreach (var summary in queued)
+        {
+            if (!TryGetDraftContext(summary, out var account, out var mailbox))
             {
-                await _provider.UpdateDraftAsync(
-                    sender.Account, sender.Mailbox, providerDraftId, draft);
-                await _provider.SendDraftAsync(
-                    sender.Account, sender.Mailbox, providerDraftId);
+                continue;
             }
-            else
-            {
-                await _provider.SendAsync(sender.Account, sender.Mailbox, draft);
-            }
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            var mailboxLock = _draftSyncLocks.GetOrAdd(mailbox.Id, static _ => new SemaphoreSlim(1, 1));
             try
             {
-                await DeleteLocalDraftRecordAsync(localDraftId);
+                await mailboxLock.WaitAsync(timeout.Token);
+                try
+                {
+                    var local = await _store.GetLocalDraftAsync(summary.Id, timeout.Token);
+                    if (local is not { IsQueued: true })
+                    {
+                        continue;
+                    }
+                    if (!local.SendAccepted)
+                    {
+                        // ponytail: lost server acknowledgements need provider idempotency for exactly-once delivery.
+                        var message = new DraftMessage(
+                            local.Subject, ComposeWindowViewModel.ParseRecipients(local.To), local.Body, local.IsHtml,
+                            ComposeWindowViewModel.ParseRecipients(local.Cc), ComposeWindowViewModel.ParseRecipients(local.Bcc),
+                            local.Attachments);
+                        if (_provider.SupportsCloudDraftsFor(account))
+                        {
+                            var remote = local.ProviderDraftId is { Length: > 0 } providerDraftId
+                                ? await _provider.UpdateDraftAsync(account, mailbox, providerDraftId, message, timeout.Token)
+                                : await _provider.CreateDraftAsync(account, mailbox, message, timeout.Token);
+                            if (remote.AccountId != account.AccountId || remote.MailboxId != mailbox.Id)
+                            {
+                                throw new InvalidOperationException("The provider returned a draft owned by another mailbox.");
+                            }
+                            await _store.UpdateLocalDraftSyncMetadataAsync(
+                                local.Id, remote.ProviderId, local.UpdatedAt, remote.UpdatedAt, remote.ETag, timeout.Token);
+                            await _provider.SendDraftAsync(account, mailbox, remote.ProviderId, timeout.Token);
+                        }
+                        else
+                        {
+                            await _provider.SendAsync(account, mailbox, message, timeout.Token);
+                        }
+                        // Record acceptance before cleanup so a failed delete does not resend the message.
+                        await _store.MarkOutboxSendAcceptedAsync(local.Id);
+                    }
+                    await _store.DeleteLocalDraftAsync(local.Id);
+                }
+                finally
+                {
+                    mailboxLock.Release();
+                }
             }
-            catch (Exception exception) when (exception is not OperationCanceledException)
+            catch (Exception)
             {
-                Error = $"Message sent, but its encrypted local draft could not be removed: {exception.Message}";
-                Status = "Message sent; draft cleanup needs attention";
+                // Keep the encrypted outbox item. The next sync owns the next attempt.
             }
-            _ = SyncAsync();
         }
-        finally
-        {
-            mailboxLock.Release();
-        }
+        await RefreshDraftsAsync();
     }
 
     public void ConfigureSenderPreferences(
@@ -5133,19 +5228,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         await _store.SaveLocalDraftAsync(draft);
-        var existing = Drafts.FirstOrDefault(candidate => candidate.Id == draft.Id);
-        if (existing is not null)
-        {
-            Drafts.Remove(existing);
-        }
-        Drafts.Insert(0, draft with
-        {
-            Body = "",
-            Attachments = [],
-            SyncStatus = draft.SyncStatus ?? existing?.SyncStatus,
-            SyncError = draft.SyncError ?? existing?.SyncError
-        });
-        RebuildVisibleDrafts();
+        await RefreshDraftsAsync();
     }
 
     public async Task DeleteLocalDraftAsync(string id)
@@ -5155,13 +5238,18 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         var draft = await GetStoredDraftAsync(id);
+        if (draft?.IsQueued == true)
+        {
+            return;
+        }
         if (draft?.ProviderDraftId is { Length: > 0 } providerDraftId &&
             TryGetDraftContext(draft, out var account, out var mailbox) &&
             _provider?.SupportsCloudDraftsFor(account) == true)
         {
             var mailboxLock = _draftSyncLocks.GetOrAdd(mailbox.Id, static _ => new SemaphoreSlim(1, 1));
-            await mailboxLock.WaitAsync();
+            await mailboxLock.WaitAsync(timeout.Token);
             try
             {
                 draft = await GetStoredDraftAsync(id);
@@ -5170,7 +5258,7 @@ public sealed class MainWindowViewModel : ViewModelBase
                 {
                     try
                     {
-                        await _provider.DeleteDraftAsync(account, mailbox, currentProviderDraftId);
+                        await _provider.DeleteDraftAsync(account, mailbox, currentProviderDraftId, timeout.Token);
                     }
                     catch (HttpRequestException exception) when (exception.StatusCode == HttpStatusCode.NotFound)
                     {
@@ -5219,6 +5307,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     internal async Task OpenLocalDraftAsync(LocalDraft draft)
     {
         draft = await GetStoredDraftAsync(draft.Id) ?? draft;
+        if (draft.IsQueued)
+        {
+            return;
+        }
         IsSettingsOpen = false;
         ActiveModule = "Mail";
         ComposeRequested?.Invoke(new ComposeRequest(
@@ -5525,7 +5617,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(ShowEmptyState));
     }
 
-    private void ReconcileConversation(MailMessage? selected)
+    private void ReconcileConversation(MailMessage? selected, bool selectMessage = false)
     {
         if (selected is null)
         {
@@ -5550,7 +5642,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             messages.Add(selected);
         }
-        ConversationThread.Reconcile(messages, selected);
+        ConversationThread.Reconcile(messages, selectMessage || ConversationThread.SelectedThread?.Identity != threadIdentity
+            ? selected : ConversationThread.SelectedMessage?.Message ?? selected);
     }
 
     private async Task LoadConversationAsync(
@@ -5596,7 +5689,7 @@ public sealed class MainWindowViewModel : ViewModelBase
                     messages.Add(hydrated);
                 }
             }
-            ConversationThread.Reconcile(messages, selected);
+            ConversationThread.Reconcile(messages, ConversationThread.SelectedMessage?.Message ?? selected);
             ConversationThread.SetAttachments(selected, Attachments.ToArray());
         }
         catch (OperationCanceledException)
@@ -5642,6 +5735,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     private void RaiseDraftState()
     {
         RaisePropertyChanged(nameof(DraftCountText));
+        RaisePropertyChanged(nameof(OutboxCountText));
+        RaisePropertyChanged(nameof(HasOutbox));
         RaisePropertyChanged(nameof(HasDrafts));
         RaisePropertyChanged(nameof(CurrentItemCountText));
         RaisePropertyChanged(nameof(ShowDraftEmptyState));
@@ -5653,9 +5748,11 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void RebuildVisibleDrafts()
     {
-        IEnumerable<LocalDraft> visible = _draftMailboxId is null
-            ? Drafts
-            : Drafts.Where(draft => draft.MailboxId == _draftMailboxId);
+        IEnumerable<LocalDraft> visible = _draftListFilter == DraftListFilter.Outbox ? Outbox : Drafts;
+        if (_draftMailboxId is not null)
+        {
+            visible = visible.Where(draft => draft.MailboxId == _draftMailboxId);
+        }
         visible = _draftListFilter switch
         {
             DraftListFilter.SyncIssues => visible.Where(static draft => draft.HasSyncIssue),
@@ -5680,6 +5777,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 internal enum DraftListFilter
 {
     All,
+    Outbox,
     SyncIssues,
     Conflicts
 }

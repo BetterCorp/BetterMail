@@ -64,6 +64,8 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             await EnsureColumnAsync(connection, "local_drafts", "conversation_identity", "TEXT", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "local_drafts", "sync_status", "TEXT", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "local_drafts", "sync_error", "TEXT", cancellationToken).ConfigureAwait(false);
+            await EnsureColumnAsync(connection, "local_drafts", "is_queued", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
+            await EnsureColumnAsync(connection, "local_drafts", "send_accepted", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
             await RunOnceAsync(connection, "thread-index-v1", BackfillThreadIndex, cancellationToken).ConfigureAwait(false);
             _optimizedSearch = await MigrationCompleteAsync(connection, "message-search-v2", cancellationToken).ConfigureAwait(false);
             _correspondentsReady = await MigrationCompleteAsync(connection, "message-correspondents-v1", cancellationToken).ConfigureAwait(false);
@@ -1119,11 +1121,11 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                 INSERT INTO local_drafts(
                     id, account_id, mailbox_id, recipients, cc, bcc, subject, body, attachments_json,
                     updated_at, is_html, provider_draft_id, synced_local_updated_at, provider_updated_at, provider_etag, conversation_identity,
-                    sync_status, sync_error)
+                    sync_status, sync_error, is_queued, send_accepted)
                 VALUES(
                     $id, $account, $mailbox, $to, $cc, $bcc, $subject, $body, $attachments,
                     $updated, $isHtml, $providerDraft, $syncedLocal, $providerUpdated, $providerETag, $conversationIdentity,
-                    $syncStatus, $syncError)
+                    $syncStatus, $syncError, $queued, $accepted)
                 ON CONFLICT(id) DO UPDATE SET
                     account_id = excluded.account_id,
                     mailbox_id = excluded.mailbox_id,
@@ -1156,8 +1158,11 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                         THEN COALESCE(excluded.provider_etag, local_drafts.provider_etag)
                         ELSE excluded.provider_etag
                     END,
-                    sync_status = COALESCE(excluded.sync_status, local_drafts.sync_status),
-                    sync_error = COALESCE(excluded.sync_error, local_drafts.sync_error);
+                    sync_status = CASE WHEN excluded.is_queued = 1 THEN NULL ELSE COALESCE(excluded.sync_status, local_drafts.sync_status) END,
+                    sync_error = CASE WHEN excluded.is_queued = 1 THEN NULL ELSE COALESCE(excluded.sync_error, local_drafts.sync_error) END,
+                    is_queued = excluded.is_queued,
+                    send_accepted = excluded.send_accepted
+                WHERE local_drafts.is_queued = 0;
                 """;
             command.Parameters.AddWithValue("$id", draft.Id);
             command.Parameters.AddWithValue("$account", draft.AccountId);
@@ -1177,6 +1182,8 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             command.Parameters.AddWithValue("$conversationIdentity", (object?)draft.ConversationIdentity ?? DBNull.Value);
             command.Parameters.AddWithValue("$syncStatus", (object?)draft.SyncStatus?.ToString() ?? DBNull.Value);
             command.Parameters.AddWithValue("$syncError", (object?)draft.SyncError ?? DBNull.Value);
+            command.Parameters.AddWithValue("$queued", draft.IsQueued);
+            command.Parameters.AddWithValue("$accepted", draft.SendAccepted);
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }, cancellationToken).ConfigureAwait(false);
     }
@@ -1202,7 +1209,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                 SELECT id, account_id, mailbox_id, recipients, cc, bcc, subject,
                        {(includeAttachments ? "body" : "''")}, {(includeAttachments ? "attachments_json" : "'[]'")},
                        updated_at, is_html, provider_draft_id, synced_local_updated_at, provider_updated_at, provider_etag, conversation_identity,
-                       sync_status, sync_error
+                       sync_status, sync_error, is_queued, send_accepted
                 FROM local_drafts{(id is null ? "" : " WHERE id = $id")} ORDER BY updated_at DESC;
                 """;
             if (id is not null)
@@ -1228,7 +1235,8 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                     reader.IsDBNull(14) ? null : reader.GetString(14),
                     reader.IsDBNull(15) ? null : reader.GetString(15),
                     syncStatus,
-                    reader.IsDBNull(17) ? null : reader.GetString(17)));
+                    reader.IsDBNull(17) ? null : reader.GetString(17),
+                    reader.GetBoolean(18), reader.GetBoolean(19)));
             }
             return drafts;
         }, cancellationToken);
@@ -1271,6 +1279,15 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             }
         }, cancellationToken);
 
+    public Task MarkOutboxSendAcceptedAsync(string id, CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE local_drafts SET send_accepted = 1 WHERE id = $id AND is_queued = 1;";
+            command.Parameters.AddWithValue("$id", id);
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+
     public Task UpdateLocalDraftSyncIssueAsync(
         string id,
         DraftSyncStatus? status,
@@ -1280,7 +1297,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         {
             await using var command = connection.CreateCommand();
             command.CommandText = """
-                UPDATE local_drafts SET sync_status = $status, sync_error = $error WHERE id = $id;
+                UPDATE local_drafts SET sync_status = $status, sync_error = $error WHERE id = $id AND is_queued = 0;
                 """;
             command.Parameters.AddWithValue("$id", id);
             command.Parameters.AddWithValue("$status", (object?)status?.ToString() ?? DBNull.Value);

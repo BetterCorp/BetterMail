@@ -15,6 +15,16 @@ public sealed partial class ComposeWindow : Window
     public ComposeWindow()
     {
         InitializeComponent();
+        DragDrop.SetAllowDrop(this, true);
+        AddHandler(DragDrop.DragOverEvent, FilesDragOver);
+        AddHandler(DragDrop.DropEvent, FilesDropped);
+        Composer.AttachmentDropped += attachment =>
+        {
+            if (DataContext is ComposeWindowViewModel { IsSending: false } viewModel)
+            {
+                viewModel.AddAttachment(attachment);
+            }
+        };
         Closing += SaveBeforeClosing;
         Opened += (_, _) => FocusToRecipient();
     }
@@ -146,22 +156,53 @@ public sealed partial class ComposeWindow : Window
             return;
         }
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Attach files", AllowMultiple = true });
+        await AttachFilesAsync(viewModel, files);
+    }
+
+    private void FilesDragOver(object? sender, DragEventArgs e)
+    {
+        if (!e.DataTransfer.Formats.Contains(DataFormat.File))
+        {
+            return;
+        }
+        e.DragEffects = DataContext is ComposeWindowViewModel { IsSending: false }
+            ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private async void FilesDropped(object? sender, DragEventArgs e)
+    {
+        if (DataContext is not ComposeWindowViewModel { IsSending: false } viewModel ||
+            e.DataTransfer.TryGetFiles() is not { } files)
+        {
+            return;
+        }
+        e.Handled = true;
+        await AttachFilesAsync(viewModel, files.OfType<IStorageFile>());
+    }
+
+    private static async Task AttachFilesAsync(ComposeWindowViewModel viewModel, IEnumerable<IStorageFile> files)
+    {
         foreach (var file in files)
         {
-            await using var stream = await file.OpenReadAsync();
-            if (stream.CanSeek && !viewModel.ValidateAttachmentSize(file.Name, stream.Length))
-            {
-                continue;
-            }
-            await using var content = new LimitedMemoryStream(DraftAttachment.MaximumSizeBytes);
             try
             {
+                await using var stream = await file.OpenReadAsync();
+                if (stream.CanSeek && !viewModel.ValidateAttachmentSize(file.Name, stream.Length))
+                {
+                    continue;
+                }
+                await using var content = new LimitedMemoryStream(DraftAttachment.MaximumSizeBytes);
                 await stream.CopyToAsync(content);
                 viewModel.AddAttachment(new DraftAttachment(file.Name, "application/octet-stream", content.ToArray()));
             }
             catch (InvalidOperationException)
             {
                 viewModel.ValidateAttachmentSize(file.Name, DraftAttachment.MaximumSizeBytes + 1);
+            }
+            catch (Exception exception)
+            {
+                viewModel.ReportError($"'{file.Name}' could not be attached: {exception.Message}");
             }
         }
     }
