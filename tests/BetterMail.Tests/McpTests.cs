@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using BetterMail.App;
 using BetterMail.Core;
+using Microsoft.Data.Sqlite;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -13,6 +14,57 @@ namespace BetterMail.Tests;
 
 public sealed class McpTests
 {
+    [Fact]
+    public async Task PrivatePathMigratesOnceAndSurvivesRestartSettingsAndKeyRotation()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-mcp-path-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(directory, "mail.db");
+        var databaseKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        var originalAccessKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        try
+        {
+            await using (var initial = new EncryptedMailStore(path, databaseKey)) await initial.InitializeAsync(token);
+            // Seed the v0.2.41 schema, before installation-specific paths existed.
+            await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+                { DataSource = path, Password = databaseKey, Pooling = false }.ToString()))
+            {
+                await connection.OpenAsync(token);
+                await using var command = connection.CreateCommand();
+                command.CommandText = """
+                    CREATE TABLE mcp_settings(id INTEGER PRIMARY KEY CHECK(id = 1), configuration_json TEXT NOT NULL, access_key TEXT NOT NULL);
+                    INSERT INTO mcp_settings VALUES(1, $configuration, $key);
+                    """;
+                command.Parameters.AddWithValue("$configuration", JsonSerializer.Serialize(new McpConfiguration()));
+                command.Parameters.AddWithValue("$key", originalAccessKey);
+                await command.ExecuteNonQueryAsync(token);
+            }
+            string endpointPath;
+            await using (var store = new EncryptedMailStore(path, databaseKey))
+            {
+                await store.InitializeAsync(token);
+                var saved = await store.GetMcpConfigurationAsync(token);
+                endpointPath = saved.EndpointPath;
+                Assert.Matches("^/bm/[0-9a-f]{64}$", endpointPath);
+                Assert.Equal(originalAccessKey, saved.AccessKey);
+                await store.RotateMcpAccessKeyAsync(token);
+                await store.SaveMcpConfigurationAsync(saved.Configuration with { Port = 47832, AllowWrites = true }, token);
+                var changed = await store.GetMcpConfigurationAsync(token);
+                Assert.Equal(endpointPath, changed.EndpointPath);
+                Assert.NotEqual(originalAccessKey, changed.AccessKey);
+            }
+            await using (var restarted = new EncryptedMailStore(path, databaseKey))
+            {
+                await restarted.InitializeAsync(token);
+                var saved = await restarted.GetMcpConfigurationAsync(token);
+                Assert.Equal(endpointPath, saved.EndpointPath);
+                Assert.Equal(47832, saved.Configuration.Port);
+            }
+            await WithStore(async independent => Assert.NotEqual(endpointPath, (await independent.GetMcpConfigurationAsync()).EndpointPath));
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
+    }
+
     [Fact]
     public async Task SettingsRequireExplicitEnablementAndPersistPermissionsAndKey()
     {
@@ -28,6 +80,7 @@ public sealed class McpTests
             Assert.False(settings.IsAvailable);
             await settings.InitializeAsync();
             Assert.True(settings.IsAvailable);
+            Assert.EndsWith(saved.EndpointPath, settings.EndpointUrl);
             Assert.Contains("Disabled", settings.Status);
 
             // An occupied port proves that toggling the staged setting alone never starts a listener.
@@ -51,6 +104,8 @@ public sealed class McpTests
             var rotated = await store.GetMcpConfigurationAsync();
             Assert.NotEqual(saved.AccessKey, rotated.AccessKey);
             Assert.Equal(settings.AccessKey, rotated.AccessKey);
+            Assert.Equal(saved.EndpointPath, rotated.EndpointPath);
+            Assert.EndsWith(saved.EndpointPath, settings.EndpointUrl);
             var mailbox = new Mailbox("account", "me@example.com", "Me");
             await store.SaveMailboxAsync(mailbox);
             await settings.RefreshMailboxesAsync();
@@ -81,11 +136,18 @@ public sealed class McpTests
             await store.SaveAccountAsync(account);
             await store.SaveMailboxAsync(mailbox);
             var configuration = new McpConfiguration(Enabled: true, MailboxIds: [mailbox.Id]);
-            var key = (await store.GetMcpConfigurationAsync()).AccessKey;
+            var saved = await store.GetMcpConfigurationAsync();
+            var key = saved.AccessKey;
             var tools = new McpMailTools(store, () => configuration, () => Task.CompletedTask, (_, _, _) => Task.CompletedTask);
-            await using var endpoint = new McpEndpoint(tools, 0, () => configuration.Enabled, () => key);
+            await using var endpoint = new McpEndpoint(tools, 0, saved.EndpointPath, () => configuration.Enabled, () => key);
             await endpoint.StartAsync(TestContext.Current.CancellationToken);
             using var http = new HttpClient();
+            foreach (var wrongPath in new[] { "/mcp", "/bm/" + new string('0', 64), saved.EndpointPath + "extra" })
+            {
+                using var unknown = await http.GetAsync(new Uri(new Uri(endpoint.Address), wrongPath), TestContext.Current.CancellationToken);
+                Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+                Assert.Empty(unknown.Headers.WwwAuthenticate);
+            }
             async Task<HttpStatusCode> Status(string? bearer = null, string? host = null, string? origin = null)
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get, endpoint.Address);

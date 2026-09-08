@@ -100,9 +100,41 @@ enable the endpoint, and click **Apply MCP settings**. Creating drafts and movin
 mail require the edit permission; sending saved drafts requires the additional send permission.
 New mailboxes are excluded until explicitly selected. Uncheck enablement and apply to stop access.
 
-Configure your MCP client with Streamable HTTP, the URL copied from Settings (default
-`http://127.0.0.1:47831/mcp`), and an `Authorization: Bearer <access-key>` header. Copy the key
-from Settings; **Replace access key** immediately revokes the previous key for new requests.
+Configure your MCP client with these fields:
+
+| Field | Value |
+| --- | --- |
+| Transport | Streamable HTTP |
+| URL | Copy the entire endpoint from BetterMail: `http://127.0.0.1:47831/bm/<installation-token>` (default port) |
+| HTTP header name | `Authorization` |
+| HTTP header value | `Bearer <your access key>` |
+
+The `/bm/` path contains a 256-bit cryptographically random token generated once
+and saved in the encrypted mail database. It remains unchanged across restarts,
+updates, port changes, and access-key rotation. Copy the full URL; `/mcp` is no
+longer an endpoint. Existing v0.2.41 clients must update their URL once after upgrading.
+The private path makes guessing difficult; bearer authentication remains mandatory.
+
+Use **Copy header value** in BetterMail's MCP settings to copy `Bearer`, one space, and the
+current key together. Paste that into the header's value field without quotes or angle brackets.
+If the client offers a dedicated **Bearer token** field, use **Copy access key** instead; that
+field expects only the key. For clients with a JSON headers field, the format is:
+
+```json
+{"Authorization": "Bearer PASTE_ACCESS_KEY_HERE"}
+```
+
+Save and restart the MCP connection. In **ChatGPT desktop > Settings > MCP servers**, select
+**Restart**, then type `/mcp` in the composer to confirm BetterMail is connected
+([official setup instructions](https://learn.chatgpt.com/docs/extend/mcp#configure-in-the-chatgpt-desktop-app)).
+Attaching `@BetterMail` as a desktop window selects computer control, which is separate from MCP.
+ChatGPT in a browser does not read this local MCP configuration.
+
+For the current BetterTunnels Host-header setup and the proposed Senior-only public
+link integration, see [BetterTunnels MCP setup](docs/mcp-bettertunnels.md).
+
+**Replace access key** immediately revokes the previous key for new requests. Update the header
+in your client and restart its connection after replacing the key.
 The endpoint is loopback-only and runs while BetterMail is open. Settings and the key are stored
 in the encrypted mail database. Clients must support a manually configured authorization header.
 

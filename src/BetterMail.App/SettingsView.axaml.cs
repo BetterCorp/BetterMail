@@ -103,7 +103,12 @@ public sealed partial class SettingsView : UserControl
         if (sender is Button { DataContext: McpSettingsViewModel settings, CommandParameter: string value } &&
             TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
         {
-            await clipboard.SetValueAsync(DataFormat.Text, value == "key" ? settings.AccessKey : settings.EndpointUrl);
+            await clipboard.SetValueAsync(DataFormat.Text, value switch
+            {
+                "header" => "Bearer " + settings.AccessKey,
+                "key" => settings.AccessKey,
+                _ => settings.EndpointUrl
+            });
         }
     }
 }

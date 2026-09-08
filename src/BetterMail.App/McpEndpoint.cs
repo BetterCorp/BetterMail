@@ -14,10 +14,15 @@ namespace BetterMail.App;
 internal sealed class McpEndpoint : IAsyncDisposable
 {
     private readonly WebApplication _app;
-    public string Address => _app.Urls.Single() + "/mcp";
+    private readonly string _endpointPath;
+    public string Address => _app.Urls.Single() + _endpointPath;
 
-    public McpEndpoint(McpMailTools tools, int port, Func<bool> enabled, Func<string> accessKey)
+    public McpEndpoint(McpMailTools tools, int port, string endpointPath, Func<bool> enabled, Func<string> accessKey)
     {
+        if (endpointPath.Length != 68 || !endpointPath.StartsWith("/bm/", StringComparison.Ordinal) ||
+            !endpointPath[4..].All(Uri.IsHexDigit))
+            throw new ArgumentException("The saved MCP endpoint path is invalid.", nameof(endpointPath));
+        _endpointPath = endpointPath;
         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { Args = [] });
         builder.Configuration.Sources.Clear();
         builder.Logging.ClearProviders();
@@ -33,6 +38,11 @@ internal sealed class McpEndpoint : IAsyncDisposable
         _app.Use(async (context, next) =>
         {
             var request = context.Request;
+            if (!request.Path.StartsWithSegments(_endpointPath, StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
             var expectedPort = context.Connection.LocalPort;
             if (!enabled() || context.Connection.RemoteIpAddress is not { } remote || !IPAddress.IsLoopback(remote) ||
                 request.Host.Host is not ("127.0.0.1" or "localhost") || request.Host.Port != expectedPort ||
@@ -54,7 +64,7 @@ internal sealed class McpEndpoint : IAsyncDisposable
             context.Response.Headers.CacheControl = "no-store";
             await next(context);
         });
-        _app.MapMcp("/mcp");
+        _app.MapMcp(_endpointPath);
     }
 
     public Task StartAsync(CancellationToken cancellationToken = default) => _app.StartAsync(cancellationToken);

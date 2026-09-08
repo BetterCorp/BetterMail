@@ -29,22 +29,28 @@ public sealed partial class EncryptedMailStore
             CREATE TABLE IF NOT EXISTS mcp_settings (
                 id INTEGER PRIMARY KEY CHECK(id = 1), configuration_json TEXT NOT NULL, access_key TEXT NOT NULL);
             """, cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "mcp_settings", "endpoint_path", "TEXT", cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
-        command.CommandText = "INSERT OR IGNORE INTO mcp_settings VALUES(1, $settings, $key);";
+        command.CommandText = """
+            INSERT OR IGNORE INTO mcp_settings(id, configuration_json, access_key, endpoint_path)
+                VALUES(1, $settings, $key, $path);
+            UPDATE mcp_settings SET endpoint_path = $path WHERE id = 1 AND endpoint_path IS NULL;
+            """;
         command.Parameters.AddWithValue("$settings", JsonSerializer.Serialize(new McpConfiguration()));
         command.Parameters.AddWithValue("$key", Convert.ToHexString(RandomNumberGenerator.GetBytes(32)));
+        command.Parameters.AddWithValue("$path", "/bm/" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32)));
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    public Task<(McpConfiguration Configuration, string AccessKey)> GetMcpConfigurationAsync(CancellationToken cancellationToken = default) =>
+    public Task<(McpConfiguration Configuration, string AccessKey, string EndpointPath)> GetMcpConfigurationAsync(CancellationToken cancellationToken = default) =>
         WithLockAsync(async connection =>
         {
             await EnsureMcpSettingsAsync(connection, cancellationToken).ConfigureAwait(false);
             await using var command = connection.CreateCommand();
-            command.CommandText = "SELECT configuration_json, access_key FROM mcp_settings WHERE id = 1;";
+            command.CommandText = "SELECT configuration_json, access_key, endpoint_path FROM mcp_settings WHERE id = 1;";
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
-            return (JsonSerializer.Deserialize<McpConfiguration>(reader.GetString(0)) ?? new(), reader.GetString(1));
+            return (JsonSerializer.Deserialize<McpConfiguration>(reader.GetString(0)) ?? new(), reader.GetString(1), reader.GetString(2));
         }, cancellationToken);
 
     public Task SaveMcpConfigurationAsync(McpConfiguration configuration, CancellationToken cancellationToken = default) =>

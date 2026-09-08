@@ -76,13 +76,25 @@
           <Border Classes="settingsCard" IsEnabled="{Binding IsAvailable}">
             <StackPanel Spacing="10">
               <TextBlock Text="Connect a client" FontSize="18" FontWeight="SemiBold" />
-              <TextBlock Text="Use Streamable HTTP with the endpoint below and an Authorization: Bearer header containing your access key. Keep the key private; it grants the access selected above." TextWrapping="Wrap" />
+              <TextBlock Text="1. In your client's MCP settings, add a Streamable HTTP server with this endpoint." TextWrapping="Wrap" />
               <TextBox Text="{Binding EndpointUrl}" IsReadOnly="True" AutomationProperties.Name="MCP endpoint URL" />
+              <TextBlock Text="Copy the entire URL, including its private /bm/ path. This random path is generated once and stays the same across restarts and access-key changes. The access key is still required." TextWrapping="Wrap" Opacity="0.7" />
+              <TextBlock Text="2. Add a custom HTTP header using these fields:" TextWrapping="Wrap" />
+              <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="6">
+                <TextBlock Text="Header name" VerticalAlignment="Center" />
+                <TextBox Grid.Column="1" Text="Authorization" IsReadOnly="True" AutomationProperties.Name="MCP header name" />
+                <TextBlock Grid.Row="1" Text="Header value" VerticalAlignment="Center" />
+                <TextBox Grid.Row="1" Grid.Column="1" Text="Bearer &lt;your access key&gt;" IsReadOnly="True" AutomationProperties.Name="MCP header value format" />
+              </Grid>
+              <TextBlock Text="Copy header value includes Bearer, one space, and your current key. Paste it as the value only, without quotes or angle brackets. If your client has a dedicated Bearer token field, use Copy access key instead." TextWrapping="Wrap" />
               <WrapPanel>
                 <Button Content="Copy endpoint" Click="CopyMcpValueClicked" CommandParameter="endpoint" Margin="0,0,8,8" />
+                <Button Content="Copy header value" Click="CopyMcpValueClicked" CommandParameter="header" Margin="0,0,8,8" />
                 <Button Content="Copy access key" Click="CopyMcpValueClicked" CommandParameter="key" Margin="0,0,8,8" />
                 <Button Content="Replace access key" Command="{Binding RotateKeyCommand}" Margin="0,0,0,8" />
               </WrapPanel>
+              <TextBlock Text="3. Save the connection and restart it in your MCP client. In ChatGPT desktop, use Settings → MCP servers → Restart, then type /mcp to check the connection. Attaching the BetterMail desktop window uses computer control, a separate connection." TextWrapping="Wrap" />
+              <TextBlock Text="Keep the key private; it grants the permissions selected above. After replacing it, copy the new header value into your client and restart the connection." TextWrapping="Wrap" Opacity="0.7" />
             </StackPanel>
           </Border>
           <TextBlock Text="{Binding Status}" TextWrapping="Wrap" AutomationProperties.Name="MCP status" />

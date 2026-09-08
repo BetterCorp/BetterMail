@@ -20,6 +20,7 @@ public sealed class McpSettingsViewModel : ViewModelBase, IAsyncDisposable
     private McpEndpoint? _endpoint;
     private McpConfiguration _active = new();
     private string _accessKey = "";
+    private string _endpointPath = "";
     private bool _enabled;
     private bool _allowWrites;
     private bool _allowSending;
@@ -42,7 +43,7 @@ public sealed class McpSettingsViewModel : ViewModelBase, IAsyncDisposable
     public bool AllowWrites { get => _allowWrites; set => SetProperty(ref _allowWrites, value); }
     public bool AllowSending { get => _allowSending; set => SetProperty(ref _allowSending, value); }
     public int Port { get => _port; set { if (SetProperty(ref _port, value)) RaisePropertyChanged(nameof(EndpointUrl)); } }
-    public string EndpointUrl => $"http://127.0.0.1:{Port}/mcp";
+    public string EndpointUrl => _endpointPath.Length == 0 ? "" : $"http://127.0.0.1:{Port}{_endpointPath}";
     public string AccessKey => _accessKey;
     public string Status { get => _status; private set => SetProperty(ref _status, value); }
     public ObservableCollection<McpMailboxChoice> Mailboxes { get; } = [];
@@ -56,7 +57,9 @@ public sealed class McpSettingsViewModel : ViewModelBase, IAsyncDisposable
         {
             var saved = await _store.GetMcpConfigurationAsync();
             _accessKey = saved.AccessKey;
+            _endpointPath = saved.EndpointPath;
             RaisePropertyChanged(nameof(AccessKey));
+            RaisePropertyChanged(nameof(EndpointUrl));
             Enabled = saved.Configuration.Enabled;
             Port = saved.Configuration.Port;
             AllowWrites = saved.Configuration.AllowWrites;
@@ -105,11 +108,14 @@ public sealed class McpSettingsViewModel : ViewModelBase, IAsyncDisposable
             if (persist) await _store.SaveMcpConfigurationAsync(configuration);
             if (!configuration.Enabled) { Status = "Disabled — no MCP listener is running."; return; }
             if (configuration.Port is < 1024 or > 65535) throw new InvalidOperationException("Choose a port from 1024 to 65535.");
-            Volatile.Write(ref _accessKey, (await _store.GetMcpConfigurationAsync()).AccessKey);
+            var saved = await _store.GetMcpConfigurationAsync();
+            Volatile.Write(ref _accessKey, saved.AccessKey);
+            _endpointPath = saved.EndpointPath;
             RaisePropertyChanged(nameof(AccessKey));
+            RaisePropertyChanged(nameof(EndpointUrl));
             Volatile.Write(ref _active, configuration);
             var tools = new McpMailTools(_store, () => Volatile.Read(ref _active), _refreshAndSync, _queueSend);
-            _endpoint = new(tools, configuration.Port, () => Volatile.Read(ref _active).Enabled, () => Volatile.Read(ref _accessKey));
+            _endpoint = new(tools, configuration.Port, _endpointPath, () => Volatile.Read(ref _active).Enabled, () => Volatile.Read(ref _accessKey));
             await _endpoint.StartAsync();
             Status = $"Listening at {_endpoint.Address} · {configuration.MailboxIds?.Length ?? 0} allowed mailboxes";
         }
