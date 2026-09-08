@@ -26,6 +26,8 @@ public sealed class ComposeWindowViewModel : ViewModelBase
     private string _draftStatus = "";
     private bool _sent;
     private bool _isSending;
+    private MailImportance _importance;
+    private bool _isFlagged;
     private bool _manageSignature;
     private string? _managedSignatureBlock;
 
@@ -54,6 +56,8 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         BccField = new ComposeRecipientField("Bcc", request.Bcc, searchRecipients, RecipientsChanged);
         RecipientFields = [ToField, CcField, BccField];
         _subject = request.Subject;
+        _importance = request.Importance;
+        _isFlagged = request.IsFlagged;
         _body = _renderer.PrepareComposeHtml(request.Body, request.IsHtml);
         _draftId = request.DraftId ?? Guid.NewGuid().ToString("N");
         _send = send;
@@ -90,6 +94,10 @@ public sealed class ComposeWindowViewModel : ViewModelBase
     public ICommand SendCommand { get; }
     public ICommand DeleteCommand { get; }
     public ICommand RemoveAttachmentCommand { get; }
+    public IReadOnlyList<MailImportance> ImportanceLevels { get; } = Enum.GetValues<MailImportance>();
+    public MailImportance Importance { get => _importance; set => SetAndSchedule(ref _importance, value); }
+    public bool SupportsFollowUpFlag => SelectedSender?.Account.ProviderId == "microsoft365";
+    public bool IsFlagged { get => SupportsFollowUpFlag && _isFlagged; set => SetAndSchedule(ref _isFlagged, value); }
 
     public ComposeSender? SelectedSender
     {
@@ -101,6 +109,8 @@ public sealed class ComposeWindowViewModel : ViewModelBase
                 ((AsyncCommand)SendCommand).Refresh();
                 ((AsyncCommand)DeleteCommand).Refresh();
                 ApplySignatureForSender(value);
+                RaisePropertyChanged(nameof(SupportsFollowUpFlag));
+                RaisePropertyChanged(nameof(IsFlagged));
                 ScheduleAutosave();
             }
         }
@@ -255,7 +265,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
                 IsHtml: true,
                 cc,
                 bcc,
-                outgoing.Attachments));
+                outgoing.Attachments, Importance, IsFlagged));
             _sent = true;
             Sent?.Invoke(this, EventArgs.Empty);
         }
@@ -273,7 +283,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         }
     }
 
-    private void SetAndSchedule(ref string field, string value, [CallerMemberName] string? propertyName = null)
+    private void SetAndSchedule<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
         if (SetProperty(ref field, value, propertyName))
         {
@@ -394,7 +404,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
                 Attachments.ToArray(),
                 DateTimeOffset.UtcNow,
                 IsHtml: true,
-                ConversationIdentity: _conversationIdentity));
+                ConversationIdentity: _conversationIdentity, Importance: Importance, IsFlagged: IsFlagged));
             DraftStatus = "Saved";
         }
         finally
@@ -434,23 +444,9 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         !string.IsNullOrWhiteSpace(Bcc) ||
         !string.IsNullOrWhiteSpace(Subject) ||
         !string.IsNullOrWhiteSpace(Body) ||
-        Attachments.Count > 0;
+        Attachments.Count > 0 || Importance != MailImportance.Normal || IsFlagged;
 
-    public static IReadOnlyList<BetterMail.Core.MailAddress> ParseRecipients(string value)
-    {
-        var recipients = new List<BetterMail.Core.MailAddress>();
-        foreach (var part in value.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (!System.Net.Mail.MailAddress.TryCreate(part, out var parsed))
-            {
-                throw new FormatException($"'{part}' is not a valid email address.");
-            }
-
-            recipients.Add(new BetterMail.Core.MailAddress(parsed.DisplayName, parsed.Address));
-        }
-
-        return recipients;
-    }
+    public static IReadOnlyList<BetterMail.Core.MailAddress> ParseRecipients(string value) => MailAddressList.Parse(value);
 }
 
 public sealed record RecipientSuggestion(string DisplayName, string Address, string Source)
@@ -461,8 +457,9 @@ public sealed record RecipientSuggestion(string DisplayName, string Address, str
 
 public sealed record ComposeRecipientToken(string DisplayName, string Address)
 {
-    public string Text => string.IsNullOrWhiteSpace(DisplayName) ? Address : DisplayName;
-    public string Serialized => string.IsNullOrWhiteSpace(DisplayName) ? Address : $"{DisplayName} <{Address}>";
+    public string Text => string.IsNullOrWhiteSpace(DisplayName) || DisplayName.Equals(Address, StringComparison.OrdinalIgnoreCase)
+        ? Address : $"{DisplayName} <{Address}>";
+    public string Serialized => new BetterMail.Core.MailAddress(DisplayName, Address).ToString();
 }
 
 public sealed class ComposeRecipientField : ViewModelBase
@@ -523,18 +520,17 @@ public sealed class ComposeRecipientField : ViewModelBase
         {
             return;
         }
-        var parts = Query.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var parsed = parts.Select(part => System.Net.Mail.MailAddress.TryCreate(part, out var address)
-                ? address
-                : throw new FormatException($"'{part}' is not a valid email address."))
-            .ToArray();
-        if (parsed.Length == 0)
+        var parsed = MailAddressList.Parse(Query);
+        if (parsed.Count == 0)
         {
             throw new FormatException($"'{Query}' is not a valid email address.");
         }
         foreach (var address in parsed)
         {
-            Add(address.DisplayName, address.Address);
+            var name = string.IsNullOrWhiteSpace(address.Name)
+                ? Suggestions.FirstOrDefault(suggestion => suggestion.Address.Equals(address.Address, StringComparison.OrdinalIgnoreCase))?.DisplayName ?? ""
+                : address.Name;
+            Add(name, address.Address);
         }
         Query = "";
         CloseSearch();
@@ -543,19 +539,13 @@ public sealed class ComposeRecipientField : ViewModelBase
     private void SetSerialized(string value, bool notify)
     {
         Tokens.Clear();
-        var invalid = new List<string>();
-        foreach (var part in value.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        _query = "";
+        try
         {
-            if (System.Net.Mail.MailAddress.TryCreate(part, out var parsed))
-            {
-                Add(parsed.DisplayName, parsed.Address, notify: false);
-            }
-            else
-            {
-                invalid.Add(part);
-            }
+            foreach (var parsed in MailAddressList.Parse(value))
+                Add(parsed.Name, parsed.Address, notify: false);
         }
-        _query = string.Join("; ", invalid);
+        catch (FormatException) { _query = value; }
         RaisePropertyChanged(nameof(Query));
         RaisePropertyChanged(nameof(Serialized));
         if (notify)

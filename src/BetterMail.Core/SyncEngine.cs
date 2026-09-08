@@ -44,7 +44,7 @@ public sealed class SyncEngine(IMailProvider provider, IMailStore store)
             {
                 var page = await provider.SyncFolderAsync(
                     account, mailbox, folder.ProviderId, cursor, receivedSince, cancellationToken).ConfigureAwait(false);
-                await store.ApplySyncPageAsync(cursorId, page, cancellationToken).ConfigureAwait(false);
+                await store.ApplySyncPageAsync(cursorId, page with { SourceFolderId = folder.ProviderId }, cancellationToken).ConfigureAwait(false);
                 changed += page.Messages.Count;
                 cursor = page.NextCursor;
 

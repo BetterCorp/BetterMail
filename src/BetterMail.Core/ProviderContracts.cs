@@ -71,6 +71,14 @@ public interface IMailProvider
         string destinationFolderId,
         CancellationToken cancellationToken = default);
 
+    async Task<(string ProviderId, string FolderId)> MoveMessageWithResultAsync(
+        MailAccount account, Mailbox mailbox, string messageId, string destinationFolderId,
+        CancellationToken cancellationToken = default)
+    {
+        await MoveMessageAsync(account, mailbox, messageId, destinationFolderId, cancellationToken).ConfigureAwait(false);
+        return (messageId, destinationFolderId);
+    }
+
     Task SetFlaggedAsync(
         MailAccount account,
         Mailbox mailbox,
@@ -460,6 +468,7 @@ public sealed record MailPage(
 
 public interface IDraftStore
 {
+    Task<bool> IsDraftPendingDeletionAsync(string id, CancellationToken cancellationToken = default) => Task.FromResult(false);
     Task SaveLocalDraftAsync(LocalDraft draft, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<LocalDraft>> GetLocalDraftsAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<LocalDraft>> GetLocalDraftSummariesAsync(CancellationToken cancellationToken = default) =>

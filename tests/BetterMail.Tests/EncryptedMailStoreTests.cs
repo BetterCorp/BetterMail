@@ -7,6 +7,75 @@ namespace BetterMail.Tests;
 public sealed class EncryptedMailStoreTests
 {
     [Fact]
+    public async Task PendingActionsSurviveRestartAndProtectLocalMovesAndDraftDeletion()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-busy-{Guid.NewGuid():N}");
+        var path = Path.Combine(directory, "mail.db");
+        var key = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        var account = new MailAccount("microsoft365", "account", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+        var mailbox = new Mailbox(account.AccountId, account.EmailAddress, "Me");
+        var original = Message(mailbox.Id, "original", "Queued move", "Preserved body");
+        var archive = new MailFolder(mailbox.Id, "archive", "Archive", 0, 0, "archive");
+        var trash = archive with { ProviderId = "trash", DisplayName = "Trash", WellKnownName = "deleteditems" };
+        var draft = new LocalDraft("draft", account.AccountId, mailbox.Id, "to@example.com", "", "",
+            "Delete me", "Body", [], DateTimeOffset.UtcNow, ProviderDraftId: "remote-draft");
+        try
+        {
+            await using (var store = new EncryptedMailStore(path, key))
+            {
+                await store.InitializeAsync(token);
+                await store.ApplySyncPageAsync("seed", new([original], null, false), token);
+                await store.QueueMoveAsync(account, original, archive, token);
+                await store.QueueMoveAsync(account, original with { FolderId = "archive" }, trash, token);
+                Assert.Equal("trash", Assert.Single(await store.GetMailActionsAsync(token)).DestinationId);
+                await store.ApplySyncPageAsync("stale", new([original], null, false), token);
+                await store.ApplySyncPageAsync("delete-source", new([original with { IsDeleted = true }], null, false, "inbox"), token);
+                Assert.Equal("trash", Assert.Single(await store.GetMessagesAsync(cancellationToken: token)).FolderId);
+                Assert.Equal("trash", Assert.Single(await store.SearchAsync("Queued", cancellationToken: token)).FolderId);
+                Assert.Equal(0, await store.PruneMessagesBeforeAsync(mailbox.Id, DateTimeOffset.UtcNow.AddDays(1), token));
+                Assert.Single(await store.GetThreadMessagesAsync(ConversationThread.ThreadIdentity(original), token));
+
+                var first = Assert.Single(await store.GetMailActionsAsync(token));
+                await store.StartMailActionAsync(first.Id, token);
+                await store.QueueMoveAsync(account, original with { FolderId = "trash" }, archive, token);
+                await store.CompleteMoveAsync(first, original with { ProviderId = "moved-id", FolderId = "trash" }, token);
+                Assert.Equal("moved-id", Assert.Single(await store.GetMailActionsAsync(token)).ProviderId);
+                await store.StartMailActionAsync(Assert.Single(await store.GetMailActionsAsync(token)).Id, token);
+                Assert.Equal("archive", Assert.Single(await store.GetMessagesAsync(cancellationToken: token)).FolderId);
+                await store.SaveLocalDraftAsync(draft, token);
+                await store.QueueDraftDeletionAsync(draft, token);
+                await store.SaveLocalDraftAsync(draft with { Subject = "Late autosave" }, token);
+                Assert.Empty(await store.GetLocalDraftSummariesAsync(token));
+                Assert.Equal("Delete me", (await store.GetLocalDraftAsync(draft.Id, token))!.Subject);
+            }
+            await using (var store = new EncryptedMailStore(path, key))
+            {
+                await store.InitializeAsync(token);
+                var actions = await store.GetMailActionsAsync(token);
+                Assert.Equal(2, actions.Count);
+                var move = actions.Single(action => action.Kind == MailActionKind.Move);
+                Assert.False(move.Running);
+                await store.CompleteMoveAsync(move, original with { ProviderId = "final-id", FolderId = "archive" }, token);
+                await store.ApplySyncPageAsync("stale", new([original], null, false), token);
+                Assert.Equal("final-id", Assert.Single(await store.GetMessagesAsync(cancellationToken: token)).ProviderId);
+                var deletion = actions.Single(action => action.Kind == MailActionKind.DeleteDraft);
+                await store.CompleteDraftDeletionAsync(deletion, draft.ProviderDraftId, token);
+                await store.SaveLocalDraftAsync(draft, token);
+                await store.SaveLocalDraftAsync(draft with { Id = "late-remote-import" }, token);
+                Assert.Empty(await store.GetLocalDraftsAsync(token));
+                Assert.Null(await store.GetLocalDraftAsync(draft.Id, token));
+                Assert.Empty(await store.GetMailActionsAsync(token));
+                var confirmed = original with { ProviderId = "final-id", FolderId = "archive" };
+                await store.ApplySyncPageAsync("confirmed", new([confirmed], null, false, "archive"), token);
+                await store.ApplySyncPageAsync("old-source", new([confirmed with { IsDeleted = true }], null, false, "inbox"), token);
+                Assert.Equal("archive", Assert.Single(await store.GetMessagesAsync(cancellationToken: token)).FolderId);
+            }
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
     public async Task OutboxContentIsFrozenAndAcceptanceSurvivesRestart()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -20,7 +89,8 @@ public sealed class EncryptedMailStoreTests
                 await store.InitializeAsync(cancellationToken);
                 var draft = new LocalDraft("queued", "account", "mailbox", "to@example.com", "", "",
                     "Draft", "Body", [new("notes.txt", "text/plain", "secret"u8.ToArray())], DateTimeOffset.UtcNow,
-                    ProviderDraftId: "remote", SyncStatus: DraftSyncStatus.Failed, SyncError: "old error");
+                    ProviderDraftId: "remote", SyncStatus: DraftSyncStatus.Failed, SyncError: "old error",
+                    Importance: MailImportance.High, IsFlagged: true);
                 await store.SaveLocalDraftAsync(draft, cancellationToken);
                 await store.SaveLocalDraftAsync(draft with { Subject = "Ready", ProviderDraftId = null, IsQueued = true }, cancellationToken);
                 await store.SaveLocalDraftAsync(draft with { Subject = "Stale autosave", Body = "Stale" }, cancellationToken);
@@ -33,6 +103,8 @@ public sealed class EncryptedMailStoreTests
                 var queued = Assert.Single(await store.GetLocalDraftsAsync(cancellationToken));
                 Assert.True(queued.IsQueued);
                 Assert.True(queued.SendAccepted);
+                Assert.Equal(MailImportance.High, queued.Importance);
+                Assert.True(queued.IsFlagged);
                 Assert.Equal("Ready", queued.Subject);
                 Assert.Equal("Body", queued.Body);
                 Assert.Equal("remote", queued.ProviderDraftId);

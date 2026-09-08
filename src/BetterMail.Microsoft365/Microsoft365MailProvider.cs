@@ -17,7 +17,7 @@ public sealed class Microsoft365MailProvider(
     internal const string MessageSelect =
         "id,conversationId,internetMessageId,parentFolderId,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,isRead,hasAttachments,importance,categories,flag";
     internal const string DraftSelect =
-        "id,conversationId,subject,toRecipients,ccRecipients,bccRecipients,body,lastModifiedDateTime,hasAttachments";
+        "id,conversationId,subject,toRecipients,ccRecipients,bccRecipients,body,lastModifiedDateTime,hasAttachments,importance,flag";
     internal const string FolderSelect =
         "id,displayName,unreadItemCount,totalItemCount,childFolderCount";
 
@@ -272,12 +272,21 @@ public sealed class Microsoft365MailProvider(
         Mailbox mailbox,
         string messageId,
         string destinationFolderId,
-        CancellationToken cancellationToken = default) => SendJsonAsync(
+        CancellationToken cancellationToken = default) => MoveMessageWithResultAsync(
+            account, mailbox, messageId, destinationFolderId, cancellationToken);
+
+    public async Task<(string ProviderId, string FolderId)> MoveMessageWithResultAsync(
+        MailAccount account, Mailbox mailbox, string messageId, string destinationFolderId,
+        CancellationToken cancellationToken = default)
+    {
+        using var document = await SendJsonForResponseAsync(
             account,
             HttpMethod.Post,
             $"{MailboxPath(account, mailbox)}/messages/{Uri.EscapeDataString(messageId)}/move",
             new { destinationId = destinationFolderId },
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
+        return (RequiredString(document.RootElement, "id"), RequiredString(document.RootElement, "parentFolderId"));
+    }
 
     public Task SetFlaggedAsync(
         MailAccount account,
@@ -476,6 +485,8 @@ public sealed class Microsoft365MailProvider(
     internal static object BuildMessagePayload(Mailbox mailbox, DraftMessage draft) => new
     {
         subject = draft.Subject,
+        importance = draft.Importance.ToString().ToLowerInvariant(),
+        flag = new { flagStatus = draft.IsFlagged ? "flagged" : "notFlagged" },
         body = new { contentType = draft.IsHtml ? "HTML" : "Text", content = draft.Body },
         toRecipients = ToGraphRecipients(draft.To),
         ccRecipients = ToGraphRecipients(draft.Cc ?? []),
@@ -612,7 +623,10 @@ public sealed class Microsoft365MailProvider(
                 string.Equals(OptionalString(body, "contentType"), "html", StringComparison.OrdinalIgnoreCase),
                 ReadAddresses(message, "ccRecipients"),
                 ReadAddresses(message, "bccRecipients"),
-                attachments),
+                attachments,
+                ParseImportance(OptionalString(message, "importance")),
+                message.TryGetProperty("flag", out var flag) &&
+                string.Equals(OptionalString(flag, "flagStatus"), "flagged", StringComparison.OrdinalIgnoreCase)),
             updatedAt,
             OptionalString(message, "@odata.etag"),
             hasUnsupportedAttachments,

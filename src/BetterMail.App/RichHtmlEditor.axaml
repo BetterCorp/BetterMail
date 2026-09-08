@@ -4,9 +4,12 @@
              x:Name="Root">
   <Border ClipToBounds="True" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1" CornerRadius="3">
     <Grid RowDefinitions="Auto,*,Auto">
-      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" AllowAutoHide="False"
                     BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1"
                     IsVisible="{Binding !IsReadOnly, ElementName=Root}">
+        <ScrollViewer.Resources>
+          <x:Double x:Key="ScrollBarSize">8</x:Double>
+        </ScrollViewer.Resources>
         <StackPanel Orientation="Horizontal" Spacing="2" Margin="5,4">
           <Button Classes="command" Content="Undo" CommandParameter="undo" Click="FormatClicked" />
           <Button Classes="command" Content="Redo" CommandParameter="redo" Click="FormatClicked" />

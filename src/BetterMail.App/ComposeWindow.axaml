@@ -6,11 +6,34 @@
         Title="New message" Icon="/Assets/BetterMail.ico"
         Width="820" Height="720" MinWidth="560" MinHeight="500"
         KeyDown="ComposeWindowKeyDown" WindowStartupLocation="CenterOwner">
+  <Window.Styles>
+    <Style Selector="TextBox.composeHeader, ComboBox.composeHeader">
+      <Setter Property="BorderBrush" Value="{DynamicResource BetterMailDividerBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundAltHighBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="3" />
+      <Setter Property="MinHeight" Value="36" />
+    </Style>
+    <Style Selector="Border.recipientField">
+      <Setter Property="BorderBrush" Value="{DynamicResource BetterMailDividerBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundAltHighBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="3" />
+      <Setter Property="MinHeight" Value="36" />
+    </Style>
+    <Style Selector="TextBox.composeHeader:focus-within, ComboBox.composeHeader:focus-within">
+      <Setter Property="BorderBrush" Value="{DynamicResource BetterMailAccentBrush}" />
+    </Style>
+    <Style Selector="Border.recipientField:focus-within">
+      <Setter Property="BorderBrush" Value="{DynamicResource BetterMailAccentBrush}" />
+    </Style>
+  </Window.Styles>
   <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto" Margin="18">
     <Grid ColumnDefinitions="80,*" Margin="0,0,0,10" IsEnabled="{Binding !IsSending}">
       <TextBlock Text="From" VerticalAlignment="Center" Opacity="0.7" />
-      <ComboBox Grid.Column="1" ItemsSource="{Binding Senders}" SelectedItem="{Binding SelectedSender}">
-        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding DisplayName}" /></DataTemplate></ComboBox.ItemTemplate>
+      <ComboBox Grid.Column="1" Classes="composeHeader" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                ItemsSource="{Binding Senders}" SelectedItem="{Binding SelectedSender}" AutomationProperties.Name="From">
+        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding DisplayName}" TextWrapping="Wrap" /></DataTemplate></ComboBox.ItemTemplate>
       </ComboBox>
     </Grid>
     <ItemsControl Grid.Row="1" ItemsSource="{Binding RecipientFields}" IsEnabled="{Binding !IsSending}">
@@ -18,28 +41,31 @@
         <DataTemplate>
           <Grid ColumnDefinitions="80,*" Margin="0,0,0,8">
             <TextBlock Text="{Binding Label}" VerticalAlignment="Center" Opacity="0.7" />
-            <Border Grid.Column="1" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1" CornerRadius="2" Padding="5,3">
+            <Border Grid.Column="1" Classes="recipientField" PointerPressed="RecipientFieldPressed">
               <Grid>
-                <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
-                  <ItemsControl ItemsSource="{Binding Tokens}">
+                <DockPanel LastChildFill="True">
+                  <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding Tokens}" Margin="5,0,5,0">
                     <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
-                        <Border Background="{DynamicResource BetterMailSelectionBrush}" CornerRadius="10" Padding="7,2" Margin="0,0,4,1">
-                          <StackPanel Orientation="Horizontal" Spacing="4">
-                            <TextBlock Text="{Binding Text}" ToolTip.Tip="{Binding Address}" />
-                            <Button Content="×" Padding="2,0" Background="Transparent" BorderThickness="0"
+                        <Border Background="{DynamicResource BetterMailSelectionBrush}" CornerRadius="10" Padding="7,3" Margin="0,4,4,0"
+                                MaxWidth="{Binding $parent[ItemsControl].Bounds.Width}">
+                          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="4">
+                            <TextBlock Text="{Binding Text}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" Content="×" Padding="2,0" Background="Transparent" BorderThickness="0"
                                     Command="{Binding $parent[ItemsControl].DataContext.RemoveTokenCommand}"
                                     CommandParameter="{Binding}" AutomationProperties.Name="Remove recipient" />
-                          </StackPanel>
+                          </Grid>
                         </Border>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
-                  <TextBox x:Name="RecipientQuery" Text="{Binding Query}" MinWidth="180" BorderThickness="0"
-                           Background="Transparent" PlaceholderText="Type a name or address"
+                  <TextBox x:Name="RecipientQuery" Text="{Binding Query}" MinHeight="34" BorderThickness="0"
+                           HorizontalAlignment="Stretch" VerticalAlignment="Stretch" VerticalContentAlignment="Center"
+                           Padding="9,5" Background="Transparent" PlaceholderText="Type a name or address"
+                           AutomationProperties.Name="{Binding Label}"
                            GotFocus="RecipientQueryGotFocus" KeyDown="RecipientQueryKeyDown" />
-                </WrapPanel>
+                </DockPanel>
                 <Popup IsOpen="{Binding IsSearchOpen}" PlacementTarget="{Binding #RecipientQuery}" Placement="BottomEdgeAlignedLeft"
                        IsLightDismissEnabled="True">
                   <Border Width="420" MaxHeight="280" Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
@@ -67,13 +93,26 @@
     </ItemsControl>
     <Grid Grid.Row="2" ColumnDefinitions="80,*" Margin="0,0,0,10" IsEnabled="{Binding !IsSending}">
       <TextBlock Text="Subject" VerticalAlignment="Center" Opacity="0.7" />
-      <TextBox Grid.Column="1" Text="{Binding Subject}" />
+      <TextBox Grid.Column="1" Classes="composeHeader" Text="{Binding Subject}" VerticalContentAlignment="Center" AutomationProperties.Name="Subject" />
     </Grid>
 
-    <Grid Grid.Row="3" ColumnDefinitions="Auto,Auto,*" Margin="0,0,0,10" IsEnabled="{Binding !IsSending}">
-      <Button Classes="command" Content="Attach file" Click="AttachFileClicked" />
-      <Button Grid.Column="1" Classes="command" Content="Attach from OneDrive" Click="AttachDriveClicked" Margin="4,0,0,0" />
-      <ItemsControl Grid.Column="2" ItemsSource="{Binding Attachments}" Margin="10,0,0,0">
+    <Grid Grid.Row="3" ColumnDefinitions="Auto,Auto,*" RowDefinitions="Auto,Auto" Margin="0,0,0,10" IsEnabled="{Binding !IsSending}">
+      <Button Content="Attach file" Click="AttachFileClicked" Padding="12,7" />
+      <Button Grid.Column="1" Content="Attach from OneDrive" Click="AttachDriveClicked" Margin="6,0,0,0" Padding="12,7" />
+      <Button Grid.Column="2" Content="Mail options" HorizontalAlignment="Right" Padding="12,7">
+        <Button.Flyout>
+          <Flyout>
+            <StackPanel MinWidth="240" Spacing="10">
+              <TextBlock Text="Importance" FontWeight="SemiBold" />
+              <ComboBox ItemsSource="{Binding ImportanceLevels}" SelectedItem="{Binding Importance}"
+                        HorizontalAlignment="Stretch" AutomationProperties.Name="Message importance" />
+              <CheckBox Content="Flag for follow-up" IsChecked="{Binding IsFlagged}" IsEnabled="{Binding SupportsFollowUpFlag}"
+                        ToolTip.Tip="Follow-up flags are available for Microsoft 365 accounts." />
+            </StackPanel>
+          </Flyout>
+        </Button.Flyout>
+      </Button>
+      <ItemsControl Grid.Row="1" Grid.ColumnSpan="3" ItemsSource="{Binding Attachments}" Margin="0,6,0,0">
         <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="core:DraftAttachment">

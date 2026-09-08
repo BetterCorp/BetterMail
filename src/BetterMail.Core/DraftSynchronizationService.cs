@@ -61,6 +61,8 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
         foreach (var local in localDrafts.Where(static draft => !draft.IsQueued))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (await store.IsDraftPendingDeletionAsync(local.Id, cancellationToken).ConfigureAwait(false))
+                continue;
             try
             {
                 if (string.IsNullOrWhiteSpace(local.ProviderDraftId))
@@ -212,7 +214,7 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
         draft.IsHtml,
         ParseAddresses(draft.Cc),
         ParseAddresses(draft.Bcc),
-        draft.Attachments);
+        draft.Attachments, draft.Importance, draft.IsFlagged);
 
     internal static LocalDraft ToLocalDraft(string localId, CloudDraft draft) => new(
         localId,
@@ -232,18 +234,18 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
         draft.ETag,
         string.IsNullOrWhiteSpace(draft.ConversationId)
             ? null
-            : ConversationThread.ThreadIdentity(draft.MailboxId, draft.ConversationId));
+            : ConversationThread.ThreadIdentity(draft.MailboxId, draft.ConversationId),
+        Importance: draft.Message.Importance, IsFlagged: draft.Message.IsFlagged);
 
     private static IReadOnlyList<MailAddress> ParseAddresses(string value)
     {
-        var addresses = new List<MailAddress>();
-        foreach (var part in value.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        var addresses = MailAddressList.Parse(value);
+        foreach (var address in addresses)
         {
-            if (!System.Net.Mail.MailAddress.TryCreate(part, out var parsed))
+            if (!address.Address.Contains('@'))
             {
-                throw new InvalidOperationException($"'{part}' is not a valid email address.");
+                throw new InvalidOperationException($"'{address.Address}' is not a valid email address.");
             }
-            addresses.Add(new(parsed.DisplayName, parsed.Address));
         }
         return addresses;
     }

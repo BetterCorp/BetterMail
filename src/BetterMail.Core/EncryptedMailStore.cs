@@ -6,7 +6,7 @@ using Microsoft.Data.Sqlite;
 
 namespace BetterMail.Core;
 
-public sealed class EncryptedMailStore(string databasePath, string key) : IMailStore, IDraftStore, IProviderTokenStore
+public sealed partial class EncryptedMailStore(string databasePath, string key) : IMailStore, IDraftStore, IProviderTokenStore
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private SqliteConnection? _connection;
@@ -66,6 +66,9 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             await EnsureColumnAsync(connection, "local_drafts", "sync_error", "TEXT", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "local_drafts", "is_queued", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "local_drafts", "send_accepted", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
+            await EnsureColumnAsync(connection, "local_drafts", "importance", "INTEGER NOT NULL DEFAULT 1", cancellationToken).ConfigureAwait(false);
+            await EnsureColumnAsync(connection, "local_drafts", "is_flagged", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
+            await InitializeMailActionsAsync(connection, cancellationToken).ConfigureAwait(false);
             await RunOnceAsync(connection, "thread-index-v1", BackfillThreadIndex, cancellationToken).ConfigureAwait(false);
             _optimizedSearch = await MigrationCompleteAsync(connection, "message-search-v2", cancellationToken).ConfigureAwait(false);
             _correspondentsReady = await MigrationCompleteAsync(connection, "message-correspondents-v1", cancellationToken).ConfigureAwait(false);
@@ -199,6 +202,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             {
                 "DELETE FROM provider_tokens WHERE provider_id = $provider AND account_id = $account;",
                 "DELETE FROM local_drafts WHERE account_id = $account;",
+                "DELETE FROM mail_actions WHERE account_id = $account;",
                 "DELETE FROM message_threads WHERE mailbox_id IN (SELECT account_id || ':' || lower(address) FROM mailboxes WHERE account_id = $account);",
                 "DELETE FROM messages WHERE mailbox_id IN (SELECT account_id || ':' || lower(address) FROM mailboxes WHERE account_id = $account);",
                 "DELETE FROM sync_cursors WHERE mailbox_id LIKE $account || ':%';",
@@ -300,6 +304,8 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                     DELETE FROM messages
                     WHERE mailbox_id = $mailbox
                       AND $hasFolders = 1
+                      AND NOT EXISTS (SELECT 1 FROM mail_actions WHERE kind = 0 AND mailbox_id = messages.mailbox_id
+                          AND json_extract(payload_json, '$.ProviderId') = messages.provider_id)
                       AND NOT EXISTS (
                           SELECT 1
                           FROM mail_folders
@@ -367,11 +373,36 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         await WithLockAsync(async connection =>
         {
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            var actions = await ReadActionsAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
             foreach (var message in page.Messages)
             {
+                var moves = actions.Where(action => action.Kind == MailActionKind.Move && MatchesMessage(action, message)).ToArray();
+                if (moves.Length > 0)
+                {
+                    var latest = moves[^1];
+                    if (message.ProviderId != latest.ProviderId)
+                        continue;
+                    if (moves.Any(static action => !action.Accepted))
+                    {
+                        if (!message.IsDeleted)
+                            await UpsertMessageAsync(connection, transaction, message with
+                            { FolderId = latest.DestinationId!, IsRead = true }, cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
+                    if (message.IsDeleted ? page.SourceFolderId != latest.DestinationId : message.FolderId != latest.DestinationId)
+                        continue;
+                    foreach (var move in moves)
+                    {
+                        await using var complete = connection.CreateCommand();
+                        complete.Transaction = transaction;
+                        complete.CommandText = "DELETE FROM mail_actions WHERE id = $id;";
+                        complete.Parameters.AddWithValue("$id", move.Id);
+                        await complete.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                    }
+                }
                 if (message.IsDeleted)
                 {
-                    await DeleteMessageAsync(connection, transaction, message.MailboxId, message.ProviderId, cancellationToken).ConfigureAwait(false);
+                    await DeleteMessageAsync(connection, transaction, message.MailboxId, message.ProviderId, cancellationToken, page.SourceFolderId).ConfigureAwait(false);
                 }
                 else
                 {
@@ -569,6 +600,8 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                         WHERE (mailbox_id, provider_id) IN (
                             SELECT mailbox_id, provider_id FROM messages
                             WHERE mailbox_id = $mailbox AND received_at < $cutoff
+                                AND NOT EXISTS (SELECT 1 FROM mail_actions WHERE kind = 0 AND mailbox_id = messages.mailbox_id
+                                    AND json_extract(payload_json, '$.ProviderId') = messages.provider_id)
                             ORDER BY rowid LIMIT 500
                         );
                         """;
@@ -582,6 +615,8 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                     DELETE FROM messages WHERE rowid IN (
                         SELECT rowid FROM messages
                         WHERE mailbox_id = $mailbox AND received_at < $cutoff
+                            AND NOT EXISTS (SELECT 1 FROM mail_actions WHERE kind = 0 AND mailbox_id = messages.mailbox_id
+                                AND json_extract(payload_json, '$.ProviderId') = messages.provider_id)
                         ORDER BY rowid LIMIT 500
                     );
                     """;
@@ -635,30 +670,39 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                 checked((int)reader.GetInt64(2)));
         }, cancellationToken);
 
-    public Task<IReadOnlyList<MailMessage>> SearchAsync(string query, int limit = 200, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<MailMessage>> SearchAsync(string query, int limit = 200, CancellationToken cancellationToken = default) =>
+        SearchMailboxAsync(null, query, limit, cancellationToken);
+
+    public Task<IReadOnlyList<MailMessage>> SearchMailboxAsync(string? mailboxId, string query, int limit = 200, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
-            return GetMessagesAsync(limit: limit, cancellationToken: cancellationToken);
+            return GetMessagesAsync(mailboxId: mailboxId, limit: limit, cancellationToken: cancellationToken);
         }
 
         var ftsQuery = string.Join(' ', query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(static term => $"\"{term.Replace("\"", "\"\"")}\"*"));
         return QueryMessagesAsync(
-            _optimizedSearch
+            (_optimizedSearch
                 ? "WHERE rowid IN (SELECT rowid FROM message_search_v2 WHERE message_search_v2 MATCH $query)"
-                : "WHERE rowid IN (SELECT rowid FROM message_search WHERE message_search MATCH $query UNION SELECT rowid FROM message_search_v2 WHERE message_search_v2 MATCH $query)",
+                : "WHERE rowid IN (SELECT rowid FROM message_search WHERE message_search MATCH $query UNION SELECT rowid FROM message_search_v2 WHERE message_search_v2 MATCH $query)") +
+                " AND ($mailbox IS NULL OR mailbox_id = $mailbox)",
             limit,
             false,
             cancellationToken,
-            ("$query", ftsQuery));
+            ("$query", ftsQuery), ("$mailbox", (object?)mailboxId ?? DBNull.Value));
     }
 
     public Task<IReadOnlyList<MailMessage>> GetThreadMessagesAsync(
         string threadId,
         CancellationToken cancellationToken = default) =>
         QueryMessagesAsync(
-            "WHERE EXISTS (SELECT 1 FROM message_threads thread WHERE thread.mailbox_id = messages.mailbox_id AND thread.provider_id = messages.provider_id AND thread.thread_id = $thread)",
+            """
+            WHERE EXISTS (SELECT 1 FROM message_threads thread WHERE thread.mailbox_id = messages.mailbox_id
+                AND thread.provider_id = messages.provider_id AND thread.thread_id = $thread)
+            AND NOT EXISTS (SELECT 1 FROM mail_folders folder WHERE folder.mailbox_id = messages.mailbox_id
+                AND folder.provider_id = messages.folder_id AND folder.well_known_name IN ('deleteditems', 'junkemail'))
+            """,
             1000,
             false,
             cancellationToken,
@@ -1116,16 +1160,30 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         ArgumentException.ThrowIfNullOrWhiteSpace(draft.MailboxId);
         await WithLockAsync(async connection =>
         {
+            await using (var guard = connection.CreateCommand())
+            {
+                guard.CommandText = """
+                    SELECT 1 FROM mail_actions WHERE
+                        (item_id = $id OR mailbox_id = $mailbox AND json_extract(payload_json, '$.ProviderId') = $provider)
+                        AND (kind = 1 OR kind = 2 AND json_extract(payload_json, '$.Accepted') = 1) LIMIT 1;
+                    """;
+                guard.Parameters.AddWithValue("$id", draft.Id);
+                guard.Parameters.AddWithValue("$mailbox", draft.MailboxId);
+                guard.Parameters.AddWithValue("$provider", (object?)draft.ProviderDraftId ?? DBNull.Value);
+                if (await guard.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is not null) return;
+            }
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
             await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = """
                 INSERT INTO local_drafts(
                     id, account_id, mailbox_id, recipients, cc, bcc, subject, body, attachments_json,
                     updated_at, is_html, provider_draft_id, synced_local_updated_at, provider_updated_at, provider_etag, conversation_identity,
-                    sync_status, sync_error, is_queued, send_accepted)
+                    sync_status, sync_error, is_queued, send_accepted, importance, is_flagged)
                 VALUES(
                     $id, $account, $mailbox, $to, $cc, $bcc, $subject, $body, $attachments,
                     $updated, $isHtml, $providerDraft, $syncedLocal, $providerUpdated, $providerETag, $conversationIdentity,
-                    $syncStatus, $syncError, $queued, $accepted)
+                    $syncStatus, $syncError, $queued, $accepted, $importance, $flagged)
                 ON CONFLICT(id) DO UPDATE SET
                     account_id = excluded.account_id,
                     mailbox_id = excluded.mailbox_id,
@@ -1161,7 +1219,9 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                     sync_status = CASE WHEN excluded.is_queued = 1 THEN NULL ELSE COALESCE(excluded.sync_status, local_drafts.sync_status) END,
                     sync_error = CASE WHEN excluded.is_queued = 1 THEN NULL ELSE COALESCE(excluded.sync_error, local_drafts.sync_error) END,
                     is_queued = excluded.is_queued,
-                    send_accepted = excluded.send_accepted
+                    send_accepted = excluded.send_accepted,
+                    importance = excluded.importance,
+                    is_flagged = excluded.is_flagged
                 WHERE local_drafts.is_queued = 0;
                 """;
             command.Parameters.AddWithValue("$id", draft.Id);
@@ -1184,7 +1244,14 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             command.Parameters.AddWithValue("$syncError", (object?)draft.SyncError ?? DBNull.Value);
             command.Parameters.AddWithValue("$queued", draft.IsQueued);
             command.Parameters.AddWithValue("$accepted", draft.SendAccepted);
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            command.Parameters.AddWithValue("$importance", (int)draft.Importance);
+            command.Parameters.AddWithValue("$flagged", draft.IsFlagged);
+            var saved = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            if (saved > 0 && draft.IsQueued)
+                await WriteActionAsync(connection, transaction, new MailAction("send:" + draft.Id,
+                    draft.AccountId, draft.MailboxId, draft.Id, MailActionKind.Send, draft.Subject,
+                    draft.UpdatedAt, Accepted: draft.SendAccepted), cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }, cancellationToken).ConfigureAwait(false);
     }
 
@@ -1209,8 +1276,8 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                 SELECT id, account_id, mailbox_id, recipients, cc, bcc, subject,
                        {(includeAttachments ? "body" : "''")}, {(includeAttachments ? "attachments_json" : "'[]'")},
                        updated_at, is_html, provider_draft_id, synced_local_updated_at, provider_updated_at, provider_etag, conversation_identity,
-                       sync_status, sync_error, is_queued, send_accepted
-                FROM local_drafts{(id is null ? "" : " WHERE id = $id")} ORDER BY updated_at DESC;
+                       sync_status, sync_error, is_queued, send_accepted, importance, is_flagged
+                FROM local_drafts WHERE {(id is null ? "NOT EXISTS (SELECT 1 FROM mail_actions WHERE kind = 1 AND item_id = local_drafts.id)" : "id = $id")} ORDER BY updated_at DESC;
                 """;
             if (id is not null)
             {
@@ -1236,7 +1303,7 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
                     reader.IsDBNull(15) ? null : reader.GetString(15),
                     syncStatus,
                     reader.IsDBNull(17) ? null : reader.GetString(17),
-                    reader.GetBoolean(18), reader.GetBoolean(19)));
+                    reader.GetBoolean(18), reader.GetBoolean(19), (MailImportance)reader.GetInt32(20), reader.GetBoolean(21)));
             }
             return drafts;
         }, cancellationToken);
@@ -1277,15 +1344,26 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
             {
                 throw new InvalidOperationException("The local draft no longer exists.");
             }
+            var action = (await ReadActionsAsync(connection, null, cancellationToken).ConfigureAwait(false))
+                .FirstOrDefault(action => action.Kind is MailActionKind.DeleteDraft or MailActionKind.Send && action.ItemId == id);
+            if (action is not null)
+                await WriteActionAsync(connection, null, action with { ProviderId = providerDraftId }, cancellationToken).ConfigureAwait(false);
         }, cancellationToken);
 
     public Task MarkOutboxSendAcceptedAsync(string id, CancellationToken cancellationToken = default) =>
         WithLockAsync(async connection =>
         {
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
             await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = "UPDATE local_drafts SET send_accepted = 1 WHERE id = $id AND is_queued = 1;";
             command.Parameters.AddWithValue("$id", id);
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            var action = (await ReadActionsAsync(connection, transaction, cancellationToken).ConfigureAwait(false))
+                .FirstOrDefault(action => action.Kind == MailActionKind.Send && action.ItemId == id);
+            if (action is not null)
+                await WriteActionAsync(connection, transaction, action with { Accepted = true, Running = false }, cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }, cancellationToken);
 
     public Task UpdateLocalDraftSyncIssueAsync(
@@ -1550,8 +1628,18 @@ public sealed class EncryptedMailStore(string databasePath, string key) : IMailS
         ArgumentException.ThrowIfNullOrWhiteSpace(scopeId);
     }
 
-    private static async Task DeleteMessageAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction, string mailboxId, string providerId, CancellationToken cancellationToken)
+    private static async Task DeleteMessageAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction, string mailboxId, string providerId, CancellationToken cancellationToken, string? folderId = null)
     {
+        if (folderId is not null)
+        {
+            await using var check = connection.CreateCommand();
+            check.Transaction = (SqliteTransaction)transaction;
+            check.CommandText = "SELECT 1 FROM messages WHERE mailbox_id = $mailbox AND provider_id = $provider AND folder_id = $folder;";
+            check.Parameters.AddWithValue("$mailbox", mailboxId);
+            check.Parameters.AddWithValue("$provider", providerId);
+            check.Parameters.AddWithValue("$folder", folderId);
+            if (await check.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is null) return;
+        }
         await using (var threadCommand = connection.CreateCommand())
         {
             threadCommand.Transaction = (SqliteTransaction)transaction;

@@ -366,9 +366,9 @@
             </Button>
             <Button Classes="folder" Classes.selected="{Binding IsOutboxView}"
                     Command="{Binding ShowOutboxCommand}" Click="FolderSelectedClicked" IsVisible="{Binding HasOutbox}"
-                    AutomationProperties.Name="Open Outbox">
+                    AutomationProperties.Name="Open Busy">
               <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Text="Outbox" VerticalAlignment="Center" />
+                <TextBlock Text="Busy" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="1" Text="{Binding OutboxCountText}" FontWeight="SemiBold"
                            Foreground="#0F6CBD" Margin="6,0,1,0" />
               </Grid>
@@ -723,7 +723,8 @@
 
           <ListBox ItemsSource="{Binding VisibleDrafts}"
                    Grid.RowSpan="2"
-                   IsVisible="{Binding IsDraftsView}"
+                   IsVisible="{Binding ShowDraftRows}"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                    Background="Transparent"
                    BorderThickness="0"
                    AutomationProperties.Name="{Binding CurrentFolderName}">
@@ -744,6 +745,7 @@
               <DataTemplate x:DataType="core:LocalDraft">
                 <Button Classes="searchResult"
                         Height="{Binding $parent[Window].DataContext.MessageRowHeight}"
+                        HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Stretch"
                         Padding="14,4,9,5"
                         Command="{Binding $parent[Window].DataContext.OpenDraftCommand}"
@@ -761,6 +763,35 @@
                     <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding DetailText}" FontSize="11" Opacity="0.62" TextTrimming="CharacterEllipsis" Margin="0,1,0,1" VerticalAlignment="Center" />
                   </Grid>
                 </Button>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <ListBox ItemsSource="{Binding BusyActions}" IsVisible="{Binding IsOutboxView}"
+                   Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                   AutomationProperties.Name="Pending mail actions">
+            <ListBox.Styles>
+              <Style Selector="ListBoxItem">
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+              </Style>
+            </ListBox.Styles>
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="core:MailAction">
+                <Border Padding="14,7,9,7" HorizontalAlignment="Stretch" Background="Transparent"
+                        BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1"
+                        ToolTip.Tip="{Binding Error}">
+                  <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" RowSpacing="3">
+                    <TextBlock Text="{Binding ActionText}" Foreground="{DynamicResource BetterMailAccentBrush}"
+                               FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="1" Text="{Binding LocalCreatedAt, StringFormat='{}{0:MMM d, HH:mm}'}" FontSize="11" Opacity="0.62" />
+                    <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding DisplaySubject}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Row="2" Text="{Binding MailboxAddress}" FontSize="11" Opacity="0.62" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding StatusText}" FontSize="11" Opacity="0.62" Margin="8,0,0,0" />
+                  </Grid>
+                </Border>
               </DataTemplate>
             </ListBox.ItemTemplate>
           </ListBox>

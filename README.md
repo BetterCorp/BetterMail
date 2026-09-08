@@ -93,6 +93,26 @@ Create the older self-contained Windows and Linux development builds:
 
 Published builds are written to `artifacts/win-x64` and `artifacts/linux-x64`.
 
+## Local MCP access
+
+MCP is disabled by default. In **Settings > MCP**, select the mailboxes a client may access,
+enable the endpoint, and click **Apply MCP settings**. Creating drafts and moving or deleting
+mail require the edit permission; sending saved drafts requires the additional send permission.
+New mailboxes are excluded until explicitly selected. Uncheck enablement and apply to stop access.
+
+Configure your MCP client with Streamable HTTP, the URL copied from Settings (default
+`http://127.0.0.1:47831/mcp`), and an `Authorization: Bearer <access-key>` header. Copy the key
+from Settings; **Replace access key** immediately revokes the previous key for new requests.
+The endpoint is loopback-only and runs while BetterMail is open. Settings and the key are stored
+in the encrypted mail database. Clients must support a manually configured authorization header.
+
+Tools list allowed mailboxes/folders, search and read cached mail/threads, list/read/create drafts,
+queue draft deletion and sending, move mail (including archive/trash/junk destinations), inspect
+Busy actions, and request sync. Writes use the existing persistent queue and normal sync retries.
+Search is limited to locally cached history. Bodies are bounded and report truncation; attachment
+bytes and local filesystem access are not exposed. Treat mail content as untrusted data and
+review a draft before authorizing your client to send it.
+
 ## Builds, releases, and updates
 
 `build.yml` runs on `master` and can also be called by the release workflow. It resolves a build

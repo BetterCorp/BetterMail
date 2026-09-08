@@ -1,0 +1,212 @@
+using System.Text.Json;
+using Microsoft.Data.Sqlite;
+
+namespace BetterMail.Core;
+
+public sealed partial class EncryptedMailStore
+{
+    private static async Task InitializeMailActionsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await ExecuteAsync(connection, """
+            CREATE TABLE IF NOT EXISTS mail_actions (
+                id TEXT PRIMARY KEY, account_id TEXT NOT NULL, mailbox_id TEXT NOT NULL,
+                item_id TEXT NOT NULL, kind INTEGER NOT NULL, payload_json TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS mail_actions_item ON mail_actions(mailbox_id, item_id);
+            CREATE INDEX IF NOT EXISTS mail_actions_draft ON mail_actions(item_id, kind);
+            """, cancellationToken).ConfigureAwait(false);
+        var actions = await ReadActionsAsync(connection, null, cancellationToken, includeTombstones: true).ConfigureAwait(false);
+        foreach (var action in actions.Where(static action => action.Running))
+            await WriteActionAsync(connection, null, action with { Running = false }, cancellationToken).ConfigureAwait(false);
+
+        // Existing outbox payloads and acceptance markers remain in local_drafts.
+        var sends = new List<MailAction>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT id, account_id, mailbox_id, subject, updated_at, send_accepted, provider_draft_id FROM local_drafts WHERE is_queued = 1;";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                sends.Add(new("send:" + reader.GetString(0), reader.GetString(1), reader.GetString(2),
+                    reader.GetString(0), MailActionKind.Send, reader.GetString(3), ParseTimestamp(reader.GetString(4)),
+                    ProviderId: reader.IsDBNull(6) ? null : reader.GetString(6), Accepted: reader.GetBoolean(5)));
+        }
+        foreach (var send in sends.Where(send => actions.All(action => action.Id != send.Id)))
+            await WriteActionAsync(connection, null, send, cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<IReadOnlyList<MailAction>> GetMailActionsAsync(CancellationToken cancellationToken = default) =>
+        WithLockAsync<IReadOnlyList<MailAction>>(async connection =>
+            (await ReadActionsAsync(connection, null, cancellationToken).ConfigureAwait(false))
+                .Where(static action => !action.Accepted).ToArray(), cancellationToken);
+
+    public Task<IReadOnlyList<MailAction>> GetAcceptedMovesAsync(CancellationToken cancellationToken = default) =>
+        WithLockAsync<IReadOnlyList<MailAction>>(async connection =>
+            (await ReadActionsAsync(connection, null, cancellationToken).ConfigureAwait(false))
+                .Where(static action => action.Kind == MailActionKind.Move)
+                .GroupBy(static action => (action.MailboxId, action.ItemId))
+                .Where(static group => group.All(static action => action.Accepted))
+                .Select(static group => group.Last()).ToArray(), cancellationToken);
+
+    public Task ConfirmMoveAsync(MailAction action, MailMessage? current, CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            if (current is not null && (current.MailboxId != action.MailboxId || current.ProviderId != action.ProviderId))
+                throw new InvalidOperationException("The provider returned a different message.");
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            var actions = await ReadActionsAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+            if (actions.Any(candidate => candidate.MailboxId == action.MailboxId && candidate.ItemId == action.ItemId && !candidate.Accepted)) return;
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "DELETE FROM mail_actions WHERE mailbox_id = $mailbox AND item_id = $item AND kind = 0;";
+            command.Parameters.AddWithValue("$mailbox", action.MailboxId);
+            command.Parameters.AddWithValue("$item", action.ItemId);
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            if (current is null)
+                await DeleteMessageAsync(connection, transaction, action.MailboxId, action.ProviderId!, cancellationToken).ConfigureAwait(false);
+            else
+                await UpsertMessageAsync(connection, transaction, current, cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+
+    public Task<bool> IsDraftPendingDeletionAsync(string id, CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT 1 FROM mail_actions WHERE kind = 1 AND item_id = $id LIMIT 1;";
+            command.Parameters.AddWithValue("$id", id);
+            return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is not null;
+        }, cancellationToken);
+
+    public Task QueueDraftDeletionAsync(LocalDraft draft, CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            var actions = await ReadActionsAsync(connection, null, cancellationToken, includeTombstones: true).ConfigureAwait(false);
+            if (actions.Any(action => action.ItemId == draft.Id && action.Kind is MailActionKind.DeleteDraft or MailActionKind.Send))
+                return;
+            await WriteActionAsync(connection, null, new MailAction("delete:" + draft.Id,
+                draft.AccountId, draft.MailboxId, draft.Id, MailActionKind.DeleteDraft,
+                draft.Subject, DateTimeOffset.UtcNow, draft.ProviderDraftId), cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+
+    public Task<MailAction> QueueMoveAsync(MailAccount account, MailMessage message, MailFolder destination,
+        CancellationToken cancellationToken = default) => WithLockAsync(async connection =>
+    {
+        if (destination.MailboxId != message.MailboxId)
+            throw new InvalidOperationException("The destination belongs to another mailbox.");
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        var actions = await ReadActionsAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        var related = actions.Where(action => action.Kind == MailActionKind.Move && MatchesMessage(action, message)).ToArray();
+        var last = related.LastOrDefault();
+        var action = last is { Running: false, Accepted: false }
+            ? last with { DestinationId = destination.ProviderId, DestinationName = destination.DisplayName, Error = null }
+            : new MailAction(Guid.NewGuid().ToString("N"), account.AccountId, message.MailboxId,
+                last?.ItemId ?? message.ProviderId, MailActionKind.Move, message.Subject, DateTimeOffset.UtcNow,
+                last?.ProviderId ?? message.ProviderId, destination.ProviderId, destination.DisplayName,
+                PreviousProviderIds: last?.PreviousProviderIds, SourceFolderId: message.FolderId, SourceWasUnread: message.IsUnread);
+        await WriteActionAsync(connection, transaction, action, cancellationToken).ConfigureAwait(false);
+        await UpsertMessageAsync(connection, transaction,
+            message with { ProviderId = action.ProviderId!, FolderId = destination.ProviderId, IsRead = true }, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return action;
+    }, cancellationToken);
+
+    public Task<MailAction?> StartMailActionAsync(string id, CancellationToken cancellationToken = default) =>
+        WithLockAsync<MailAction?>(async connection =>
+        {
+            var actions = await ReadActionsAsync(connection, null, cancellationToken).ConfigureAwait(false);
+            var action = actions.FirstOrDefault(action => action.Id == id && !action.Accepted && !action.Running);
+            if (action is null) return null;
+            action = action with { Running = true, Error = null };
+            await WriteActionAsync(connection, null, action, cancellationToken).ConfigureAwait(false);
+            return action;
+        }, cancellationToken);
+
+    public Task FailMailActionAsync(string id, string error, CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            var action = (await ReadActionsAsync(connection, null, cancellationToken).ConfigureAwait(false))
+                .FirstOrDefault(action => action.Id == id);
+            if (action is not null)
+                await WriteActionAsync(connection, null, action with { Running = false, Error = error }, cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+
+    public Task CompleteMoveAsync(MailAction completed, MailMessage result, CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            if (result.MailboxId != completed.MailboxId)
+                throw new InvalidOperationException("The provider returned a message owned by another mailbox.");
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            var related = (await ReadActionsAsync(connection, transaction, cancellationToken).ConfigureAwait(false))
+                .Where(action => action.Kind == MailActionKind.Move && action.MailboxId == completed.MailboxId && action.ItemId == completed.ItemId).ToArray();
+            foreach (var action in related)
+                await WriteActionAsync(connection, transaction, action with
+                {
+                    ProviderId = result.ProviderId,
+                    PreviousProviderIds = (action.PreviousProviderIds ?? []).Append(completed.ProviderId!).Distinct().ToArray(),
+                    Accepted = action.Id == completed.Id || action.Accepted,
+                    Running = action.Id == completed.Id ? false : action.Running,
+                    DestinationId = action.Id == completed.Id ? result.FolderId : action.DestinationId
+                }, cancellationToken).ConfigureAwait(false);
+            var desired = related.LastOrDefault(action => action.Id != completed.Id && !action.Accepted);
+            await UpsertMessageAsync(connection, transaction, result with
+            {
+                FolderId = desired?.DestinationId ?? result.FolderId,
+                IsRead = true
+            }, cancellationToken).ConfigureAwait(false);
+            if (completed.ProviderId != result.ProviderId)
+                await DeleteMessageAsync(connection, transaction, completed.MailboxId, completed.ProviderId!, cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+
+    public Task CompleteDraftDeletionAsync(MailAction action, string? providerId, CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            // Keep the small tombstone: a late autosave or remote snapshot must not recreate this draft.
+            await WriteActionAsync(connection, transaction, action with
+            { Accepted = true, Running = false, ProviderId = providerId }, cancellationToken).ConfigureAwait(false);
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "DELETE FROM local_drafts WHERE id = $id;";
+            command.Parameters.AddWithValue("$id", action.ItemId);
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+
+    private static bool MatchesMessage(MailAction action, MailMessage message) =>
+        action.MailboxId == message.MailboxId &&
+        (action.ProviderId == message.ProviderId || action.ItemId == message.ProviderId ||
+         (action.PreviousProviderIds ?? []).Contains(message.ProviderId));
+
+    private static async Task<List<MailAction>> ReadActionsAsync(SqliteConnection connection,
+        SqliteTransaction? transaction, CancellationToken cancellationToken, bool includeTombstones = false)
+    {
+        var actions = new List<MailAction>();
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT payload_json FROM mail_actions" +
+            (includeTombstones ? "" : " WHERE kind = 0 OR json_extract(payload_json, '$.Accepted') = 0") + " ORDER BY rowid;";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            actions.Add(JsonSerializer.Deserialize<MailAction>(reader.GetString(0))!);
+        return actions;
+    }
+
+    private static async Task WriteActionAsync(SqliteConnection connection, SqliteTransaction? transaction,
+        MailAction action, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO mail_actions(id, account_id, mailbox_id, item_id, kind, payload_json)
+            VALUES($id, $account, $mailbox, $item, $kind, $payload)
+            ON CONFLICT(id) DO UPDATE SET payload_json = excluded.payload_json;
+            """;
+        command.Parameters.AddWithValue("$id", action.Id);
+        command.Parameters.AddWithValue("$account", action.AccountId);
+        command.Parameters.AddWithValue("$mailbox", action.MailboxId);
+        command.Parameters.AddWithValue("$item", action.ItemId);
+        command.Parameters.AddWithValue("$kind", (int)action.Kind);
+        command.Parameters.AddWithValue("$payload", JsonSerializer.Serialize(action));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+}

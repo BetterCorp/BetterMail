@@ -49,6 +49,45 @@
     </Border>
 
     <Grid x:Name="SettingsContent" Grid.Row="3" Margin="28" ClipToBounds="True">
+      <ScrollViewer IsVisible="{Binding ShowMcpSettings}">
+        <StackPanel MaxWidth="920" HorizontalAlignment="Stretch" Spacing="18" DataContext="{Binding Mcp}">
+          <TextBlock Text="MCP" FontSize="22" FontWeight="SemiBold" />
+          <TextBlock Text="Connect local AI clients to BetterMail. MCP runs only while BetterMail is open. Changes take effect when you apply settings." TextWrapping="Wrap" />
+          <Border Classes="settingsCard" IsEnabled="{Binding IsAvailable}">
+            <StackPanel Spacing="10">
+              <ToggleSwitch Content="Enable MCP endpoint" IsChecked="{Binding Enabled}" />
+              <TextBlock Text="Local port" FontWeight="SemiBold" />
+              <NumericUpDown Minimum="1024" Maximum="65535" Value="{Binding Port}" FormatString="0" Width="160" HorizontalAlignment="Left" AutomationProperties.Name="MCP port" />
+              <TextBlock Text="Allowed mailboxes" FontWeight="SemiBold" Margin="0,6,0,0" />
+              <TextBlock Text="Only selected mailboxes are accessible. New mailboxes are excluded until you select them." TextWrapping="Wrap" Opacity="0.7" />
+              <ItemsControl ItemsSource="{Binding Mailboxes}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="app:McpMailboxChoice">
+                    <CheckBox IsChecked="{Binding IsSelected}"><TextBlock Text="{Binding Label}" TextWrapping="Wrap" /></CheckBox>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <ToggleSwitch Content="Allow creating drafts, moving mail and deleting drafts" IsChecked="{Binding AllowWrites}" />
+              <ToggleSwitch Content="Also allow sending saved drafts" IsChecked="{Binding AllowSending}" IsEnabled="{Binding AllowWrites}" />
+              <TextBlock Text="Sending uses the Busy queue and retries on the next sync. With both permissions off, clients can only read cached mail." TextWrapping="Wrap" Opacity="0.7" />
+              <Button Classes="primary" Content="Apply MCP settings" Command="{Binding ApplyCommand}" />
+            </StackPanel>
+          </Border>
+          <Border Classes="settingsCard" IsEnabled="{Binding IsAvailable}">
+            <StackPanel Spacing="10">
+              <TextBlock Text="Connect a client" FontSize="18" FontWeight="SemiBold" />
+              <TextBlock Text="Use Streamable HTTP with the endpoint below and an Authorization: Bearer header containing your access key. Keep the key private; it grants the access selected above." TextWrapping="Wrap" />
+              <TextBox Text="{Binding EndpointUrl}" IsReadOnly="True" AutomationProperties.Name="MCP endpoint URL" />
+              <WrapPanel>
+                <Button Content="Copy endpoint" Click="CopyMcpValueClicked" CommandParameter="endpoint" Margin="0,0,8,8" />
+                <Button Content="Copy access key" Click="CopyMcpValueClicked" CommandParameter="key" Margin="0,0,8,8" />
+                <Button Content="Replace access key" Command="{Binding RotateKeyCommand}" Margin="0,0,0,8" />
+              </WrapPanel>
+            </StackPanel>
+          </Border>
+          <TextBlock Text="{Binding Status}" TextWrapping="Wrap" AutomationProperties.Name="MCP status" />
+        </StackPanel>
+      </ScrollViewer>
       <ScrollViewer IsVisible="{Binding ShowAppearanceSettings}">
         <StackPanel MaxWidth="920" HorizontalAlignment="Stretch" Spacing="18">
           <TextBlock Text="Appearance" FontSize="22" FontWeight="SemiBold" />

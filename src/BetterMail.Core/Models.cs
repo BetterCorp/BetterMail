@@ -51,7 +51,10 @@ public sealed record MailHeader(string Name, string Value);
 
 public sealed record MailAddress(string Name, string Address)
 {
-    public override string ToString() => string.IsNullOrWhiteSpace(Name) ? Address : $"{Name} <{Address}>";
+    public override string ToString() => string.IsNullOrWhiteSpace(Name) ? Address :
+        Name.IndexOfAny([',', ';', '"', '\\']) >= 0
+            ? new System.Net.Mail.MailAddress(Address, Name).ToString()
+            : $"{Name} <{Address}>";
 }
 
 public enum MailImportance
@@ -148,7 +151,8 @@ public sealed record MailAttachment(
 public sealed record MailSyncPage(
     IReadOnlyList<MailMessage> Messages,
     string? NextCursor,
-    bool HasMore);
+    bool HasMore,
+    string? SourceFolderId = null);
 
 public sealed record MailSyncState(string? Cursor, bool IsComplete);
 
@@ -159,7 +163,9 @@ public sealed record DraftMessage(
     bool IsHtml,
     IReadOnlyList<MailAddress>? Cc = null,
     IReadOnlyList<MailAddress>? Bcc = null,
-    IReadOnlyList<DraftAttachment>? Attachments = null);
+    IReadOnlyList<DraftAttachment>? Attachments = null,
+    MailImportance Importance = MailImportance.Normal,
+    bool IsFlagged = false);
 
 public sealed record CloudDraft(
     string ProviderId,
@@ -205,7 +211,9 @@ public sealed record LocalDraft(
     DraftSyncStatus? SyncStatus = null,
     string? SyncError = null,
     bool IsQueued = false,
-    bool SendAccepted = false)
+    bool SendAccepted = false,
+    MailImportance Importance = MailImportance.Normal,
+    bool IsFlagged = false)
 {
     public string KindText => IsQueued ? "Queued" : "Draft";
     public string DisplaySubject => string.IsNullOrWhiteSpace(Subject) ? "(no subject)" : Subject;

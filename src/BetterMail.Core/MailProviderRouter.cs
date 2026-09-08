@@ -29,6 +29,8 @@ public sealed class MailProviderRouter(IEnumerable<(string ProviderId, IMailProv
         For(account).GetMessageHeadersAsync(account, mailbox, messageId, cancellationToken);
     public Task MoveMessageAsync(MailAccount account, Mailbox mailbox, string messageId, string destinationFolderId, CancellationToken cancellationToken = default) =>
         For(account).MoveMessageAsync(account, mailbox, messageId, destinationFolderId, cancellationToken);
+    public Task<(string ProviderId, string FolderId)> MoveMessageWithResultAsync(MailAccount account, Mailbox mailbox, string messageId, string destinationFolderId, CancellationToken cancellationToken = default) =>
+        For(account).MoveMessageWithResultAsync(account, mailbox, messageId, destinationFolderId, cancellationToken);
     public Task SetFlaggedAsync(MailAccount account, Mailbox mailbox, string messageId, bool isFlagged, CancellationToken cancellationToken = default) =>
         For(account).SetFlaggedAsync(account, mailbox, messageId, isFlagged, cancellationToken);
     public Task<IReadOnlyList<MailAttachment>> GetAttachmentsAsync(MailAccount account, Mailbox mailbox, string messageId, CancellationToken cancellationToken = default) =>

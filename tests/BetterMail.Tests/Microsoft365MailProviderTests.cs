@@ -237,7 +237,7 @@ public sealed class Microsoft365MailProviderTests
             "<p>Hello</p>",
             true,
             [new("Cc", "cc@example.com")],
-            [new("Bcc", "bcc@example.com")]);
+            [new("Bcc", "bcc@example.com")], Importance: BetterMail.Core.MailImportance.High, IsFlagged: true);
 
         Assert.Equal(
             $"me/mailFolders/drafts/messages?$select={Microsoft365MailProvider.DraftSelect}&$top=50",
@@ -248,6 +248,8 @@ public sealed class Microsoft365MailProviderTests
         using var payload = JsonDocument.Parse(
             JsonSerializer.Serialize(Microsoft365MailProvider.BuildMessagePayload(shared, draft)));
         Assert.Equal("HTML", payload.RootElement.GetProperty("body").GetProperty("contentType").GetString());
+        Assert.Equal("high", payload.RootElement.GetProperty("importance").GetString());
+        Assert.Equal("flagged", payload.RootElement.GetProperty("flag").GetProperty("flagStatus").GetString());
         Assert.Equal("to@example.com", payload.RootElement.GetProperty("toRecipients")[0]
             .GetProperty("emailAddress").GetProperty("address").GetString());
         Assert.Equal("cc@example.com", payload.RootElement.GetProperty("ccRecipients")[0]

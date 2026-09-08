@@ -1282,7 +1282,10 @@ public sealed class MainWindowViewModelTests
                 ], null, false),
                 cancellationToken);
 
-            var provider = new RecordingProvider();
+            var provider = new RecordingProvider
+            {
+                FolderResults = [inbox, new(mailbox.Id, "deleteditems", "Deleted Items", 0, 0, "deleteditems")]
+            };
             var viewModel = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
             await viewModel.InitializeAsync();
 
@@ -1298,8 +1301,10 @@ public sealed class MainWindowViewModelTests
             provider.MoveRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
             viewModel.DeleteCommand.Execute(null);
             await WaitUntilAsync(() => provider.MoveDestination == "deleteditems", cancellationToken);
-            Assert.True(viewModel.IsMailActionRunning);
-            Assert.Equal("Moving to Deleted Items...", viewModel.MailActionStatus);
+            Assert.False(viewModel.IsMailActionRunning);
+            Assert.Single(viewModel.Messages);
+            Assert.Single(viewModel.BusyActions);
+            Assert.Single(await store.GetMessagesAsync(mailbox.Id, "deleteditems", cancellationToken: cancellationToken));
             provider.MoveRelease.SetResult();
             await WaitUntilAsync(() => provider.MarkedRead && provider.MoveDestination == "deleteditems" && viewModel.Messages.Count == 1 && !viewModel.IsMailActionRunning, cancellationToken);
             Assert.True(viewModel.DeleteCommand.CanExecute(null));
@@ -1309,7 +1314,8 @@ public sealed class MainWindowViewModelTests
             Assert.False(viewModel.IsBusy);
             Assert.False(viewModel.IsMailActionRunning);
             Assert.Null(viewModel.SelectedMessage);
-            Assert.Empty(await store.GetMessagesAsync(cancellationToken: cancellationToken));
+            Assert.Empty(await store.GetMessagesAsync(mailbox.Id, "inbox", cancellationToken: cancellationToken));
+            await WaitUntilAsync(() => !viewModel.IsSyncing, cancellationToken);
         }
         finally
         {
@@ -1636,6 +1642,8 @@ public sealed class MainWindowViewModelTests
                 cancellationToken);
             await viewModel.DeleteLocalDraftAsync(deleteDraft.Id);
             await viewModel.DeleteLocalDraftAsync(deleteDraft.Id);
+            Assert.Empty(viewModel.Drafts);
+            await WaitUntilAsync(() => !viewModel.IsSyncing, cancellationToken);
             Assert.Equal(1, provider.DeleteCount);
             Assert.Empty(await store.GetLocalDraftsAsync(cancellationToken));
 
@@ -1647,17 +1655,20 @@ public sealed class MainWindowViewModelTests
             };
             await viewModel.SaveLocalDraftAsync(missingRemote);
             await viewModel.DeleteLocalDraftAsync(missingRemote.Id);
-            Assert.Equal(1, provider.DeleteCount);
+            await WaitUntilAsync(() => !viewModel.IsSyncing, cancellationToken);
+            Assert.Equal(2, provider.DeleteCount);
 
             provider.DeleteAsMissing = true;
             var staleConflict = missingRemote with
             {
                 Id = "stale-conflict",
+                ProviderDraftId = "another-missing-remote",
                 SyncStatus = DraftSyncStatus.Conflict
             };
             await viewModel.SaveLocalDraftAsync(staleConflict);
             await viewModel.DeleteLocalDraftAsync(staleConflict.Id);
-            Assert.Equal(2, provider.DeleteCount);
+            await WaitUntilAsync(() => !viewModel.IsSyncing, cancellationToken);
+            Assert.Equal(3, provider.DeleteCount);
             Assert.Empty(await store.GetLocalDraftsAsync(cancellationToken));
 
             await viewModel.SaveLocalDraftAsync(local with
@@ -1900,7 +1911,7 @@ public sealed class MainWindowViewModelTests
             Assert.True(viewModel.HasOutbox);
             Assert.Equal(0, provider.SendCalls);
             viewModel.ShowOutboxCommand.Execute(null);
-            Assert.Equal("Outbox", viewModel.CurrentFolderName);
+            Assert.Equal("Busy", viewModel.CurrentFolderName);
             Assert.False(viewModel.OpenDraftCommand.CanExecute(Assert.Single(viewModel.VisibleDrafts)));
 
             // Delivery must wait for the normal incoming-mail sync to finish.
@@ -1939,6 +1950,64 @@ public sealed class MainWindowViewModelTests
                 Directory.Delete(directory, recursive: true);
             }
         }
+    }
+
+    [Fact]
+    public async Task DeletingADraftClosesBeforeCloudDeletionAndRetriesAfterRestart()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-delete-draft-{Guid.NewGuid():N}");
+        var path = Path.Combine(directory, "mail.db");
+        var key = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        var provider = new LifecycleDraftProvider { DeleteRelease = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        try
+        {
+            var account = new MailAccount("microsoft365", "account", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, "Me");
+            await using (var store = new EncryptedMailStore(path, key))
+            {
+                await store.InitializeAsync(token);
+                var remote = await provider.CreateDraftAsync(account, mailbox,
+                    new("Delete me", [new("To", "to@example.com")], "Body", false), token);
+                var draft = new LocalDraft("delete-draft", account.AccountId, mailbox.Id, "to@example.com", "", "",
+                    "Delete me", "Body", [], DateTimeOffset.UtcNow, ProviderDraftId: remote.ProviderId);
+                await store.SaveLocalDraftAsync(draft, token);
+                var viewModel = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
+                viewModel.Accounts.Add(account);
+                viewModel.Mailboxes.Add(mailbox);
+                var composer = new ComposeWindowViewModel([account], [mailbox],
+                    new ComposeRequest(draft.To, draft.Subject, draft.Body, DraftId: draft.Id),
+                    viewModel.QueueSendAsync, viewModel.SaveLocalDraftAsync, viewModel.DeleteLocalDraftAsync);
+                var closed = false;
+                composer.Deleted += (_, _) => closed = true;
+                await ((AsyncCommand)composer.DeleteCommand).ExecuteAsync();
+                Assert.True(closed);
+                Assert.False(composer.HasError);
+                Assert.Empty(viewModel.Drafts);
+                await WaitUntilAsync(() => provider.DeleteCount == 1, token);
+                Assert.Single(viewModel.BusyActions);
+                provider.DeleteRelease.SetException(new HttpRequestException("Offline"));
+                await WaitUntilAsync(() => !viewModel.IsSyncing, token);
+                Assert.Null(viewModel.Error);
+                Assert.Equal("Retrying next sync", Assert.Single(viewModel.BusyActions).StatusText);
+                Assert.Equal(1, provider.DeleteCount);
+                await composer.FlushDraftAsync();
+                Assert.Empty(await store.GetLocalDraftSummariesAsync(token));
+            }
+            await using (var store = new EncryptedMailStore(path, key))
+            {
+                await store.InitializeAsync(token);
+                provider.DeleteRelease = null;
+                var viewModel = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
+                viewModel.Accounts.Add(account);
+                viewModel.Mailboxes.Add(mailbox);
+                await ((AsyncCommand)viewModel.SyncCommand).ExecuteAsync();
+                Assert.Equal(2, provider.DeleteCount);
+                Assert.Empty(viewModel.BusyActions);
+                Assert.Empty(await store.GetLocalDraftsAsync(token));
+            }
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }
 
     private sealed class RecordingProvider : IMailProvider, ISharedMailboxProvider
@@ -2344,6 +2413,7 @@ public sealed class MainWindowViewModelTests
         public int SendCount { get; private set; }
         public int DeleteCount { get; private set; }
         public bool DeleteAsMissing { get; set; }
+        public TaskCompletionSource? DeleteRelease { get; set; }
 
         public Task<IReadOnlyList<CloudDraft>> GetDraftsAsync(
             MailAccount account,
@@ -2375,22 +2445,22 @@ public sealed class MainWindowViewModelTests
             return Task.FromResult(updated);
         }
 
-        public Task DeleteDraftAsync(
+        public async Task DeleteDraftAsync(
             MailAccount account,
             Mailbox mailbox,
             string draftId,
             CancellationToken cancellationToken = default)
         {
             DeleteCount++;
+            if (DeleteRelease is not null) await DeleteRelease.Task.WaitAsync(cancellationToken);
             if (DeleteAsMissing)
             {
-                return Task.FromException(new HttpRequestException(
+                throw new HttpRequestException(
                     "The specified object was not found in the store.",
                     null,
-                    System.Net.HttpStatusCode.NotFound));
+                    System.Net.HttpStatusCode.NotFound);
             }
             _drafts.RemoveAll(candidate => candidate.ProviderId == draftId);
-            return Task.CompletedTask;
         }
 
         public Task SendDraftAsync(

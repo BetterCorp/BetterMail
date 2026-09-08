@@ -22,9 +22,13 @@ public sealed record ComposeRequest(
     IReadOnlyList<DraftAttachment>? Attachments = null,
     bool IsHtml = false,
     ComposeIntent Intent = ComposeIntent.NewMail,
-    string? ConversationIdentity = null);
+    string? ConversationIdentity = null,
+    MailImportance Importance = MailImportance.Normal,
+    bool IsFlagged = false);
 
 public sealed record ComposeSender(MailAccount Account, Mailbox Mailbox)
 {
-    public string DisplayName => Mailbox.IsShared ? $"{Mailbox.Address} (shared)" : Account.EmailAddress;
+    public string DisplayName => new MailAddress(
+        string.IsNullOrWhiteSpace(Mailbox.DisplayName) ? Account.DisplayName : Mailbox.DisplayName,
+        Mailbox.Address).ToString() + (Mailbox.IsShared ? " (shared)" : "");
 }

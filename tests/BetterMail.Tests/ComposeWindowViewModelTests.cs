@@ -58,6 +58,8 @@ public sealed class ComposeWindowViewModelTests
         Assert.True(viewModel.ToField.CommitFirstSuggestion());
 
         var token = Assert.Single(viewModel.ToField.Tokens);
+        Assert.Equal("Ada Lovelace <ada@example.com>", token.Text);
+        Assert.Equal("Person <person@example.com>", viewModel.SelectedSender!.DisplayName);
         Assert.Equal("Ada Lovelace <ada@example.com>", viewModel.To);
         viewModel.ToField.RemoveTokenCommand.Execute(token);
         Assert.Empty(viewModel.ToField.Tokens);
@@ -71,6 +73,10 @@ public sealed class ComposeWindowViewModelTests
         Assert.Equal(2, recipients.Count);
         Assert.Equal("Alice", recipients[0].Name);
         Assert.Equal("bob@example.com", recipients[1].Address);
+        var quoted = new ComposeRecipientToken("Doe, Jane", "jane@example.com");
+        var restored = Assert.Single(ComposeWindowViewModel.ParseRecipients(quoted.Serialized));
+        Assert.Equal("Doe, Jane", restored.Name);
+        Assert.Equal("jane@example.com", restored.Address);
         Assert.Throws<FormatException>(() => ComposeWindowViewModel.ParseRecipients("not an address"));
     }
 
@@ -91,7 +97,9 @@ public sealed class ComposeWindowViewModelTests
             })
         {
             Cc = "cc@example.com",
-            Bcc = "bcc@example.com"
+            Bcc = "bcc@example.com",
+            Importance = MailImportance.High,
+            IsFlagged = true
         };
         viewModel.AddAttachment(new DraftAttachment("notes.txt", "text/plain", "hello"u8.ToArray()));
 
@@ -102,6 +110,8 @@ public sealed class ComposeWindowViewModelTests
         }
 
         Assert.NotNull(sent);
+        Assert.Equal(MailImportance.High, sent.Importance);
+        Assert.True(sent.IsFlagged);
         Assert.True(sent.IsHtml);
         Assert.Contains("Body", sent.Body);
         Assert.Equal("cc@example.com", Assert.Single(sent.Cc!).Address);

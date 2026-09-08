@@ -38,6 +38,10 @@
     <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="HtmlSanitizer" />
     <PackageReference Include="Velopack" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+  </ItemGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
     <PackageReference Include="Microsoft.WindowsAppSDK" />

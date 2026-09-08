@@ -95,11 +95,11 @@ public sealed partial class ComposeWindow : Window
         {
             if (e.Key is Key.Enter or Key.Tab && field.CommitFirstSuggestion())
             {
-                e.Handled = true;
+                e.Handled = e.Key != Key.Tab;
                 return;
             }
             field.CommitQuery();
-            e.Handled = true;
+            e.Handled = e.Key != Key.Tab;
         }
         catch (FormatException)
         {
@@ -157,6 +157,13 @@ public sealed partial class ComposeWindow : Window
         }
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Attach files", AllowMultiple = true });
         await AttachFilesAsync(viewModel, files);
+    }
+
+    private static void RecipientFieldPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.Source is Avalonia.Visual source && source.GetSelfAndVisualAncestors().Any(static visual => visual is TextBox or Button)) return;
+        if (sender is Border border)
+            border.GetVisualDescendants().OfType<TextBox>().FirstOrDefault()?.Focus();
     }
 
     private void FilesDragOver(object? sender, DragEventArgs e)

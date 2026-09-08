@@ -392,7 +392,7 @@ public sealed class GoogleGmailProvider(
             body.IsHtml,
             !labels.Contains("UNREAD"),
             MapAttachments(payload).Count > 0,
-            labels.Contains("IMPORTANT") ? MailImportance.High : MailImportance.Normal,
+            ReadImportance(headers, labels.Contains("IMPORTANT") ? MailImportance.High : MailImportance.Normal),
             labels.Where(label => !SystemLabels.Contains(label, StringComparer.Ordinal))
                 .Select(label => labelNames?.GetValueOrDefault(label) ?? label)
                 .ToArray(),
@@ -404,6 +404,7 @@ public sealed class GoogleGmailProvider(
 
     internal static string BuildMime(Mailbox mailbox, DraftMessage draft)
     {
+        if (draft.IsFlagged) throw new NotSupportedException("Gmail does not support follow-up flags on drafts.");
         var builder = new StringBuilder();
         HeaderLine(builder, "From", FormatAddress(new CoreMailAddress(mailbox.DisplayName, mailbox.Address)));
         HeaderLine(builder, "To", string.Join(", ", draft.To.Select(FormatAddress)));
@@ -416,6 +417,8 @@ public sealed class GoogleGmailProvider(
             HeaderLine(builder, "Bcc", string.Join(", ", draft.Bcc.Select(FormatAddress)));
         }
         HeaderLine(builder, "Subject", EncodeHeader(draft.Subject));
+        HeaderLine(builder, "Importance", draft.Importance.ToString().ToLowerInvariant());
+        HeaderLine(builder, "X-Priority", draft.Importance switch { MailImportance.High => "1", MailImportance.Low => "5", _ => "3" });
         HeaderLine(builder, "Date", DateTimeOffset.Now.ToString("r", CultureInfo.InvariantCulture));
         HeaderLine(builder, "MIME-Version", "1.0");
 
@@ -601,7 +604,7 @@ public sealed class GoogleGmailProvider(
                     attachment.ContentType,
                     attachment.ContentBytes ?? [],
                     attachment.IsInline,
-                    attachment.ContentId)).ToArray()),
+                    attachment.ContentId)).ToArray(), ReadImportance(headers)),
             updatedAt,
             OptionalString(message, "historyId"),
             false,
@@ -804,6 +807,20 @@ public sealed class GoogleGmailProvider(
         }
         return headers;
     }
+
+    private static MailImportance ReadImportance(IReadOnlyDictionary<string, string> headers, MailImportance fallback = MailImportance.Normal) =>
+        Header(headers, "Importance").ToLowerInvariant() switch
+        {
+            "high" => MailImportance.High,
+            "low" => MailImportance.Low,
+            "normal" => MailImportance.Normal,
+            _ => Header(headers, "X-Priority").FirstOrDefault() switch
+            {
+                '1' or '2' => MailImportance.High,
+                '4' or '5' => MailImportance.Low,
+                _ => fallback
+            }
+        };
 
     private static IReadOnlyList<CoreMailAddress> ParseAddresses(string value)
     {

@@ -130,11 +130,13 @@ public sealed class GoogleProviderTests
                 [new MailAddress("Recipient", "recipient@example.com")],
                 "<p>Attached</p>",
                 true,
-                Attachments: [new DraftAttachment("report.txt", "text/plain", Encoding.UTF8.GetBytes("content"))]));
+                Attachments: [new DraftAttachment("report.txt", "text/plain", Encoding.UTF8.GetBytes("content"))], Importance: MailImportance.Low));
 
         Assert.Contains("From: Person <person@example.com>\r\n", mime);
         Assert.Contains("To: Recipient <recipient@example.com>\r\n", mime);
         Assert.Contains("Subject: =?UTF-8?B?", mime);
+        Assert.Contains("Importance: low\r\n", mime);
+        Assert.Contains("X-Priority: 5\r\n", mime);
         Assert.Contains("Content-Type: multipart/mixed", mime);
         Assert.Contains("filename=\"report.txt\"", mime);
         Assert.Contains(Convert.ToBase64String(Encoding.UTF8.GetBytes("content")), mime);

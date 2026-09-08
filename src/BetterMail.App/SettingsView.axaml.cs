@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Input.Platform;
 
 namespace BetterMail.App;
 
@@ -93,6 +95,15 @@ public sealed partial class SettingsView : UserControl
         if (TopLevel.GetTopLevel(this) is MainWindow { CheckForUpdatesAsync: { } check })
         {
             await check();
+        }
+    }
+
+    private async void CopyMcpValueClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: McpSettingsViewModel settings, CommandParameter: string value } &&
+            TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
+        {
+            await clipboard.SetValueAsync(DataFormat.Text, value == "key" ? settings.AccessKey : settings.EndpointUrl);
         }
     }
 }
