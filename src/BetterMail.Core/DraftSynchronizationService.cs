@@ -214,7 +214,7 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
         draft.IsHtml,
         ParseAddresses(draft.Cc),
         ParseAddresses(draft.Bcc),
-        draft.Attachments, draft.Importance, draft.IsFlagged);
+        draft.Attachments, draft.Importance, draft.IsFlagged, draft.RequestReadReceipt, draft.RequestDeliveryReceipt);
 
     internal static LocalDraft ToLocalDraft(string localId, CloudDraft draft) => new(
         localId,
@@ -235,7 +235,8 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
         string.IsNullOrWhiteSpace(draft.ConversationId)
             ? null
             : ConversationThread.ThreadIdentity(draft.MailboxId, draft.ConversationId),
-        Importance: draft.Message.Importance, IsFlagged: draft.Message.IsFlagged);
+        Importance: draft.Message.Importance, IsFlagged: draft.Message.IsFlagged,
+        RequestReadReceipt: draft.Message.RequestReadReceipt, RequestDeliveryReceipt: draft.Message.RequestDeliveryReceipt);
 
     private static IReadOnlyList<MailAddress> ParseAddresses(string value)
     {

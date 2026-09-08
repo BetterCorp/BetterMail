@@ -21,6 +21,7 @@ public sealed record MailAction(
     string? SourceFolderId = null,
     bool SourceWasUnread = false)
 {
+    public bool CanCancel => !Running && !Accepted;
     public string DisplaySubject => string.IsNullOrWhiteSpace(Subject) ? "(no subject)" : Subject;
     public string ActionText => Kind switch
     {

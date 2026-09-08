@@ -6,6 +6,34 @@ namespace BetterMail.Tests;
 public sealed class ComposeWindowViewModelTests
 {
     [Fact]
+    public async Task ReceiptOptionsAreIndependentAndFollowSenderSupport()
+    {
+        var microsoft = new MailAccount("microsoft365", "microsoft", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+        var google = microsoft with { ProviderId = "google", AccountId = "google" };
+        LocalDraft? saved = null;
+        var viewModel = new ComposeWindowViewModel([microsoft, google],
+            [new(microsoft.AccountId, microsoft.EmailAddress, "Me"), new(google.AccountId, google.EmailAddress, "Me")],
+            new ComposeRequest(DraftId: "draft", RequestReadReceipt: true), (_, _, _) => Task.CompletedTask,
+            draft => { saved = draft; return Task.CompletedTask; });
+        Assert.True(viewModel.RequestReadReceipt);
+        Assert.False(viewModel.RequestDeliveryReceipt);
+        viewModel.RequestReadReceipt = false;
+        viewModel.RequestDeliveryReceipt = true;
+        await viewModel.FlushDraftAsync();
+        Assert.NotNull(saved);
+        Assert.False(saved.RequestReadReceipt);
+        Assert.True(saved.RequestDeliveryReceipt);
+        viewModel.SelectedSender = viewModel.Senders[1];
+        Assert.False(viewModel.SupportsReceipts);
+        Assert.False(viewModel.RequestReadReceipt);
+        Assert.False(viewModel.RequestDeliveryReceipt);
+        viewModel.SelectedSender = viewModel.Senders[0];
+        Assert.True(viewModel.SupportsReceipts);
+        Assert.True(viewModel.RequestDeliveryReceipt);
+        await viewModel.FlushDraftAsync();
+    }
+
+    [Fact]
     public void DroppedFilesKeepTheirContentAndRejectInvalidPayloads()
     {
         var file = RichHtmlEditor.ParseDroppedAttachment(
@@ -99,7 +127,9 @@ public sealed class ComposeWindowViewModelTests
             Cc = "cc@example.com",
             Bcc = "bcc@example.com",
             Importance = MailImportance.High,
-            IsFlagged = true
+            IsFlagged = true,
+            RequestReadReceipt = true,
+            RequestDeliveryReceipt = true
         };
         viewModel.AddAttachment(new DraftAttachment("notes.txt", "text/plain", "hello"u8.ToArray()));
 
@@ -112,6 +142,8 @@ public sealed class ComposeWindowViewModelTests
         Assert.NotNull(sent);
         Assert.Equal(MailImportance.High, sent.Importance);
         Assert.True(sent.IsFlagged);
+        Assert.True(sent.RequestReadReceipt);
+        Assert.True(sent.RequestDeliveryReceipt);
         Assert.True(sent.IsHtml);
         Assert.Contains("Body", sent.Body);
         Assert.Equal("cc@example.com", Assert.Single(sent.Cc!).Address);
@@ -161,7 +193,8 @@ public sealed class ComposeWindowViewModelTests
         var viewModel = new ComposeWindowViewModel(
             [account],
             [mailbox],
-            new ComposeRequest(DraftId: "draft-one", ConversationIdentity: "mailbox:conversation:one"),
+            new ComposeRequest(DraftId: "draft-one", ConversationIdentity: "mailbox:conversation:one",
+                RequestReadReceipt: true, RequestDeliveryReceipt: true),
             (_, id, _) =>
             {
                 sentId = id;
@@ -193,6 +226,8 @@ public sealed class ComposeWindowViewModelTests
         Assert.Equal(mailbox.Id, saved.MailboxId);
         Assert.Equal("mailbox:conversation:one", saved.ConversationIdentity);
         Assert.Equal("Saved", viewModel.DraftStatus);
+        Assert.True(saved.RequestReadReceipt);
+        Assert.True(saved.RequestDeliveryReceipt);
 
         viewModel.SendCommand.Execute(null);
         for (var attempt = 0; attempt < 50 && !sent; attempt++)

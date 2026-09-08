@@ -109,6 +109,42 @@ public sealed partial class EncryptedMailStore
         return action;
     }, cancellationToken);
 
+    public Task<bool> CancelMailActionAsync(string id, CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            var actions = await ReadActionsAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+            var action = actions.FirstOrDefault(action => action.Id == id);
+            if (action is null || !action.CanCancel) return false;
+            var related = actions.Where(candidate => candidate.MailboxId == action.MailboxId && candidate.ItemId == action.ItemId).ToArray();
+            if (related[^1].Id != id) return false;
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            if (action.Kind == MailActionKind.Move)
+            {
+                var previous = related.Length > 1 ? related[^2] : null;
+                var folder = previous?.DestinationId ?? action.SourceFolderId;
+                if (folder is null) return false;
+                command.CommandText = "UPDATE messages SET folder_id = $folder, is_read = $read WHERE mailbox_id = $mailbox AND provider_id = $provider;";
+                command.Parameters.AddWithValue("$folder", folder);
+                command.Parameters.AddWithValue("$read", previous is not null || !action.SourceWasUnread);
+                command.Parameters.AddWithValue("$mailbox", action.MailboxId);
+                command.Parameters.AddWithValue("$provider", action.ProviderId!);
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+            else if (action.Kind == MailActionKind.Send)
+            {
+                command.CommandText = "UPDATE local_drafts SET is_queued = 0 WHERE id = $item AND send_accepted = 0;";
+                command.Parameters.AddWithValue("$item", action.ItemId);
+                if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 0) return false;
+            }
+            command.CommandText = "DELETE FROM mail_actions WHERE id = $id;";
+            command.Parameters.AddWithValue("$id", id);
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return true;
+        }, cancellationToken);
+
     public Task<MailAction?> StartMailActionAsync(string id, CancellationToken cancellationToken = default) =>
         WithLockAsync<MailAction?>(async connection =>
         {

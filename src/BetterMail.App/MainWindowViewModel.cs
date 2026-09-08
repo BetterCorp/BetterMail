@@ -192,6 +192,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         ShowPinnedCommand = new AsyncCommand(() => ShowUnifiedFilterAsync(MailMessageFilter.Pinned));
         ShowFlaggedCommand = new AsyncCommand(() => ShowUnifiedFilterAsync(MailMessageFilter.Flagged));
         ShowDraftsCommand = new AsyncCommand(ShowDraftsAsync);
+        CancelBusyActionCommand = new AsyncCommand<MailAction>(CancelBusyActionAsync, static action => action.CanCancel);
         ShowOutboxCommand = new AsyncCommand(() => ShowDraftListAsync(DraftListFilter.Outbox));
         ShowSyncIssuesCommand = new AsyncCommand(() => ShowDraftListAsync(DraftListFilter.SyncIssues));
         ShowDraftConflictsCommand = new AsyncCommand(() => ShowDraftListAsync(DraftListFilter.Conflicts));
@@ -734,6 +735,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 RaisePropertyChanged(nameof(CurrentItemCountText));
                 RaisePropertyChanged(nameof(ShowEmptyState));
                 RaisePropertyChanged(nameof(ShowDraftEmptyState));
+                RefreshMailActionCommands();
             }
         }
     }
@@ -4172,7 +4174,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private bool CanViewHeaders() =>
         CanReplyToSelectedMessage() && !_isMailActionRunning;
 
-    private bool IsMailInteractionContext => IsMailModule && !IsSettingsOpen && !IsGlobalSearchOpen;
+    private bool IsMailInteractionContext => IsMailModule && !IsDraftsView && !IsSettingsOpen && !IsGlobalSearchOpen;
 
     private IReadOnlyList<MailMessage> ActionMessages()
     {
@@ -4379,6 +4381,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private void RefreshMailActionCommands()
     {
+        ((AsyncCommand)ReplyCommand).Refresh();
+        ((AsyncCommand)ReplyAllCommand).Refresh();
+        ((AsyncCommand)ForwardCommand).Refresh();
         ((AsyncCommand)ToggleReadCommand).Refresh();
         ((AsyncCommand)ArchiveCommand).Refresh();
         ((AsyncCommand)DeleteCommand).Refresh();
@@ -4781,7 +4786,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             string.Join("; ", message.To), string.Join("; ", message.Cc ?? []), string.Join("; ", message.Bcc ?? []),
             message.Subject, message.Body, message.Attachments ?? [], DateTimeOffset.UtcNow,
             message.IsHtml, ConversationIdentity: local?.ConversationIdentity, IsQueued: true,
-            Importance: message.Importance, IsFlagged: message.IsFlagged));
+            Importance: message.Importance, IsFlagged: message.IsFlagged,
+            RequestReadReceipt: message.RequestReadReceipt, RequestDeliveryReceipt: message.RequestDeliveryReceipt));
         if (await _store.GetLocalDraftAsync(localDraftId) is not { IsQueued: true })
             throw new InvalidOperationException("This draft was deleted and cannot be sent.");
         await RefreshDraftsAsync();
@@ -4806,7 +4812,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             var mailboxLock = _draftSyncLocks.GetOrAdd(mailbox.Id, static _ => new SemaphoreSlim(1, 1));
             try
             {
-                await _store.StartMailActionAsync("send:" + summary.Id);
+                if (await _store.StartMailActionAsync("send:" + summary.Id) is null && !summary.SendAccepted)
+                    continue;
                 await RefreshBusyActionsAsync();
                 await mailboxLock.WaitAsync(timeout.Token);
                 try
@@ -4822,7 +4829,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                         var message = new DraftMessage(
                             local.Subject, ComposeWindowViewModel.ParseRecipients(local.To), local.Body, local.IsHtml,
                             ComposeWindowViewModel.ParseRecipients(local.Cc), ComposeWindowViewModel.ParseRecipients(local.Bcc),
-                            local.Attachments, local.Importance, local.IsFlagged);
+                            local.Attachments, local.Importance, local.IsFlagged, local.RequestReadReceipt, local.RequestDeliveryReceipt);
                         if (_provider.SupportsCloudDraftsFor(account))
                         {
                             var remote = local.ProviderDraftId is { Length: > 0 } providerDraftId
@@ -5314,7 +5321,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             draft.MailboxId,
             draft.Attachments,
             draft.IsHtml,
-            ConversationIdentity: draft.ConversationIdentity, Importance: draft.Importance, IsFlagged: draft.IsFlagged));
+            ConversationIdentity: draft.ConversationIdentity, Importance: draft.Importance, IsFlagged: draft.IsFlagged,
+            RequestReadReceipt: draft.RequestReadReceipt, RequestDeliveryReceipt: draft.RequestDeliveryReceipt));
     }
 
     private Task ReplyAsync()

@@ -783,13 +783,17 @@
                 <Border Padding="14,7,9,7" HorizontalAlignment="Stretch" Background="Transparent"
                         BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1"
                         ToolTip.Tip="{Binding Error}">
-                  <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" RowSpacing="3">
+                  <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="3">
                     <TextBlock Text="{Binding ActionText}" Foreground="{DynamicResource BetterMailAccentBrush}"
                                FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                     <TextBlock Grid.Column="1" Text="{Binding LocalCreatedAt, StringFormat='{}{0:MMM d, HH:mm}'}" FontSize="11" Opacity="0.62" />
                     <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding DisplaySubject}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                     <TextBlock Grid.Row="2" Text="{Binding MailboxAddress}" FontSize="11" Opacity="0.62" TextTrimming="CharacterEllipsis" />
                     <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding StatusText}" FontSize="11" Opacity="0.62" Margin="8,0,0,0" />
+                    <Button Grid.Row="3" Grid.Column="1" Content="Cancel" HorizontalAlignment="Right"
+                            Command="{Binding $parent[Window].((app:MainWindowViewModel)DataContext).CancelBusyActionCommand}"
+                            CommandParameter="{Binding}" IsEnabled="{Binding CanCancel}"
+                            ToolTip.Tip="Cancel a waiting action. Actions already executing cannot be recalled." />
                   </Grid>
                 </Border>
               </DataTemplate>

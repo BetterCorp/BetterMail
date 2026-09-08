@@ -7,6 +7,16 @@ namespace BetterMail.Tests;
 
 public sealed class GoogleProviderTests
 {
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void RejectsUnsupportedReceiptRequests(bool read, bool delivery)
+    {
+        var mailbox = new Mailbox("account", "me@example.com", "Me");
+        Assert.Throws<NotSupportedException>(() => GoogleGmailProvider.BuildMime(mailbox,
+            new("Subject", [], "Body", false, RequestReadReceipt: read, RequestDeliveryReceipt: delivery)));
+    }
+
     [Fact]
     public void UsesEnvironmentCredentialOverrides()
     {

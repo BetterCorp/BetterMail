@@ -404,6 +404,8 @@ public sealed class GoogleGmailProvider(
 
     internal static string BuildMime(Mailbox mailbox, DraftMessage draft)
     {
+        if (draft.RequestReadReceipt || draft.RequestDeliveryReceipt)
+            throw new NotSupportedException("Receipt requests are not supported by BetterMail for Gmail accounts.");
         if (draft.IsFlagged) throw new NotSupportedException("Gmail does not support follow-up flags on drafts.");
         var builder = new StringBuilder();
         HeaderLine(builder, "From", FormatAddress(new CoreMailAddress(mailbox.DisplayName, mailbox.Address)));

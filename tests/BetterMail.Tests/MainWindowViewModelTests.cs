@@ -6,6 +6,56 @@ namespace BetterMail.Tests;
 
 public sealed class MainWindowViewModelTests
 {
+    [Fact]
+    public async Task BusyCancellationRestoresDraftAndDisablesMailActionsWithStaleSelection()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-cancel-ui-{Guid.NewGuid():N}");
+        var key = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        var provider = new RecordingProvider { SyncRelease = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), key);
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "account", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, "Me");
+            provider.FolderResults = [new(mailbox.Id, "inbox", "Inbox", 0, 0, "inbox")];
+            var viewModel = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
+            viewModel.Accounts.Add(account);
+            viewModel.Mailboxes.Add(mailbox);
+            await viewModel.QueueSendAsync(new(account, mailbox), "cancel-send",
+                new("Draft", [new("To", "to@example.com")], "Body", false, RequestReadReceipt: true, RequestDeliveryReceipt: true));
+            await ((AsyncCommand)viewModel.ShowOutboxCommand).ExecuteAsync();
+            // A late list refresh can select cached mail while Busy is visible.
+            viewModel.SelectedMessage = new(mailbox.Id, "stale", null, null, "inbox", "Old selection",
+                new("From", "from@example.com"), [], DateTimeOffset.UtcNow, "Body", "Body", false, true,
+                false, MailImportance.Normal, [], null);
+            foreach (var command in new[] { viewModel.DeleteCommand, viewModel.ArchiveCommand, viewModel.JunkCommand,
+                         viewModel.NotJunkCommand, viewModel.ReplyCommand, viewModel.ReplyAllCommand, viewModel.ForwardCommand,
+                         viewModel.ToggleReadCommand, viewModel.ToggleFlagCommand, viewModel.TogglePinCommand, viewModel.ViewHeadersCommand })
+                Assert.False(command.CanExecute(null));
+            Assert.False(viewModel.MoveToFolderCommand.CanExecute(new MailFolderItem(provider.FolderResults[0], "Me")));
+            var action = Assert.Single(viewModel.BusyActions);
+            Assert.True(viewModel.CancelBusyActionCommand.CanExecute(action));
+            Assert.False(viewModel.CancelBusyActionCommand.CanExecute(action with { Running = true }));
+            viewModel.CancelBusyActionCommand.Execute(action);
+            await WaitUntilAsync(() => !viewModel.HasOutbox && viewModel.Drafts.Count == 1, token);
+            var draft = Assert.Single(viewModel.Drafts);
+            Assert.True(draft.RequestReadReceipt);
+            Assert.True(draft.RequestDeliveryReceipt);
+            Assert.False(draft.IsQueued);
+            provider.SyncRelease.SetResult();
+            await WaitUntilAsync(() => !viewModel.IsSyncing, token);
+            Assert.Equal(0, provider.SendCalls);
+            Assert.Null(viewModel.Error);
+        }
+        finally
+        {
+            provider.SyncRelease.TrySetResult();
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
     [Theory]
     [InlineData(390, 0)]
     [InlineData(719, 0)]

@@ -108,6 +108,10 @@
                         HorizontalAlignment="Stretch" AutomationProperties.Name="Message importance" />
               <CheckBox Content="Flag for follow-up" IsChecked="{Binding IsFlagged}" IsEnabled="{Binding SupportsFollowUpFlag}"
                         ToolTip.Tip="Follow-up flags are available for Microsoft 365 accounts." />
+              <CheckBox Content="Request read receipt" IsChecked="{Binding RequestReadReceipt}" IsEnabled="{Binding SupportsReceipts}"
+                        ToolTip.Tip="Receipt requests are available for Microsoft 365 accounts." />
+              <CheckBox Content="Request delivery receipt" IsChecked="{Binding RequestDeliveryReceipt}" IsEnabled="{Binding SupportsReceipts}"
+                        ToolTip.Tip="Receipt requests are available for Microsoft 365 accounts." />
             </StackPanel>
           </Flyout>
         </Button.Flyout>

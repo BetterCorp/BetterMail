@@ -17,7 +17,7 @@ public sealed class Microsoft365MailProvider(
     internal const string MessageSelect =
         "id,conversationId,internetMessageId,parentFolderId,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,isRead,hasAttachments,importance,categories,flag";
     internal const string DraftSelect =
-        "id,conversationId,subject,toRecipients,ccRecipients,bccRecipients,body,lastModifiedDateTime,hasAttachments,importance,flag";
+        "id,conversationId,subject,toRecipients,ccRecipients,bccRecipients,body,lastModifiedDateTime,hasAttachments,importance,flag,isReadReceiptRequested,isDeliveryReceiptRequested";
     internal const string FolderSelect =
         "id,displayName,unreadItemCount,totalItemCount,childFolderCount";
 
@@ -486,6 +486,8 @@ public sealed class Microsoft365MailProvider(
     {
         subject = draft.Subject,
         importance = draft.Importance.ToString().ToLowerInvariant(),
+        isReadReceiptRequested = draft.RequestReadReceipt,
+        isDeliveryReceiptRequested = draft.RequestDeliveryReceipt,
         flag = new { flagStatus = draft.IsFlagged ? "flagged" : "notFlagged" },
         body = new { contentType = draft.IsHtml ? "HTML" : "Text", content = draft.Body },
         toRecipients = ToGraphRecipients(draft.To),
@@ -626,7 +628,9 @@ public sealed class Microsoft365MailProvider(
                 attachments,
                 ParseImportance(OptionalString(message, "importance")),
                 message.TryGetProperty("flag", out var flag) &&
-                string.Equals(OptionalString(flag, "flagStatus"), "flagged", StringComparison.OrdinalIgnoreCase)),
+                string.Equals(OptionalString(flag, "flagStatus"), "flagged", StringComparison.OrdinalIgnoreCase),
+                message.TryGetProperty("isReadReceiptRequested", out var readReceipt) && readReceipt.GetBoolean(),
+                message.TryGetProperty("isDeliveryReceiptRequested", out var deliveryReceipt) && deliveryReceipt.GetBoolean()),
             updatedAt,
             OptionalString(message, "@odata.etag"),
             hasUnsupportedAttachments,

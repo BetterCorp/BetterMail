@@ -151,6 +151,8 @@ public sealed class Microsoft365MailProviderTests
             {
               "id":"message",
               "subject":"Planning",
+              "isReadReceiptRequested":true,
+              "isDeliveryReceiptRequested":true,
               "parentFolderId":"inbox",
               "receivedDateTime":"2026-07-14T12:00:00Z",
               "from":{"emailAddress":{"name":"Sender","address":"sender@example.com"}},
@@ -237,7 +239,8 @@ public sealed class Microsoft365MailProviderTests
             "<p>Hello</p>",
             true,
             [new("Cc", "cc@example.com")],
-            [new("Bcc", "bcc@example.com")], Importance: BetterMail.Core.MailImportance.High, IsFlagged: true);
+            [new("Bcc", "bcc@example.com")], Importance: BetterMail.Core.MailImportance.High, IsFlagged: true,
+            RequestReadReceipt: true, RequestDeliveryReceipt: true);
 
         Assert.Equal(
             $"me/mailFolders/drafts/messages?$select={Microsoft365MailProvider.DraftSelect}&$top=50",
@@ -249,6 +252,12 @@ public sealed class Microsoft365MailProviderTests
             JsonSerializer.Serialize(Microsoft365MailProvider.BuildMessagePayload(shared, draft)));
         Assert.Equal("HTML", payload.RootElement.GetProperty("body").GetProperty("contentType").GetString());
         Assert.Equal("high", payload.RootElement.GetProperty("importance").GetString());
+        Assert.True(payload.RootElement.GetProperty("isReadReceiptRequested").GetBoolean());
+        Assert.True(payload.RootElement.GetProperty("isDeliveryReceiptRequested").GetBoolean());
+        using var defaults = JsonDocument.Parse(JsonSerializer.Serialize(Microsoft365MailProvider.BuildMessagePayload(shared,
+            draft with { RequestReadReceipt = false, RequestDeliveryReceipt = false })));
+        Assert.False(defaults.RootElement.GetProperty("isReadReceiptRequested").GetBoolean());
+        Assert.False(defaults.RootElement.GetProperty("isDeliveryReceiptRequested").GetBoolean());
         Assert.Equal("flagged", payload.RootElement.GetProperty("flag").GetProperty("flagStatus").GetString());
         Assert.Equal("to@example.com", payload.RootElement.GetProperty("toRecipients")[0]
             .GetProperty("emailAddress").GetProperty("address").GetString());
@@ -272,6 +281,8 @@ public sealed class Microsoft365MailProviderTests
               "conversationId":"conversation-id",
               "@odata.etag":"version-2",
               "subject":"Planning",
+              "isReadReceiptRequested":true,
+              "isDeliveryReceiptRequested":true,
               "lastModifiedDateTime":"2026-07-14T12:30:00Z",
               "body":{"contentType":"html","content":"<p>Hello</p>"},
               "toRecipients":[{"emailAddress":{"name":"To","address":"to@example.com"}}],
@@ -289,6 +300,8 @@ public sealed class Microsoft365MailProviderTests
         Assert.Equal(account.AccountId, draft.AccountId);
         Assert.Equal(mailbox.Id, draft.MailboxId);
         Assert.True(draft.Message.IsHtml);
+        Assert.True(draft.Message.RequestReadReceipt);
+        Assert.True(draft.Message.RequestDeliveryReceipt);
         Assert.Equal("to@example.com", Assert.Single(draft.Message.To).Address);
         Assert.Equal("cc@example.com", Assert.Single(draft.Message.Cc!).Address);
         Assert.Equal("bcc@example.com", Assert.Single(draft.Message.Bcc!).Address);

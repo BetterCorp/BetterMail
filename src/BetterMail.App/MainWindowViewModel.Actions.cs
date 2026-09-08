@@ -5,6 +5,25 @@ namespace BetterMail.App;
 
 public sealed partial class MainWindowViewModel
 {
+    public AsyncCommand<MailAction> CancelBusyActionCommand { get; }
+
+    private async Task CancelBusyActionAsync(MailAction action)
+    {
+        if (_store is null) return;
+        try
+        {
+            if (!await _store.CancelMailActionAsync(action.Id))
+            {
+                await RefreshBusyActionsAsync();
+                return;
+            }
+            await RefreshDraftsAsync();
+            await LoadMessagesAsync();
+            Status = "Action cancelled";
+        }
+        catch (Exception exception) { Error = exception.Message; }
+    }
+
     private async Task RefreshMcpChangesAsync()
     {
         await RefreshDraftsAsync();

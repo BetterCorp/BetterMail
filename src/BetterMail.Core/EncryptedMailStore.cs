@@ -68,6 +68,8 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
             await EnsureColumnAsync(connection, "local_drafts", "send_accepted", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "local_drafts", "importance", "INTEGER NOT NULL DEFAULT 1", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "local_drafts", "is_flagged", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
+            await EnsureColumnAsync(connection, "local_drafts", "request_read_receipt", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
+            await EnsureColumnAsync(connection, "local_drafts", "request_delivery_receipt", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
             await InitializeMailActionsAsync(connection, cancellationToken).ConfigureAwait(false);
             await RunOnceAsync(connection, "thread-index-v1", BackfillThreadIndex, cancellationToken).ConfigureAwait(false);
             _optimizedSearch = await MigrationCompleteAsync(connection, "message-search-v2", cancellationToken).ConfigureAwait(false);
@@ -1179,11 +1181,11 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
                 INSERT INTO local_drafts(
                     id, account_id, mailbox_id, recipients, cc, bcc, subject, body, attachments_json,
                     updated_at, is_html, provider_draft_id, synced_local_updated_at, provider_updated_at, provider_etag, conversation_identity,
-                    sync_status, sync_error, is_queued, send_accepted, importance, is_flagged)
+                    sync_status, sync_error, is_queued, send_accepted, importance, is_flagged, request_read_receipt, request_delivery_receipt)
                 VALUES(
                     $id, $account, $mailbox, $to, $cc, $bcc, $subject, $body, $attachments,
                     $updated, $isHtml, $providerDraft, $syncedLocal, $providerUpdated, $providerETag, $conversationIdentity,
-                    $syncStatus, $syncError, $queued, $accepted, $importance, $flagged)
+                    $syncStatus, $syncError, $queued, $accepted, $importance, $flagged, $readReceipt, $deliveryReceipt)
                 ON CONFLICT(id) DO UPDATE SET
                     account_id = excluded.account_id,
                     mailbox_id = excluded.mailbox_id,
@@ -1221,7 +1223,9 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
                     is_queued = excluded.is_queued,
                     send_accepted = excluded.send_accepted,
                     importance = excluded.importance,
-                    is_flagged = excluded.is_flagged
+                    is_flagged = excluded.is_flagged,
+                    request_read_receipt = excluded.request_read_receipt,
+                    request_delivery_receipt = excluded.request_delivery_receipt
                 WHERE local_drafts.is_queued = 0;
                 """;
             command.Parameters.AddWithValue("$id", draft.Id);
@@ -1246,6 +1250,8 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
             command.Parameters.AddWithValue("$accepted", draft.SendAccepted);
             command.Parameters.AddWithValue("$importance", (int)draft.Importance);
             command.Parameters.AddWithValue("$flagged", draft.IsFlagged);
+            command.Parameters.AddWithValue("$readReceipt", draft.RequestReadReceipt);
+            command.Parameters.AddWithValue("$deliveryReceipt", draft.RequestDeliveryReceipt);
             var saved = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             if (saved > 0 && draft.IsQueued)
                 await WriteActionAsync(connection, transaction, new MailAction("send:" + draft.Id,
@@ -1276,7 +1282,7 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
                 SELECT id, account_id, mailbox_id, recipients, cc, bcc, subject,
                        {(includeAttachments ? "body" : "''")}, {(includeAttachments ? "attachments_json" : "'[]'")},
                        updated_at, is_html, provider_draft_id, synced_local_updated_at, provider_updated_at, provider_etag, conversation_identity,
-                       sync_status, sync_error, is_queued, send_accepted, importance, is_flagged
+                       sync_status, sync_error, is_queued, send_accepted, importance, is_flagged, request_read_receipt, request_delivery_receipt
                 FROM local_drafts WHERE {(id is null ? "NOT EXISTS (SELECT 1 FROM mail_actions WHERE kind = 1 AND item_id = local_drafts.id)" : "id = $id")} ORDER BY updated_at DESC;
                 """;
             if (id is not null)
@@ -1303,7 +1309,7 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
                     reader.IsDBNull(15) ? null : reader.GetString(15),
                     syncStatus,
                     reader.IsDBNull(17) ? null : reader.GetString(17),
-                    reader.GetBoolean(18), reader.GetBoolean(19), (MailImportance)reader.GetInt32(20), reader.GetBoolean(21)));
+                    reader.GetBoolean(18), reader.GetBoolean(19), (MailImportance)reader.GetInt32(20), reader.GetBoolean(21), reader.GetBoolean(22), reader.GetBoolean(23)));
             }
             return drafts;
         }, cancellationToken);

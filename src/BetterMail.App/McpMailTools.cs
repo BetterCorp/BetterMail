@@ -159,7 +159,7 @@ internal sealed class McpMailTools(
         var renderer = new MailContentRenderer();
         var outgoing = renderer.PrepareOutgoingHtml(renderer.PrepareComposeHtml(draft.Body, draft.IsHtml), draft.Attachments);
         var message = new DraftMessage(draft.Subject, MailAddressList.Parse(Recipients(draft.To)), outgoing.Html, true,
-            MailAddressList.Parse(Recipients(draft.Cc)), MailAddressList.Parse(Recipients(draft.Bcc)), outgoing.Attachments, draft.Importance, draft.IsFlagged);
+            MailAddressList.Parse(Recipients(draft.Cc)), MailAddressList.Parse(Recipients(draft.Bcc)), outgoing.Attachments, draft.Importance, draft.IsFlagged, draft.RequestReadReceipt, draft.RequestDeliveryReceipt);
         if (message.To.Count == 0) throw new McpException("Add at least one To recipient before sending.");
         Authorize(mailboxId, write: true, send: true);
         await queueSend(sender, draftId, message);

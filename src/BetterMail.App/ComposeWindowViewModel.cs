@@ -28,6 +28,8 @@ public sealed class ComposeWindowViewModel : ViewModelBase
     private bool _isSending;
     private MailImportance _importance;
     private bool _isFlagged;
+    private bool _requestReadReceipt;
+    private bool _requestDeliveryReceipt;
     private bool _manageSignature;
     private string? _managedSignatureBlock;
 
@@ -58,6 +60,8 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         _subject = request.Subject;
         _importance = request.Importance;
         _isFlagged = request.IsFlagged;
+        _requestReadReceipt = request.RequestReadReceipt;
+        _requestDeliveryReceipt = request.RequestDeliveryReceipt;
         _body = _renderer.PrepareComposeHtml(request.Body, request.IsHtml);
         _draftId = request.DraftId ?? Guid.NewGuid().ToString("N");
         _send = send;
@@ -96,6 +100,9 @@ public sealed class ComposeWindowViewModel : ViewModelBase
     public ICommand RemoveAttachmentCommand { get; }
     public IReadOnlyList<MailImportance> ImportanceLevels { get; } = Enum.GetValues<MailImportance>();
     public MailImportance Importance { get => _importance; set => SetAndSchedule(ref _importance, value); }
+    public bool SupportsReceipts => SelectedSender?.Account.ProviderId == "microsoft365";
+    public bool RequestReadReceipt { get => SupportsReceipts && _requestReadReceipt; set => SetAndSchedule(ref _requestReadReceipt, value); }
+    public bool RequestDeliveryReceipt { get => SupportsReceipts && _requestDeliveryReceipt; set => SetAndSchedule(ref _requestDeliveryReceipt, value); }
     public bool SupportsFollowUpFlag => SelectedSender?.Account.ProviderId == "microsoft365";
     public bool IsFlagged { get => SupportsFollowUpFlag && _isFlagged; set => SetAndSchedule(ref _isFlagged, value); }
 
@@ -111,6 +118,9 @@ public sealed class ComposeWindowViewModel : ViewModelBase
                 ApplySignatureForSender(value);
                 RaisePropertyChanged(nameof(SupportsFollowUpFlag));
                 RaisePropertyChanged(nameof(IsFlagged));
+                RaisePropertyChanged(nameof(SupportsReceipts));
+                RaisePropertyChanged(nameof(RequestReadReceipt));
+                RaisePropertyChanged(nameof(RequestDeliveryReceipt));
                 ScheduleAutosave();
             }
         }
@@ -265,7 +275,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
                 IsHtml: true,
                 cc,
                 bcc,
-                outgoing.Attachments, Importance, IsFlagged));
+                outgoing.Attachments, Importance, IsFlagged, RequestReadReceipt, RequestDeliveryReceipt));
             _sent = true;
             Sent?.Invoke(this, EventArgs.Empty);
         }
@@ -404,7 +414,8 @@ public sealed class ComposeWindowViewModel : ViewModelBase
                 Attachments.ToArray(),
                 DateTimeOffset.UtcNow,
                 IsHtml: true,
-                ConversationIdentity: _conversationIdentity, Importance: Importance, IsFlagged: IsFlagged));
+                ConversationIdentity: _conversationIdentity, Importance: Importance, IsFlagged: IsFlagged,
+                RequestReadReceipt: RequestReadReceipt, RequestDeliveryReceipt: RequestDeliveryReceipt));
             DraftStatus = "Saved";
         }
         finally
@@ -444,7 +455,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         !string.IsNullOrWhiteSpace(Bcc) ||
         !string.IsNullOrWhiteSpace(Subject) ||
         !string.IsNullOrWhiteSpace(Body) ||
-        Attachments.Count > 0 || Importance != MailImportance.Normal || IsFlagged;
+        Attachments.Count > 0 || Importance != MailImportance.Normal || IsFlagged || RequestReadReceipt || RequestDeliveryReceipt;
 
     public static IReadOnlyList<BetterMail.Core.MailAddress> ParseRecipients(string value) => MailAddressList.Parse(value);
 }

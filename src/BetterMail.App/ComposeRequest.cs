@@ -24,7 +24,9 @@ public sealed record ComposeRequest(
     ComposeIntent Intent = ComposeIntent.NewMail,
     string? ConversationIdentity = null,
     MailImportance Importance = MailImportance.Normal,
-    bool IsFlagged = false);
+    bool IsFlagged = false,
+    bool RequestReadReceipt = false,
+    bool RequestDeliveryReceipt = false);
 
 public sealed record ComposeSender(MailAccount Account, Mailbox Mailbox)
 {

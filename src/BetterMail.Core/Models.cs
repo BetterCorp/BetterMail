@@ -165,7 +165,9 @@ public sealed record DraftMessage(
     IReadOnlyList<MailAddress>? Bcc = null,
     IReadOnlyList<DraftAttachment>? Attachments = null,
     MailImportance Importance = MailImportance.Normal,
-    bool IsFlagged = false);
+    bool IsFlagged = false,
+    bool RequestReadReceipt = false,
+    bool RequestDeliveryReceipt = false);
 
 public sealed record CloudDraft(
     string ProviderId,
@@ -213,7 +215,9 @@ public sealed record LocalDraft(
     bool IsQueued = false,
     bool SendAccepted = false,
     MailImportance Importance = MailImportance.Normal,
-    bool IsFlagged = false)
+    bool IsFlagged = false,
+    bool RequestReadReceipt = false,
+    bool RequestDeliveryReceipt = false)
 {
     public string KindText => IsQueued ? "Queued" : "Draft";
     public string DisplaySubject => string.IsNullOrWhiteSpace(Subject) ? "(no subject)" : Subject;
