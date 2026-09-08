@@ -97,6 +97,22 @@
               <TextBlock Text="Keep the key private; it grants the permissions selected above. After replacing it, copy the new header value into your client and restart the connection." TextWrapping="Wrap" Opacity="0.7" />
             </StackPanel>
           </Border>
+          <Border Classes="settingsCard" IsEnabled="{Binding IsAvailable}">
+            <StackPanel Spacing="10">
+              <TextBlock Text="BetterTunnels public MCP link" FontSize="18" FontWeight="SemiBold" />
+              <TextBlock Text="Requires a BetterTunnels Senior account. Sign in, then create a link to explicitly enable remote access. BetterMail must stay open. Enabled links reconnect automatically on startup." TextWrapping="Wrap" />
+              <WrapPanel>
+                <Button Content="Sign in to BetterTunnels" Command="{Binding SignInTunnelCommand}" Margin="0,0,8,8" />
+                <Button Content="Create public link" Command="{Binding StartTunnelCommand}" Margin="0,0,8,8" />
+                <Button Content="Stop public link" Command="{Binding StopTunnelCommand}" Margin="0,0,8,8" />
+                <Button Content="Sign out" Command="{Binding SignOutTunnelCommand}" Margin="0,0,8,8" />
+              </WrapPanel>
+              <TextBlock Text="{Binding TunnelStatus}" TextWrapping="Wrap" AutomationProperties.Name="BetterTunnels status" />
+              <TextBox Text="{Binding PublicEndpointUrl}" IsReadOnly="True" AutomationProperties.Name="Public MCP endpoint URL" />
+              <Button Content="Copy public link" Click="CopyMcpValueClicked" CommandParameter="public" />
+              <TextBlock Text="Use this HTTPS URL in your MCP client with the same Authorization header shown above. Your mailbox and editing permissions still apply. Stopping the link keeps local MCP available." TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
           <TextBlock Text="{Binding Status}" TextWrapping="Wrap" AutomationProperties.Name="MCP status" />
         </StackPanel>
       </ScrollViewer>

@@ -1,11 +1,18 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
+using System.Net.WebSockets;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 using BetterMail.App;
 using BetterMail.Core;
 using Microsoft.Data.Sqlite;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -52,6 +59,8 @@ public sealed class McpTests
                 var changed = await store.GetMcpConfigurationAsync(token);
                 Assert.Equal(endpointPath, changed.EndpointPath);
                 Assert.NotEqual(originalAccessKey, changed.AccessKey);
+                Assert.Equal(new BetterTunnelsConfiguration(), await store.GetBetterTunnelsConfigurationAsync(token));
+                await store.SaveBetterTunnelsConfigurationAsync(new(true, "test-device-token", "test@example.com"), token);
             }
             await using (var restarted = new EncryptedMailStore(path, databaseKey))
             {
@@ -59,10 +68,137 @@ public sealed class McpTests
                 var saved = await restarted.GetMcpConfigurationAsync(token);
                 Assert.Equal(endpointPath, saved.EndpointPath);
                 Assert.Equal(47832, saved.Configuration.Port);
+                Assert.Equal(new BetterTunnelsConfiguration(true, "test-device-token", "test@example.com"), await restarted.GetBetterTunnelsConfigurationAsync(token));
             }
             await WithStore(async independent => Assert.NotEqual(endpointPath, (await independent.GetMcpConfigurationAsync()).EndpointPath));
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
+    }
+
+    [Fact]
+    public async Task BetterTunnelsSignInRelayReconnectAndEntitlementPreserveMcpSecurity()
+    {
+        await WithStore(async store =>
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(40));
+            var ct = timeout.Token;
+            var saved = await store.GetMcpConfigurationAsync(ct);
+            var key = saved.AccessKey;
+            var tools = new McpMailTools(store, () => new(Enabled: true), () => Task.CompletedTask, (_, _, _) => Task.CompletedTask);
+            await using var endpoint = new McpEndpoint(tools, 0, saved.EndpointPath, () => true, () => key);
+            await endpoint.StartAsync(ct);
+            var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { Args = [] });
+            builder.Configuration.Sources.Clear();
+            builder.Logging.ClearProviders();
+            builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+            await using var server = builder.Build();
+            server.UseWebSockets();
+            var sockets = Channel.CreateUnbounded<(WebSocket Socket, TaskCompletionSource Done)>();
+            var package = "junior";
+            server.MapPost("/api/client/auth/start", () => Results.Json(new { sessionId = "test-session", pollSecret = "poll-secret", browserUrl = "https://betterportal.dev/sign-in", expiresAt = DateTimeOffset.UtcNow.AddMinutes(10) }));
+            server.MapGet("/api/client/auth/status", (HttpContext context) =>
+                context.Request.Headers.Authorization == "Bearer poll-secret" && context.Request.Query["sessionId"] == "test-session"
+                    ? Results.Json(new { status = "approved", token = "test-device-token", bpUserEmail = "test@example.com" }) : Results.Unauthorized());
+            server.MapGet("/api/client/profile", (HttpContext context) =>
+                context.Request.Headers.Authorization == "Bearer test-device-token" ? Results.Json(new { package }) : Results.Unauthorized());
+            server.Map("/api/client/ws", async (HttpContext context) =>
+            {
+                Assert.Equal("true", context.Request.Query["authenticated"]);
+                Assert.Equal("test-device-token", context.Request.Query["token"]);
+                Assert.Equal("127.0.0.1", context.Request.Query["targetHost"]);
+                using var socket = await context.WebSockets.AcceptWebSocketAsync();
+                var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                await socket.SendAsync(JsonSerializer.SerializeToUtf8Bytes(new { type = "tunnel.ready", validation = "none", publicUrl = "https://test.tunnels.betterportal.dev" }).AsMemory(), WebSocketMessageType.Text, true, ct);
+                await sockets.Writer.WriteAsync((socket, done), ct);
+                await done.Task.WaitAsync(ct);
+            });
+            await server.StartAsync(ct);
+            using var tunnel = new BetterTunnelsClient(new Uri(server.Urls.Single()));
+            var opened = false;
+            var account = await tunnel.SignInAsync(uri => { Assert.Equal("https", uri.Scheme); opened = true; }, ct);
+            Assert.True(opened);
+            Assert.Equal("test-device-token", account.Token);
+            Assert.Equal("junior", await tunnel.GetPackageAsync(account.Token, ct));
+            var statuses = Channel.CreateUnbounded<(string Status, string Url)>();
+            await tunnel.RunAsync(account.Token, new(endpoint.Address), (status, url) => statuses.Writer.TryWrite((status, url)), ct);
+            Assert.False(sockets.Reader.TryRead(out _));
+            Assert.Contains("Senior", (await statuses.Reader.ReadAsync(ct)).Status);
+            Assert.Contains("require", (await statuses.Reader.ReadAsync(ct)).Status);
+            package = "senior";
+            var running = tunnel.RunAsync(account.Token, new(endpoint.Address), (status, url) => statuses.Writer.TryWrite((status, url)), ct);
+            var connection = await sockets.Reader.ReadAsync(ct);
+            try
+            {
+                (string Status, string Url) status;
+                do { status = await statuses.Reader.ReadAsync(ct); } while (status.Url.Length == 0);
+                Assert.Equal("https://test.tunnels.betterportal.dev" + saved.EndpointPath, status.Url);
+                async Task<(int Status, string Body, string? Error)> Request(string? accessKey, string? origin = null, string? path = null)
+                {
+                    var headers = new Dictionary<string, string> { ["host"] = "test.tunnels.betterportal.dev", ["accept"] = "application/json, text/event-stream", ["content-type"] = "application/json" };
+                    if (accessKey is not null) headers["authorization"] = "Bearer " + accessKey;
+                    if (origin is not null) headers["origin"] = origin;
+                    var body = Convert.ToBase64String(Encoding.UTF8.GetBytes("""{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"""));
+                    await connection.Socket.SendAsync(JsonSerializer.SerializeToUtf8Bytes(new { type = "request.start", requestId = Guid.NewGuid().ToString(), method = "POST", path = path ?? saved.EndpointPath, headers, body }).AsMemory(), WebSocketMessageType.Text, true, ct);
+                    var status = 0;
+                    var output = new StringBuilder();
+                    while (true)
+                    {
+                        using var stream = new MemoryStream();
+                        var bytes = new byte[4096];
+                        ValueWebSocketReceiveResult received;
+                        do { received = await connection.Socket.ReceiveAsync(bytes.AsMemory(), ct); stream.Write(bytes, 0, received.Count); } while (!received.EndOfMessage);
+                        using var frame = JsonDocument.Parse(stream.ToArray());
+                        var root = frame.RootElement;
+                        switch (root.GetProperty("type").GetString())
+                        {
+                            case "response.start": status = root.GetProperty("status").GetInt32(); break;
+                            case "response.body": output.Append(Encoding.UTF8.GetString(Convert.FromBase64String(root.GetProperty("body").GetString()!))); break;
+                            case "response.end": return (status, output.ToString(), null);
+                            case "error": return (status, output.ToString(), root.GetProperty("message").GetString());
+                        }
+                    }
+                }
+                Assert.Equal(401, (await Request(null)).Status);
+                Assert.Equal(401, (await Request("wrong")).Status);
+                Assert.Equal(403, (await Request(key, "https://attacker.example")).Status);
+                var initialized = await Request(key);
+                Assert.Equal(200, initialized.Status);
+                Assert.Contains("protocolVersion", initialized.Body);
+                Assert.NotNull((await Request(key, path: "/mcp")).Error);
+                Assert.NotNull((await Request(key, path: "//attacker.example/")).Error);
+                var oldKey = key;
+                key = await store.RotateMcpAccessKeyAsync(ct);
+                Assert.Equal(401, (await Request(oldKey)).Status);
+                Assert.Equal(200, (await Request(key)).Status);
+                await connection.Socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "test reconnect", ct);
+            }
+            finally { connection.Done.TrySetResult(); }
+            connection = await sockets.Reader.ReadAsync(ct);
+            package = "junior";
+            await connection.Socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "recheck entitlement", ct);
+            connection.Done.TrySetResult();
+            await running.WaitAsync(ct);
+            (string Status, string Url) last = ("", "missing");
+            while (statuses.Reader.TryRead(out var next)) last = next;
+            Assert.Contains("require", last.Status);
+            Assert.Empty(last.Url);
+            Assert.False(sockets.Reader.TryRead(out _));
+            package = "senior";
+            using var stopped = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var restarted = tunnel.RunAsync(account.Token, new(endpoint.Address), (_, _) => { }, stopped.Token);
+            connection = await sockets.Reader.ReadAsync(ct);
+            try
+            {
+                await stopped.CancelAsync();
+                await restarted.WaitAsync(ct);
+                var bytes = new byte[1];
+                // Stop/app exit tears down the actual server connection, not just the displayed URL.
+                await Assert.ThrowsAsync<WebSocketException>(async () => await connection.Socket.ReceiveAsync(bytes.AsMemory(), ct));
+            }
+            finally { connection.Done.TrySetResult(); }
+            await server.StopAsync(ct);
+        });
     }
 
     [Fact]
@@ -90,6 +226,9 @@ public sealed class McpTests
             settings.Enabled = true;
             Assert.Contains("Disabled", settings.Status);
             Assert.False((await store.GetMcpConfigurationAsync()).Configuration.Enabled);
+            await settings.StartTunnelCommand.ExecuteAsync();
+            Assert.Contains("Enable MCP", settings.TunnelStatus);
+            Assert.False((await store.GetBetterTunnelsConfigurationAsync()).Enabled);
             await settings.ApplyCommand.ExecuteAsync();
             Assert.Contains("MCP stopped", settings.Status);
             reserved.Stop();
@@ -99,6 +238,13 @@ public sealed class McpTests
             using var http = new HttpClient();
             using var unauthorized = await http.GetAsync(settings.EndpointUrl, TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
+            await store.SaveBetterTunnelsConfigurationAsync(new(true, "test-device-token", "test@example.com"));
+            await settings.StopTunnelCommand.ExecuteAsync();
+            Assert.Equal(new BetterTunnelsConfiguration(false, "test-device-token", "test@example.com"), await store.GetBetterTunnelsConfigurationAsync());
+            using var stillLocal = await http.GetAsync(settings.EndpointUrl, TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.Unauthorized, stillLocal.StatusCode);
+            await settings.SignOutTunnelCommand.ExecuteAsync();
+            Assert.Equal(new BetterTunnelsConfiguration(), await store.GetBetterTunnelsConfigurationAsync());
 
             await settings.RotateKeyCommand.ExecuteAsync();
             var rotated = await store.GetMcpConfigurationAsync();

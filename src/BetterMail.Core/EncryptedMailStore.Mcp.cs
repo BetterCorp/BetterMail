@@ -11,6 +11,8 @@ public sealed record McpConfiguration(
     bool AllowSending = false,
     string[]? MailboxIds = null);
 
+public sealed record BetterTunnelsConfiguration(bool Enabled = false, string Token = "", string Email = "");
+
 public sealed partial class EncryptedMailStore
 {
     public Task<MailAction?> GetMailActionAsync(string id, CancellationToken cancellationToken = default) =>
@@ -30,6 +32,7 @@ public sealed partial class EncryptedMailStore
                 id INTEGER PRIMARY KEY CHECK(id = 1), configuration_json TEXT NOT NULL, access_key TEXT NOT NULL);
             """, cancellationToken).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "mcp_settings", "endpoint_path", "TEXT", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "mcp_settings", "tunnel_json", "TEXT", cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT OR IGNORE INTO mcp_settings(id, configuration_json, access_key, endpoint_path)
@@ -74,5 +77,25 @@ public sealed partial class EncryptedMailStore
             command.Parameters.AddWithValue("$key", accessKey);
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             return accessKey;
+        }, cancellationToken);
+
+    public Task<BetterTunnelsConfiguration> GetBetterTunnelsConfigurationAsync(CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            await EnsureMcpSettingsAsync(connection, cancellationToken).ConfigureAwait(false);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT tunnel_json FROM mcp_settings WHERE id = 1;";
+            return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is string json
+                ? JsonSerializer.Deserialize<BetterTunnelsConfiguration>(json) ?? new() : new();
+        }, cancellationToken);
+
+    public Task SaveBetterTunnelsConfigurationAsync(BetterTunnelsConfiguration configuration, CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            await EnsureMcpSettingsAsync(connection, cancellationToken).ConfigureAwait(false);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE mcp_settings SET tunnel_json = $settings WHERE id = 1;";
+            command.Parameters.AddWithValue("$settings", JsonSerializer.Serialize(configuration));
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }, cancellationToken);
 }

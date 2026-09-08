@@ -130,8 +130,9 @@ Save and restart the MCP connection. In **ChatGPT desktop > Settings > MCP serve
 Attaching `@BetterMail` as a desktop window selects computer control, which is separate from MCP.
 ChatGPT in a browser does not read this local MCP configuration.
 
-For the current BetterTunnels Host-header setup and the proposed Senior-only public
-link integration, see [BetterTunnels MCP setup](docs/mcp-bettertunnels.md).
+For a public HTTPS endpoint, use **Settings > MCP > BetterTunnels public MCP link**.
+Sign in with a Senior account, then select **Create public link**. See
+[BetterTunnels MCP setup](docs/mcp-bettertunnels.md) for connection and account details.
 
 **Replace access key** immediately revokes the previous key for new requests. Update the header
 in your client and restart its connection after replacing the key.

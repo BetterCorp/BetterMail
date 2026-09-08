@@ -107,6 +107,7 @@ public sealed partial class SettingsView : UserControl
             {
                 "header" => "Bearer " + settings.AccessKey,
                 "key" => settings.AccessKey,
+                "public" => settings.PublicEndpointUrl,
                 _ => settings.EndpointUrl
             });
         }

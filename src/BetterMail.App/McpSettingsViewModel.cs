@@ -11,7 +11,7 @@ public sealed class McpMailboxChoice(Mailbox mailbox, bool selected) : ViewModel
     public bool IsSelected { get => _selected; set => SetProperty(ref _selected, value); }
 }
 
-public sealed class McpSettingsViewModel : ViewModelBase, IAsyncDisposable
+public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposable
 {
     private readonly EncryptedMailStore? _store;
     private readonly Func<Task> _refreshAndSync;
@@ -36,6 +36,10 @@ public sealed class McpSettingsViewModel : ViewModelBase, IAsyncDisposable
         _queueSend = queueSend;
         ApplyCommand = new(ApplyAsync, () => IsAvailable);
         RotateKeyCommand = new(RotateKeyAsync, () => IsAvailable);
+        SignInTunnelCommand = new(SignInTunnelAsync, () => IsAvailable);
+        StartTunnelCommand = new(StartTunnelAsync, () => IsAvailable);
+        StopTunnelCommand = new(() => StopTunnelAsync(false), () => IsAvailable);
+        SignOutTunnelCommand = new(() => StopTunnelAsync(true), () => IsAvailable);
     }
 
     public bool IsAvailable => _store is not null && _initialized && !_disposed;
@@ -70,6 +74,7 @@ public sealed class McpSettingsViewModel : ViewModelBase, IAsyncDisposable
             RaisePropertyChanged(nameof(IsAvailable));
             ApplyCommand.Refresh();
             RotateKeyCommand.Refresh();
+            RefreshTunnelCommands();
         }
         catch (Exception exception) { Status = "MCP unavailable: " + exception.Message; }
     }
@@ -100,6 +105,7 @@ public sealed class McpSettingsViewModel : ViewModelBase, IAsyncDisposable
             if (_store is null || _disposed) return;
             // Revoke new requests before waiting for the old listener to drain.
             Volatile.Write(ref _active, new());
+            await DisconnectTunnelAsync();
             if (_endpoint is { } previous)
             {
                 _endpoint = null;
@@ -118,6 +124,7 @@ public sealed class McpSettingsViewModel : ViewModelBase, IAsyncDisposable
             _endpoint = new(tools, configuration.Port, _endpointPath, () => Volatile.Read(ref _active).Enabled, () => Volatile.Read(ref _accessKey));
             await _endpoint.StartAsync();
             Status = $"Listening at {_endpoint.Address} · {configuration.MailboxIds?.Length ?? 0} allowed mailboxes";
+            await RestoreTunnelAsync();
         }
         catch (Exception exception)
         {
@@ -148,11 +155,13 @@ public sealed class McpSettingsViewModel : ViewModelBase, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        _loginCancellation?.Cancel();
         Volatile.Write(ref _active, new());
         await _gate.WaitAsync();
         try
         {
             _disposed = true;
+            await DisconnectTunnelAsync();
             if (_endpoint is { } endpoint)
             {
                 _endpoint = null;
