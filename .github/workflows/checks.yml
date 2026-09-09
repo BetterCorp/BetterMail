@@ -36,6 +36,16 @@ jobs:
           cache-dependency-path: Directory.Packages.props
       - run: dotnet restore BetterMail.slnx
       - run: dotnet build BetterMail.slnx --configuration Release --no-restore -m:1
+      - name: Inspect Windows runtime dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' | Select-Object ProductName, InstallationType
+          foreach ($library in @('RoMetadata.dll', 'Microsoft.WindowsAppRuntime.dll')) {
+            $path = if ($library -eq 'RoMetadata.dll') { Join-Path $env:WINDIR "System32/$library" } else { (Get-ChildItem tests/BetterMail.Tests/bin/Release -Recurse -Filter $library | Select-Object -First 1).FullName }
+            Write-Host "$library at $path exists: $(Test-Path $path)"
+            try { $handle = [System.Runtime.InteropServices.NativeLibrary]::Load($path); [System.Runtime.InteropServices.NativeLibrary]::Free($handle); Write-Host 'Loaded successfully' } catch { Write-Host $_ }
+          }
       - name: Upload Windows runtime diagnostics
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
