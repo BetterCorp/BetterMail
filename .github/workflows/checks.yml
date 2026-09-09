@@ -36,6 +36,13 @@ jobs:
           cache-dependency-path: Directory.Packages.props
       - run: dotnet restore BetterMail.slnx
       - run: dotnet build BetterMail.slnx --configuration Release --no-restore -m:1
+      - name: Upload Windows runtime diagnostics
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-runtime
+          path: tests/BetterMail.Tests/bin/Release/
+          retention-days: 1
       - name: Run tests
         timeout-minutes: 3
         run: dotnet run --project tests/BetterMail.Tests --configuration Release --no-build -- -reporter verbose -longRunning 30
