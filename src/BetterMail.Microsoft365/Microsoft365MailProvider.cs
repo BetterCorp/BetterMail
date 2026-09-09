@@ -480,8 +480,10 @@ public sealed class Microsoft365MailProvider(
         try
         {
             using var document = await GetJsonAsync(account,
-                $"{DraftEndpoint(account, mailbox, draftId)}?$select=isDraft", cancellationToken).ConfigureAwait(false);
-            return document.RootElement.TryGetProperty("isDraft", out var isDraft) && isDraft.ValueKind == JsonValueKind.False;
+                $"{DraftEndpoint(account, mailbox, draftId)}?$select=isDraft,parentFolderId", cancellationToken).ConfigureAwait(false);
+            using var sentFolder = await GetJsonAsync(account,
+                $"{MailboxPath(account, mailbox)}/mailFolders/sentitems?$select=id", cancellationToken).ConfigureAwait(false);
+            return IsSentMessage(document.RootElement, RequiredString(sentFolder.RootElement, "id"));
         }
         catch (HttpRequestException error) when (error.StatusCode == HttpStatusCode.NotFound)
         {
@@ -489,6 +491,11 @@ public sealed class Microsoft365MailProvider(
             return false;
         }
     }
+
+    internal static bool IsSentMessage(JsonElement message, string sentFolderId) =>
+        message.TryGetProperty("isDraft", out var isDraft) && isDraft.ValueKind == JsonValueKind.False &&
+        message.TryGetProperty("parentFolderId", out var folder) && folder.ValueKind == JsonValueKind.String &&
+        !string.IsNullOrWhiteSpace(sentFolderId) && folder.GetString() == sentFolderId;
 
     public Task SendDraftAsync(
         MailAccount account,
