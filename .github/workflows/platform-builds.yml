@@ -40,7 +40,7 @@ permissions:
 jobs:
   windows:
     name: Build Windows
-    runs-on: blacksmith-2vcpu-windows-2025
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
