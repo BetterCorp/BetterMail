@@ -26,7 +26,13 @@ public sealed partial class MainWindowViewModel
                 await _store.DeleteLocalDraftAsync(action.ItemId);
             }
             else
-                await _store.ReturnUnconfirmedSendToDraftAsync(action.Id);
+            {
+                var account = Accounts.Single(account => account.AccountId == action.AccountId);
+                var mailbox = Mailboxes.Single(mailbox => mailbox.Id == action.MailboxId);
+                if (_provider is null) throw new InvalidOperationException("Reconnect the account before returning this message to drafts.");
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                await new OutboxService(_provider, _store).ReturnToDraftAsync(account, mailbox, action.Id, timeout.Token);
+            }
             await RefreshDraftsAsync();
             Status = sent ? "Send marked as confirmed" : "Returned to drafts. Check Sent before sending again.";
         }

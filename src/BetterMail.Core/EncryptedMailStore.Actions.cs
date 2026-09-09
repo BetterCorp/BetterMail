@@ -181,7 +181,7 @@ public sealed partial class EncryptedMailStore
             await WriteActionAsync(connection, null, action with { SendAttempted = false, Running = false, Error = error }, cancellationToken).ConfigureAwait(false);
         }, cancellationToken);
 
-    public Task<bool> ReturnUnconfirmedSendToDraftAsync(string actionId, CancellationToken cancellationToken = default) =>
+    public Task<bool> ReturnUnconfirmedSendToDraftAsync(string actionId, bool clearProviderMapping = false, CancellationToken cancellationToken = default) =>
         WithLockAsync(async connection =>
         {
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
@@ -191,14 +191,18 @@ public sealed partial class EncryptedMailStore
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = """
-                UPDATE local_drafts SET is_queued = 0, provider_draft_id = NULL,
-                    synced_local_updated_at = NULL, provider_updated_at = NULL, provider_etag = NULL,
+                UPDATE local_drafts SET is_queued = 0,
+                    provider_draft_id = CASE WHEN $clear THEN NULL ELSE provider_draft_id END,
+                    synced_local_updated_at = CASE WHEN $clear THEN NULL ELSE synced_local_updated_at END,
+                    provider_updated_at = CASE WHEN $clear THEN NULL ELSE provider_updated_at END,
+                    provider_etag = CASE WHEN $clear THEN NULL ELSE provider_etag END,
                     sync_status = NULL, sync_error = NULL
                 WHERE id = $item AND send_accepted = 0;
                 DELETE FROM mail_actions WHERE id = $id;
                 """;
             command.Parameters.AddWithValue("$item", action.ItemId);
             command.Parameters.AddWithValue("$id", action.Id);
+            command.Parameters.AddWithValue("$clear", clearProviderMapping);
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return true;

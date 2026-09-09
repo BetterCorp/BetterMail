@@ -25,13 +25,30 @@ public sealed class OutboxServiceTests
             provider.SendError = null;
             await new OutboxService(provider, restarted).ProcessAsync(account, mailbox, "draft");
             Assert.Equal(1, provider.Sends);
-            Assert.True(await restarted.ReturnUnconfirmedSendToDraftAsync(action.Id));
+            Assert.True(await new OutboxService(provider, restarted).ReturnToDraftAsync(account, mailbox, action.Id));
             var draft = Assert.Single(await restarted.GetLocalDraftsAsync());
             Assert.False(draft.IsQueued);
             Assert.Null(draft.ProviderDraftId);
             Assert.Equal("attachment"u8.ToArray(), Assert.Single(draft.Attachments).ContentBytes);
             await new OutboxService(provider, restarted).ProcessAsync(account, mailbox, "draft");
             Assert.Equal(1, provider.Sends);
+        });
+    }
+
+    [Fact]
+    public async Task ReturningUnconfirmedSendPreservesExistingCloudDraftWithoutDuplication()
+    {
+        await WithStore(async (store, _, account, mailbox) =>
+        {
+            await Queue(store, account, mailbox);
+            var provider = new Provider { SupportsCloudDrafts = true, KeepRemoteDraft = true, SendError = new HttpRequestException("Offline") };
+            var service = new OutboxService(provider, store);
+            await service.ProcessAsync(account, mailbox, "draft");
+            Assert.True(await service.ReturnToDraftAsync(account, mailbox, "send:draft"));
+            Assert.Equal("remote", Assert.Single(await store.GetLocalDraftsAsync()).ProviderDraftId);
+            await new DraftSynchronizationService(provider, store).SynchronizeAsync(account, mailbox);
+            Assert.Equal(1, provider.Creates);
+            Assert.Single(await store.GetLocalDraftsAsync());
         });
     }
 
@@ -127,8 +144,18 @@ public sealed class OutboxServiceTests
         public Exception? SendError { get; set; }
         public bool SentConfirmed { get; set; }
         public int Sends { get; private set; }
+        public int Creates { get; private set; }
+        public bool KeepRemoteDraft { get; init; }
+        private CloudDraft? _remote;
+        public Task<IReadOnlyList<CloudDraft>> GetDraftsAsync(MailAccount account, Mailbox mailbox, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<CloudDraft>>(KeepRemoteDraft && _remote is not null ? [_remote] : []);
         public Task<bool> IsDraftSentAsync(MailAccount account, Mailbox mailbox, string draftId, CancellationToken cancellationToken = default) => Task.FromResult(SentConfirmed);
-        public Task<CloudDraft> CreateDraftAsync(MailAccount account, Mailbox mailbox, DraftMessage draft, CancellationToken cancellationToken = default) => Task.FromResult(new CloudDraft("remote", account.AccountId, mailbox.Id, draft, DateTimeOffset.UtcNow));
+        public Task<CloudDraft> CreateDraftAsync(MailAccount account, Mailbox mailbox, DraftMessage draft, CancellationToken cancellationToken = default)
+        {
+            Creates++;
+            _remote = new CloudDraft("remote", account.AccountId, mailbox.Id, draft, DateTimeOffset.UtcNow);
+            return Task.FromResult(_remote);
+        }
         public Task SendDraftAsync(MailAccount account, Mailbox mailbox, string draftId, CancellationToken cancellationToken = default) => Send();
         public Task SendAsync(MailAccount account, Mailbox mailbox, DraftMessage draft, CancellationToken cancellationToken = default) => Send();
         private Task Send() { Sends++; return SendError is { } error ? Task.FromException(error) : Task.CompletedTask; }

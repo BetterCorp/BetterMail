@@ -36,7 +36,9 @@ jobs:
           cache-dependency-path: Directory.Packages.props
       - run: dotnet restore BetterMail.slnx
       - run: dotnet build BetterMail.slnx --configuration Release --no-restore -m:1
-      - run: dotnet run --project tests/BetterMail.Tests --configuration Release --no-build
+      - name: Run tests
+        timeout-minutes: 3
+        run: dotnet run --project tests/BetterMail.Tests --configuration Release --no-build -- -reporter verbose -longRunning 30
       - name: Publish smoke artifact
         run: dotnet publish src/BetterMail.App --configuration Release --no-restore --output artifacts/smoke -p:UseAppHost=false
       - name: Install Linux desktop libraries

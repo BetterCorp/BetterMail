@@ -5,6 +5,26 @@ namespace BetterMail.Core;
 // The caller serializes this with draft editing/synchronization for the owning mailbox.
 public sealed class OutboxService(IMailProvider provider, EncryptedMailStore store)
 {
+    public async Task<bool> ReturnToDraftAsync(MailAccount account, Mailbox mailbox, string actionId,
+        CancellationToken cancellationToken = default)
+    {
+        var action = await store.GetMailActionAsync(actionId, cancellationToken).ConfigureAwait(false);
+        if (action is not { NeedsSendReview: true }) return false;
+        if (action.AccountId != account.AccountId || action.MailboxId != mailbox.Id || mailbox.AccountId != account.AccountId)
+            throw new InvalidOperationException("The queued draft belongs to another mailbox.");
+        var clearMapping = false;
+        if (action.ProviderId is not null)
+        {
+            // A complete draft listing is authoritative about which IDs are still drafts.
+            // Lookup failures leave the queued item and its mapping untouched.
+            var drafts = await provider.GetDraftsAsync(account, mailbox, cancellationToken).ConfigureAwait(false);
+            if (drafts.Any(draft => draft.AccountId != account.AccountId || draft.MailboxId != mailbox.Id))
+                throw new InvalidOperationException("The provider returned a draft owned by another mailbox.");
+            clearMapping = drafts.All(draft => draft.ProviderId != action.ProviderId);
+        }
+        return await store.ReturnUnconfirmedSendToDraftAsync(actionId, clearMapping, cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task ProcessAsync(MailAccount account, Mailbox mailbox, string draftId,
         CancellationToken cancellationToken = default)
     {

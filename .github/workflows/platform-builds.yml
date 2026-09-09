@@ -50,7 +50,8 @@ jobs:
           cache-dependency-path: Directory.Packages.props
       - run: dotnet tool restore
       - name: Test
-        run: dotnet run --project tests/BetterMail.Tests --configuration Release
+        timeout-minutes: 5
+        run: dotnet run --project tests/BetterMail.Tests --configuration Release -- -reporter verbose -longRunning 30
       - name: Package Windows
         shell: pwsh
         env:
@@ -107,7 +108,8 @@ jobs:
           cache-dependency-path: Directory.Packages.props
       - run: dotnet tool restore
       - name: Test
-        run: dotnet run --project tests/BetterMail.Tests --configuration Release
+        timeout-minutes: 5
+        run: dotnet run --project tests/BetterMail.Tests --configuration Release -- -reporter verbose -longRunning 30
       - name: Package macOS
         shell: pwsh
         env:
