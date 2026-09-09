@@ -18,6 +18,9 @@
     <ProjectReference Include="../../src/BetterMail.Core/BetterMail.Core.csproj" />
     <ProjectReference Include="../../src/BetterMail.Google/BetterMail.Google.csproj" />
   </ItemGroup>
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <PackageReference Include="Microsoft.WindowsAppSDK" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="xunit.v3" />
   </ItemGroup>
