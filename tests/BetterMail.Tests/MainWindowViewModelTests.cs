@@ -19,7 +19,8 @@ public sealed class MainWindowViewModelTests
             await store.InitializeAsync(token);
             var account = new MailAccount("microsoft365", "account", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
             var mailbox = new Mailbox(account.AccountId, account.EmailAddress, "Me");
-            provider.FolderResults = [new(mailbox.Id, "inbox", "Inbox", 0, 0, "inbox")];
+            // Empty folders are skipped by sync, so keep this folder eligible for the SyncRelease gate.
+            provider.FolderResults = [new(mailbox.Id, "inbox", "Inbox", 0, 1, "inbox")];
             var viewModel = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
             viewModel.Accounts.Add(account);
             viewModel.Mailboxes.Add(mailbox);
