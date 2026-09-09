@@ -6,11 +6,12 @@ using ModelContextProtocol.Server;
 namespace BetterMail.App;
 
 // Mail content is untrusted data. Tools use only cached mail and the same durable queue as the UI.
-internal sealed class McpMailTools(
+internal sealed partial class McpMailTools(
     EncryptedMailStore store,
     Func<McpConfiguration> configuration,
     Func<Task> refreshAndSync,
-    Func<ComposeSender, string, DraftMessage, Task> queueSend)
+    Func<ComposeSender, string, DraftMessage, Task> queueSend,
+    EvidenceService? evidence = null)
 {
     private McpConfiguration EnabledConfiguration()
     {

@@ -283,9 +283,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         SettingsTabs.Add(new("Accounts"));
         SettingsTabs.Add(new("MCP"));
         SettingsTabs.Add(new("About"));
+        var evidence = _store is null ? null : new EvidenceService(_store, () => _provider, new AttachmentTextExtractor(EvidenceOcr.RecognizeAsync));
         Mcp = new(_store,
             async () => await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(RefreshMcpChangesAsync),
-            async (sender, id, message) => await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => QueueSendAsync(sender, id, message)));
+            async (sender, id, message) => await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => QueueSendAsync(sender, id, message)), evidence);
         _selectedSettingsTab = SettingsTabs[0];
         foreach (var id in DefaultMailQuickActionIds)
         {

@@ -12,6 +12,8 @@ public sealed class MailProviderRouter(IEnumerable<(string ProviderId, IMailProv
     public bool SupportsCloudDrafts => _providers.Count > 0 &&
         _providers.Values.All(static provider => provider.SupportsCloudDrafts);
     public bool SupportsCloudDraftsFor(MailAccount account) => For(account).SupportsCloudDraftsFor(account);
+    public Task<byte[]> GetMimeMessageAsync(MailAccount account, Mailbox mailbox, string messageId, CancellationToken cancellationToken = default) =>
+        For(account).GetMimeMessageAsync(account, mailbox, messageId, cancellationToken);
 
     public Task<IReadOnlyList<MailFolder>> GetFoldersAsync(MailAccount account, Mailbox mailbox, CancellationToken cancellationToken = default) =>
         For(account).GetFoldersAsync(account, mailbox, cancellationToken);

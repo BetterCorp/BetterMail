@@ -16,6 +16,7 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
     private readonly EncryptedMailStore? _store;
     private readonly Func<Task> _refreshAndSync;
     private readonly Func<ComposeSender, string, DraftMessage, Task> _queueSend;
+    private readonly EvidenceService? _evidence;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private McpEndpoint? _endpoint;
     private McpConfiguration _active = new();
@@ -29,11 +30,12 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
     private bool _disposed;
     private bool _initialized;
 
-    public McpSettingsViewModel(EncryptedMailStore? store, Func<Task> refreshAndSync, Func<ComposeSender, string, DraftMessage, Task> queueSend)
+    public McpSettingsViewModel(EncryptedMailStore? store, Func<Task> refreshAndSync, Func<ComposeSender, string, DraftMessage, Task> queueSend, EvidenceService? evidence = null)
     {
         _store = store;
         _refreshAndSync = refreshAndSync;
         _queueSend = queueSend;
+        _evidence = evidence;
         ApplyCommand = new(ApplyAsync, () => IsAvailable);
         RotateKeyCommand = new(RotateKeyAsync, () => IsAvailable);
         SignInTunnelCommand = new(SignInTunnelAsync, () => IsAvailable);
@@ -120,7 +122,7 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
             RaisePropertyChanged(nameof(AccessKey));
             RaisePropertyChanged(nameof(EndpointUrl));
             Volatile.Write(ref _active, configuration);
-            var tools = new McpMailTools(_store, () => Volatile.Read(ref _active), _refreshAndSync, _queueSend);
+            var tools = new McpMailTools(_store, () => Volatile.Read(ref _active), _refreshAndSync, _queueSend, _evidence);
             _endpoint = new(tools, configuration.Port, _endpointPath, () => Volatile.Read(ref _active).Enabled, () => Volatile.Read(ref _accessKey));
             await _endpoint.StartAsync();
             Status = $"Listening at {_endpoint.Address} · {configuration.MailboxIds?.Length ?? 0} allowed mailboxes";

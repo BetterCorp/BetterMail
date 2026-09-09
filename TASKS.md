@@ -42,6 +42,15 @@ Status: `[ ]` queued, `[-]` in progress, `[x]` verified complete, `[!]` blocked 
 - [ ] Finish shared-mailbox send/read validation for Send As and Send on behalf failure cases.
 - [-] Add keyboard commands for compose, reply, reply-all, forward, delete, archive, search, folders, next/previous message, and escape/back. All listed commands except dedicated keyboard folder navigation are verified.
 
+## Evidence investigation
+
+- [x] Search encrypted attachment text/OCR with extraction errors and cache coverage through MCP.
+- [x] Search related correspondence across scoped mailboxes with explicit match explanations.
+- [x] Group identical attachment/MIME bytes and Message-ID candidates while preserving all occurrences.
+- [x] Export selected MIME, attachments and a source manifest with SHA-256 hashes and partial-export errors.
+- [x] Maintain a document inventory with classification, verification, reviewer notes and stable captured-record links.
+- [x] Add paginated MCP reads and authenticated bounded attachment/export downloads with mailbox revocation checks.
+
 ## P2 — Microsoft 365 workspace workflow completion
 
 - [x] Workspace aggregation rule: Calendar, People, To Do, Drive, and Notes combine every linked account by default while retaining provider/account identity, colour, filtering, and actionable per-account errors.

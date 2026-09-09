@@ -162,6 +162,19 @@ public sealed class GoogleGmailProvider(
             .ToArray();
     }
 
+    public async Task<byte[]> GetMimeMessageAsync(MailAccount account, Mailbox mailbox, string messageId, CancellationToken cancellationToken = default)
+    {
+        Validate(account, mailbox);
+        using var response = await SendAsync(account, HttpMethod.Get, $"/messages/{Escape(messageId)}?format=raw", null, cancellationToken).ConfigureAwait(false);
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        var bytes = await EvidenceHash.ReadBoundedAsync(stream, 70 * 1024 * 1024, cancellationToken).ConfigureAwait(false);
+        using var document = JsonDocument.Parse(bytes);
+        var raw = RequiredString(document.RootElement, "raw");
+        var mime = Decode(raw);
+        if (mime.Length > 50 * 1024 * 1024) throw new EvidenceException("file_too_large", "MIME export is limited to 50 MiB per message.");
+        return mime;
+    }
+
     public async Task MoveMessageAsync(
         MailAccount account,
         Mailbox mailbox,

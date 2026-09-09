@@ -267,6 +267,20 @@ public sealed class Microsoft365MailProvider(
             .ToArray();
     }
 
+    public async Task<byte[]> GetMimeMessageAsync(MailAccount account, Mailbox mailbox, string messageId, CancellationToken cancellationToken = default)
+    {
+        var endpoint = $"{MailboxPath(account, mailbox)}/messages/{Uri.EscapeDataString(messageId)}/$value";
+        using var response = await Microsoft365RequestScheduler.Shared.SendAsync(account, endpoint, async (_, token) =>
+        {
+            using var request = await CreateRequestAsync(account, HttpMethod.Get, endpoint, token).ConfigureAwait(false);
+            request.Headers.Accept.Clear();
+            return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+        }, cancellationToken).ConfigureAwait(false);
+        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        return await EvidenceHash.ReadBoundedAsync(stream, 50 * 1024 * 1024, cancellationToken).ConfigureAwait(false);
+    }
+
     public Task MoveMessageAsync(
         MailAccount account,
         Mailbox mailbox,
@@ -333,6 +347,7 @@ public sealed class Microsoft365MailProvider(
             cancellationToken).ConfigureAwait(false);
         return MapAttachment(document.RootElement);
     }
+
 
     public async Task SendAsync(
         MailAccount account,

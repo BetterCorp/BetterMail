@@ -3,6 +3,7 @@
     <PackageReference Include="Microsoft.Data.Sqlite.Core" />
     <PackageReference Include="SQLite3MC.PCLRaw.bundle" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" />
+    <PackageReference Include="PdfPig" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="../../asset-pack/02-web/favicon-48x48.png"

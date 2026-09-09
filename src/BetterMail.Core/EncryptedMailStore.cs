@@ -44,6 +44,7 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
             connection.CreateFunction<string?, byte[]?>("encode_body", EncodeBody);
             await ExecuteAsync(connection, "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;", cancellationToken).ConfigureAwait(false);
             await ExecuteAsync(connection, Schema, cancellationToken).ConfigureAwait(false);
+            await ExecuteAsync(connection, EvidenceSchema, cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "messages", "is_flagged", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
             await EnsureColumnAsync(connection, "messages", "is_pinned", "INTEGER NOT NULL DEFAULT 0", cancellationToken).ConfigureAwait(false);
             await ExecuteAsync(connection, """
@@ -205,6 +206,8 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
                 "DELETE FROM provider_tokens WHERE provider_id = $provider AND account_id = $account;",
                 "DELETE FROM local_drafts WHERE account_id = $account;",
                 "DELETE FROM mail_actions WHERE account_id = $account;",
+                "DELETE FROM evidence_exports WHERE EXISTS(SELECT 1 FROM json_each(payload_json,'$.MailboxIds') scope JOIN mailboxes m ON scope.value=m.account_id || ':' || lower(m.address) WHERE m.account_id=$account);",
+                "DELETE FROM evidence_messages WHERE mailbox_id IN (SELECT account_id || ':' || lower(address) FROM mailboxes WHERE account_id=$account);",
                 "DELETE FROM message_threads WHERE mailbox_id IN (SELECT account_id || ':' || lower(address) FROM mailboxes WHERE account_id = $account);",
                 "DELETE FROM messages WHERE mailbox_id IN (SELECT account_id || ':' || lower(address) FROM mailboxes WHERE account_id = $account);",
                 "DELETE FROM sync_cursors WHERE mailbox_id LIKE $account || ':%';",

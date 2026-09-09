@@ -11,6 +11,9 @@ public interface IAccountProvider
 
 public interface IMailProvider
 {
+    Task<byte[]> GetMimeMessageAsync(MailAccount account, Mailbox mailbox, string messageId, CancellationToken cancellationToken = default) =>
+        Task.FromException<byte[]>(new NotSupportedException("This provider cannot export MIME messages."));
+
     bool SupportsCloudDrafts => false;
     bool SupportsCloudDraftsFor(MailAccount account) => SupportsCloudDrafts;
 
@@ -91,6 +94,7 @@ public interface IMailProvider
         Mailbox mailbox,
         string messageId,
         CancellationToken cancellationToken = default);
+
 
     async Task<MailAttachment?> GetAttachmentAsync(
         MailAccount account,

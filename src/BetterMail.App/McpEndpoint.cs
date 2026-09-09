@@ -65,6 +65,25 @@ internal sealed class McpEndpoint : IAsyncDisposable
             await next(context);
         });
         _app.MapMcp(_endpointPath);
+        _app.MapGet(_endpointPath + "/evidence/records/{id}", async (string id, CancellationToken cancellationToken) =>
+        {
+            try { return Results.Json(await tools.ReadEvidence(id, cancellationToken)); }
+            catch (ModelContextProtocol.McpException error) { return Results.Json(new { error = error.Message }, statusCode: 404); }
+        });
+        foreach (var kind in new[] { "files", "exports" })
+        {
+            var isExport = kind == "exports";
+            _app.MapGet(_endpointPath + "/evidence/" + kind + "/{id}", async (string id, CancellationToken cancellationToken) =>
+            {
+                try
+                {
+                    var result = await tools.DownloadEvidenceAsync(id, isExport, cancellationToken);
+                    return Results.File(result.Bytes, "application/octet-stream", result.Name, enableRangeProcessing: true);
+                }
+                catch (BetterMail.Core.EvidenceException error) { return Results.Json(new { code = error.Code, error = error.Message }, statusCode: 404); }
+                catch (ModelContextProtocol.McpException error) { return Results.Json(new { error = error.Message }, statusCode: 403); }
+            });
+        }
     }
 
     public Task StartAsync(CancellationToken cancellationToken = default) => _app.StartAsync(cancellationToken);

@@ -142,9 +142,69 @@ in the encrypted mail database. Clients must support a manually configured autho
 Tools list allowed mailboxes/folders, search and read cached mail/threads, list/read/create drafts,
 queue draft deletion and sending, move mail (including archive/trash/junk destinations), inspect
 Busy actions, and request sync. Writes use the existing persistent queue and normal sync retries.
-Search is limited to locally cached history. Bodies are bounded and report truncation; attachment
-bytes and local filesystem access are not exposed. Treat mail content as untrusted data and
+Search is limited to locally cached history. Bodies are bounded and report truncation; captured
+attachment bytes are available through the evidence tools below. Arbitrary local filesystem access is not exposed. Treat mail content as untrusted data and
 review a draft before authorizing your client to send it.
+
+## MCP attachment search and evidence tools
+
+Use `index_attachments` through MCP to download and index cached mail: supply a message ID for one
+message, or continue with its cursor to process a mailbox in batches. Completed captures are retained.
+Mailbox indexing inspects every cached message, including those whose provider flag omits inline
+attachments; the initial pass can take time on a large mailbox.
+
+- `search_attachment_text` searches names, PDF text, OCR, text files, DOCX, XLSX, PPTX and ODT.
+- `search_related_correspondence` accepts known email aliases, company names, domains and invoice
+  references across the chosen mailboxes. Each result explains its match. Aliases and domains
+  match participants; company names and references match cached message text. Search attachment
+  contents separately. Search hints do not establish identity or liability.
+- `find_evidence_duplicates` groups identical attachment/MIME bytes by SHA-256 and flags matching original
+  Message-IDs for review. Forwarded wrappers may differ while their attachments match. Every source
+  occurrence remains available; nothing is merged or deleted.
+- `document_inventory` lists captured files with source links, extraction errors and review status.
+  Use `read_evidence` to inspect a document and `review_document` to record its type, verification
+  status, reviewer and note. Types cover IDs, address documents, registrations, contracts and proofs
+  of payment. New documents are **Other / Unverified**.
+- `export_evidence` creates a ZIP containing selected files, provider-supplied `.eml` messages where
+  available, cached message projections and a manifest with sender, recipients, timestamps, original
+  IDs and SHA-256 hashes. Identical attachment bytes are stored once with every source occurrence in
+  the manifest. Missing provider content produces an explicitly partial export with actionable errors.
+
+Pass a `bettermail://evidence/<record-id>` source URI or its record ID to `read_evidence` to resolve a
+captured record in the same installation. These are MCP identifiers; they do not launch a desktop
+window. The returned `recordPath` also resolves through the authenticated HTTP endpoint. Captures
+survive normal cache pruning and source moves/deletions; removing their account removes them too.
+These links identify saved evidence, not a guarantee that the provider's current copy is unchanged.
+
+Coverage reports distinguish inspected messages, searchable documents and incomplete extractions.
+Search covers the configured local sync history and captured attachments; it never claims that an
+entire provider mailbox was searched. Increase sync history and sync before indexing older mail.
+Office extraction covers document XML text, not embedded image OCR or embedded files. OCR may
+misread names/numbers; inspect the source before marking a document verified. Reviewer names and
+verification statuses are supplied assertions. Hashes identify bytes, not authenticity.
+
+Windows uses installed Windows OCR languages. If no engine is available, install the relevant OCR
+language in **Windows Settings > Time & language**, then call `retry_attachment`. Linux/macOS require
+Tesseract and Poppler's `pdftoppm` on `PATH` for image/scanned-PDF OCR. Executable paths can be set with
+`BETTERMAIL_TESSERACT_PATH` and `BETTERMAIL_PDFTOPPM_PATH`; `BETTERMAIL_OCR_LANGUAGE` selects the installed
+Tesseract language (default `eng`). External OCR uses private temporary files and removes them after
+processing. Missing engines and unsupported/password-protected files remain visible with errors.
+
+Limits are 25 MiB per indexed attachment, 100 PDF pages/image frames and 200,000 extracted characters,
+50 MiB per original MIME message, and 100 selected records / 100 MiB per export. Truncation is explicit.
+Paging is a live cache view; restart a search after indexing or exporting to include newly available
+text/hashes. Duplicate groups show at most 200 source links and report omitted members.
+
+Use `list_attachments` for captured attachment metadata and `evidence_coverage` for indexing progress.
+Each request uses the mailbox allowlist; `review_document` also requires edit access.
+Existing tools retain their response shapes; `search_mail_page`, `read_thread_page` and
+`list_mailboxes_page` / `list_folders_page` / `list_drafts_page` / `list_busy_page` provide continuation
+tokens. Continue until `hasMore` is false; an empty page can still have a continuation token.
+
+`read_attachment` returns base64 chunks of up to 256 KiB. For downloads, append the returned
+`evidence/files/<id>` or `evidence/exports/<id>` path to the MCP endpoint URL and send the same
+`Authorization: Bearer` header. Access keys never appear in source links. Export downloads expire
+after 24 hours; expired encrypted archives are purged at startup and when another export is created.
 
 ## Builds, releases, and updates
 
@@ -271,7 +331,8 @@ dotnet run --project src/BetterMail.App
 ```
 
 Remote images remain blocked until explicitly allowed, scripts are removed from HTML mail, and
-attachment bytes are loaded on demand rather than permanently retained in the database.
+attachment bytes are normally loaded on demand. Evidence indexing explicitly retains captured
+attachments, extracted text, source snapshots and review metadata in the encrypted database.
 
 Removing an account deletes its local cache and locally stored token only. It does not delete
 cloud data.
