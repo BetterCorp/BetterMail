@@ -38,8 +38,15 @@ public sealed class MainWindowViewModelTests
             var action = Assert.Single(viewModel.BusyActions);
             Assert.True(viewModel.CancelBusyActionCommand.CanExecute(action));
             Assert.False(viewModel.CancelBusyActionCommand.CanExecute(action with { Running = true }));
+            var cancellationCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            viewModel.CancelBusyActionCommand.CanExecuteChanged += (_, _) =>
+            {
+                if (viewModel.CancelBusyActionCommand.CanExecute(action)) cancellationCompleted.TrySetResult();
+            };
             viewModel.CancelBusyActionCommand.Execute(action);
-            await WaitUntilAsync(() => !viewModel.HasOutbox && viewModel.Drafts.Count == 1, token);
+            await cancellationCompleted.Task.WaitAsync(TimeSpan.FromSeconds(10), token);
+            Assert.Null(viewModel.Error);
+            Assert.False(viewModel.HasOutbox);
             var draft = Assert.Single(viewModel.Drafts);
             Assert.True(draft.RequestReadReceipt);
             Assert.True(draft.RequestDeliveryReceipt);
