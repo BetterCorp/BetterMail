@@ -1,10 +1,31 @@
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
+using Avalonia.Controls;
+using Avalonia.Data;
 using BetterMail.App;
 
 namespace BetterMail.Tests;
 
 public sealed class MainWindowXamlTests
 {
+    [Fact]
+    public void BusyCancelBindingCanBeInstantiated()
+    {
+        var xaml = XDocument.Load(Path.Combine(FindRepositoryRoot(), "src", "BetterMail.App", "MainWindow.axaml"));
+        XNamespace ui = "https://github.com/avaloniaui";
+        var busyList = xaml.Descendants(ui + "ListBox")
+            .Single(element => (string?)element.Attribute("ItemsSource") == "{Binding BusyActions}");
+        var cancel = busyList.Descendants(ui + "Button").Single();
+        var command = (string)cancel.Attribute("Command")!;
+        Assert.StartsWith("{Binding ", command);
+        using var binding = new Button().Bind(Button.CommandProperty, new Binding(command[9..^1])
+        {
+            // Deferred reflection bindings must not require runtime app namespace resolution.
+            TypeResolver = (prefix, name) => prefix == "" && name == nameof(Window)
+                ? typeof(Window) : throw new ArgumentException($"Unable to resolve type {prefix}:{name}.")
+        });
+    }
+
     [Fact]
     public void BetterMailWindowsAreIndependent()
     {
