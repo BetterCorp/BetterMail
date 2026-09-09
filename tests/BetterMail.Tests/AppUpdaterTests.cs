@@ -5,6 +5,22 @@ namespace BetterMail.Tests;
 
 public sealed class AppUpdaterTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedDownloadCanRetrySameVersionWithoutRestart(bool throws)
+    {
+        var staging = new UpdateStaging();
+        var first = staging.Start("1.1.0", _ => throws
+            ? Task.FromException<Exception?>(new IOException("Disconnected"))
+            : Task.FromResult<Exception?>(new IOException("Disconnected")));
+        try { await first.Completion; } catch (IOException) { }
+        var second = staging.Start("1.1.0", _ => Task.FromResult<Exception?>(null));
+        Assert.NotSame(first, second);
+        Assert.Null(await second.Completion);
+        Assert.Same(second, staging.Start("1.1.0", _ => throw new Exception("Already downloaded")));
+    }
+
     [Fact]
     public void SecondDistinctReleaseRequiresRestart()
     {

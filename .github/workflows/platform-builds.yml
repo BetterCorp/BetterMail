@@ -15,6 +15,25 @@ on:
       BETTERMAIL_GOOGLE_CLIENT_SECRET:
         required: true
 
+      BETTERMAIL_WINDOWS_CERTIFICATE:
+        required: false
+      BETTERMAIL_WINDOWS_CERTIFICATE_PASSWORD:
+        required: false
+      BETTERMAIL_MACOS_CERTIFICATE:
+        required: false
+      BETTERMAIL_MACOS_CERTIFICATE_PASSWORD:
+        required: false
+      BETTERMAIL_MACOS_APP_IDENTITY:
+        required: false
+      BETTERMAIL_MACOS_INSTALLER_IDENTITY:
+        required: false
+      BETTERMAIL_APPLE_ID:
+        required: false
+      BETTERMAIL_APPLE_TEAM_ID:
+        required: false
+      BETTERMAIL_APPLE_APP_PASSWORD:
+        required: false
+
 permissions:
   contents: read
 
@@ -30,12 +49,16 @@ jobs:
           cache: true
           cache-dependency-path: Directory.Packages.props
       - run: dotnet tool restore
+      - name: Test
+        run: dotnet run --project tests/BetterMail.Tests --configuration Release
       - name: Package Windows
         shell: pwsh
         env:
           BETTERMAIL_MICROSOFT_CLIENT_ID: ${{ secrets.BETTERMAIL_MICROSOFT_CLIENT_ID }}
           BETTERMAIL_GOOGLE_CLIENT_ID: ${{ secrets.BETTERMAIL_GOOGLE_CLIENT_ID }}
           BETTERMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.BETTERMAIL_GOOGLE_CLIENT_SECRET }}
+          BETTERMAIL_WINDOWS_CERTIFICATE: ${{ secrets.BETTERMAIL_WINDOWS_CERTIFICATE }}
+          BETTERMAIL_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.BETTERMAIL_WINDOWS_CERTIFICATE_PASSWORD }}
         run: ./scripts/package-release.ps1 -Runtime win-x64 -Version '${{ inputs.version }}'
       - uses: actions/upload-artifact@v4
         with:
@@ -83,12 +106,21 @@ jobs:
           cache: true
           cache-dependency-path: Directory.Packages.props
       - run: dotnet tool restore
+      - name: Test
+        run: dotnet run --project tests/BetterMail.Tests --configuration Release
       - name: Package macOS
         shell: pwsh
         env:
           BETTERMAIL_MICROSOFT_CLIENT_ID: ${{ secrets.BETTERMAIL_MICROSOFT_CLIENT_ID }}
           BETTERMAIL_GOOGLE_CLIENT_ID: ${{ secrets.BETTERMAIL_GOOGLE_CLIENT_ID }}
           BETTERMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.BETTERMAIL_GOOGLE_CLIENT_SECRET }}
+          BETTERMAIL_MACOS_CERTIFICATE: ${{ secrets.BETTERMAIL_MACOS_CERTIFICATE }}
+          BETTERMAIL_MACOS_CERTIFICATE_PASSWORD: ${{ secrets.BETTERMAIL_MACOS_CERTIFICATE_PASSWORD }}
+          BETTERMAIL_MACOS_APP_IDENTITY: ${{ secrets.BETTERMAIL_MACOS_APP_IDENTITY }}
+          BETTERMAIL_MACOS_INSTALLER_IDENTITY: ${{ secrets.BETTERMAIL_MACOS_INSTALLER_IDENTITY }}
+          BETTERMAIL_APPLE_ID: ${{ secrets.BETTERMAIL_APPLE_ID }}
+          BETTERMAIL_APPLE_TEAM_ID: ${{ secrets.BETTERMAIL_APPLE_TEAM_ID }}
+          BETTERMAIL_APPLE_APP_PASSWORD: ${{ secrets.BETTERMAIL_APPLE_APP_PASSWORD }}
         run: ./scripts/package-release.ps1 -Runtime osx-arm64 -Version '${{ inputs.version }}'
       - uses: actions/upload-artifact@v4
         with:

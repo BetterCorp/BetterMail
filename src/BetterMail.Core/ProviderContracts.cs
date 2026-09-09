@@ -11,6 +11,10 @@ public interface IAccountProvider
 
 public interface IMailProvider
 {
+    // Only positive provider evidence may resolve a send whose acknowledgement was lost.
+    Task<bool> IsDraftSentAsync(MailAccount account, Mailbox mailbox, string draftId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(false);
+
     Task<byte[]> GetMimeMessageAsync(MailAccount account, Mailbox mailbox, string messageId, CancellationToken cancellationToken = default) =>
         Task.FromException<byte[]>(new NotSupportedException("This provider cannot export MIME messages."));
 

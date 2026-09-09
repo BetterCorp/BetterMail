@@ -1930,7 +1930,7 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public async Task SendClosesComposerAndRetriesFailedOutboxOnlyOnTheNextSync()
+    public async Task SendClosesComposerAndRetriesExplicitlyRejectedOutboxOnlyOnTheNextSync()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var directory = Path.Combine(Path.GetTempPath(), $"bettermail-outbox-{Guid.NewGuid():N}");
@@ -1975,7 +1975,7 @@ public sealed class MainWindowViewModelTests
             // Delivery must wait for the normal incoming-mail sync to finish.
             provider.SyncRelease.SetResult();
             await WaitUntilAsync(() => provider.SendCalls == 1, cancellationToken);
-            provider.SendRelease.SetException(new HttpRequestException("Offline"));
+            provider.SendRelease.SetException(new HttpRequestException("Throttled", null, System.Net.HttpStatusCode.TooManyRequests));
             await WaitUntilAsync(() => !viewModel.IsSyncing, cancellationToken);
             Assert.Null(viewModel.Error);
             Assert.Single(viewModel.Outbox);

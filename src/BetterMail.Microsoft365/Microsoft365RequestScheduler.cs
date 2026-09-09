@@ -47,7 +47,8 @@ internal sealed class Microsoft365RequestScheduler
         MailAccount account,
         string endpoint,
         Func<int, CancellationToken, Task<HttpResponseMessage>> send,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool retryTransient = true)
     {
         return await RunAsync(account, endpoint, async token =>
         {
@@ -56,7 +57,7 @@ internal sealed class Microsoft365RequestScheduler
                 try
                 {
                     var response = await send(attempt, token).ConfigureAwait(false);
-                    if (attempt >= RetryLimit || !IsTransient(response.StatusCode))
+                    if (!retryTransient || attempt >= RetryLimit || !IsTransient(response.StatusCode))
                     {
                         return response;
                     }
@@ -66,7 +67,7 @@ internal sealed class Microsoft365RequestScheduler
                     await Task.Delay(delay, token).ConfigureAwait(false);
                 }
                 catch (HttpRequestException exception) when (
-                    attempt < RetryLimit &&
+                    retryTransient && attempt < RetryLimit &&
                     (exception.StatusCode is null || IsTransient(exception.StatusCode.Value)))
                 {
                     await Task.Delay(FallbackDelay(attempt), token).ConfigureAwait(false);

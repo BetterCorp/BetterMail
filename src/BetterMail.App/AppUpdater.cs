@@ -214,7 +214,7 @@ internal sealed class UpdateStaging
     {
         lock (_sync)
         {
-            if (_current?.Version == version)
+            if (_current?.Version == version && !_current.CanRetry)
             {
                 return _current;
             }
@@ -242,6 +242,8 @@ internal sealed class UpdateDownload
 
     public string Version { get; }
     public int Progress => Volatile.Read(ref _progress);
+    public bool CanRetry => Completion.IsCompleted &&
+        (!Completion.IsCompletedSuccessfully || Completion.Result is not null);
     public Task<Exception?> Completion { get; }
 
     private async Task<Exception?> RunAsync(
@@ -250,7 +252,8 @@ internal sealed class UpdateDownload
     {
         if (previous is not null)
         {
-            await previous;
+            try { await previous; }
+            catch { /* A failed attempt must not prevent a new download. */ }
         }
 
         return await download(ReportProgress);

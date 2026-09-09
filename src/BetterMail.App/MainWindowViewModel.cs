@@ -193,6 +193,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         ShowFlaggedCommand = new AsyncCommand(() => ShowUnifiedFilterAsync(MailMessageFilter.Flagged));
         ShowDraftsCommand = new AsyncCommand(ShowDraftsAsync);
         CancelBusyActionCommand = new AsyncCommand<MailAction>(CancelBusyActionAsync, static action => action.CanCancel);
+        ReturnUnconfirmedSendCommand = new AsyncCommand<MailAction>(ReturnUnconfirmedSendAsync, static action => action.NeedsSendReview);
+        ConfirmSentCommand = new AsyncCommand<MailAction>(ConfirmSentAsync, static action => action.NeedsSendReview);
         ShowOutboxCommand = new AsyncCommand(() => ShowDraftListAsync(DraftListFilter.Outbox));
         ShowSyncIssuesCommand = new AsyncCommand(() => ShowDraftListAsync(DraftListFilter.SyncIssues));
         ShowDraftConflictsCommand = new AsyncCommand(() => ShowDraftListAsync(DraftListFilter.Conflicts));
@@ -1423,6 +1425,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             await _store.InitializeAsync();
             Replace(Accounts, await _store.GetAccountsAsync());
             Replace(Mailboxes, await _store.GetMailboxesAsync());
+            await RefreshSyncHealthAsync();
             await RefreshDraftsAsync();
             foreach (var account in Accounts.Where(account => Mailboxes.All(mailbox => mailbox.AccountId != account.AccountId || mailbox.IsShared)))
             {
@@ -1744,416 +1747,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             RaisePropertyChanged(nameof(SettingsAccounts));
         });
     }
-
-    private async Task SyncAsync()
-    {
-        var provider = _provider;
-        var store = _store;
-        if (IsBusy || provider is null || store is null || Accounts.Count == 0)
-        {
-            return;
-        }
-        Interlocked.Exchange(ref _syncPending, 1);
-        if (Interlocked.CompareExchange(ref _syncRunning, 1, 0) != 0)
-        {
-            return;
-        }
-
-        IsSyncing = true;
-        Status = "Syncing mail...";
-        Error = null;
-        var animation = AnimateSyncIconAsync();
-        var mailFailures = new ConcurrentQueue<string>();
-        try
-        {
-            do
-            {
-                Interlocked.Exchange(ref _syncPending, 0);
-                var engine = new SyncEngine(provider, store);
-                var mailboxes = Mailboxes.ToArray();
-                await Task.WhenAll(
-                    from account in Accounts.ToArray()
-                    join mailbox in mailboxes on account.AccountId equals mailbox.AccountId
-                    select SyncMailboxAsync(provider, store, engine, account, mailbox, mailFailures));
-
-                try
-                {
-                    await LoadFoldersAsync();
-                    if (!IsGlobalSearchOpen && !IsSearchResultsView)
-                    {
-                        await LoadMessagesAsync();
-                    }
-                    if (SelectedMessage is { } selected)
-                    {
-                        await LoadConversationAsync(selected, _selectionVersion, CancellationToken.None);
-                    }
-                    if (IsSettingsOpen)
-                    {
-                        await LoadMailStatisticsAsync();
-                    }
-                }
-                catch (Exception exception) when (exception is not OperationCanceledException)
-                {
-                    mailFailures.Enqueue(exception.Message);
-                }
-            }
-            while (Volatile.Read(ref _syncPending) != 0);
-
-            await ReconcileAllDraftsAsync();
-            _ = RefreshWorkspaceCacheAsync();
-            await ProcessMailActionsAsync();
-            await ProcessOutboxAsync();
-            if (!mailFailures.IsEmpty)
-            {
-                Error = string.Join(Environment.NewLine, mailFailures.Distinct(StringComparer.Ordinal));
-                Status = "Sync completed with issues";
-            }
-            else
-            {
-                Status = "Up to date";
-            }
-        }
-        finally
-        {
-            Interlocked.Exchange(ref _syncRunning, 0);
-            IsSyncing = false;
-            await animation;
-            _ = RunStorageMaintenanceAsync();
-            if (Volatile.Read(ref _syncPending) != 0)
-            {
-                _ = SyncAsync();
-            }
-        }
-    }
-
-
-    private async Task RunStorageMaintenanceAsync()
-    {
-        if (_store is null || Interlocked.CompareExchange(ref _storageMaintenanceRunning, 1, 0) != 0)
-        {
-            return;
-        }
-        try
-        {
-            while (await _store.RunMaintenanceBatchAsync())
-            {
-                await Task.Delay(50);
-            }
-            _recipientDirectoryTask = null;
-            if (WindowsSessionLock.IsLocked())
-            {
-                using var vacuumCancellation = new CancellationTokenSource();
-                var unlockWatcher = CancelVacuumWhenUnlockedAsync(vacuumCancellation);
-                try
-                {
-                    await _store.VacuumIfUsefulAsync(vacuumCancellation.Token);
-                }
-                catch (OperationCanceledException) when (!WindowsSessionLock.IsLocked())
-                {
-                    // The user returned; interactive database work takes priority.
-                }
-                finally
-                {
-                    vacuumCancellation.Cancel();
-                    await unlockWatcher;
-                }
-            }
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            Error = $"Storage optimization paused: {exception.Message}";
-        }
-        finally
-        {
-            Interlocked.Exchange(ref _storageMaintenanceRunning, 0);
-        }
-    }
-
-    private static async Task CancelVacuumWhenUnlockedAsync(CancellationTokenSource cancellation)
-    {
-        try
-        {
-            while (!cancellation.IsCancellationRequested && WindowsSessionLock.IsLocked())
-            {
-                await Task.Delay(TimeSpan.FromSeconds(1), cancellation.Token);
-            }
-            if (!cancellation.IsCancellationRequested)
-            {
-                cancellation.Cancel();
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-    }
-
-    private void StartAutoSync()
-    {
-        if (_autoSyncStarted)
-        {
-            return;
-        }
-
-        _autoSyncStarted = true;
-        _ = AutoSyncAsync();
-    }
-
-    private async Task AutoSyncAsync()
-    {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(60));
-        while (await timer.WaitForNextTickAsync())
-        {
-            await RefreshNextCalendarEventAsync();
-            if (!IsBusy && !IsSyncing && Accounts.Count > 0 && _provider is not null)
-            {
-                await SyncAsync();
-            }
-        }
-    }
-
-    private async Task AnimateSyncIconAsync()
-    {
-        while (IsSyncing)
-        {
-            await Task.Delay(90);
-            _syncFrame = (_syncFrame + 1) % SyncFrames.Length;
-            RaisePropertyChanged(nameof(SyncIcon));
-            RaisePropertyChanged(nameof(SyncButtonText));
-        }
-    }
-
-    private async Task RefreshWorkspaceCacheAsync()
-    {
-        if (_store is null || _workspaceProvider is null ||
-            DateTimeOffset.UtcNow - _lastWorkspaceSyncAt < TimeSpan.FromMinutes(15) ||
-            Interlocked.CompareExchange(ref _workspaceSyncRunning, 1, 0) != 0)
-        {
-            return;
-        }
-
-        _lastWorkspaceSyncAt = DateTimeOffset.UtcNow;
-        try
-        {
-            foreach (var account in Accounts.ToArray())
-            {
-                await RefreshContactsAsync(account);
-                await RefreshCalendarsAsync(account);
-                await RefreshTasksAsync(account);
-                await RefreshNotesAsync(account);
-                await _store.GarbageCollectWorkspaceAsync(account.AccountId);
-            }
-            await RefreshNextCalendarEventAsync();
-        }
-        finally
-        {
-            Interlocked.Exchange(ref _workspaceSyncRunning, 0);
-        }
-
-        async Task RefreshContactsAsync(MailAccount account)
-        {
-            if (!account.Capabilities.HasFlag(ProviderCapabilities.Contacts))
-            {
-                return;
-            }
-            try
-            {
-                var contacts = await _workspaceProvider.SearchContactsAsync(account, "");
-                await _store.ReplaceWorkspaceItemsAsync(
-                    "contact", account.AccountId, "all", contacts,
-                    static item => item.ProviderId,
-                    static item => $"{item.DisplayName} {string.Join(' ', item.EmailAddresses)}");
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-            }
-        }
-
-        async Task RefreshCalendarsAsync(MailAccount account)
-        {
-            if (!account.Capabilities.HasFlag(ProviderCapabilities.Calendar))
-            {
-                return;
-            }
-            try
-            {
-                var calendars = await _workspaceProvider.GetCalendarsAsync(account);
-                await _store.ReplaceWorkspaceItemsAsync(
-                    "calendar", account.AccountId, "all", calendars,
-                    static item => item.ProviderId,
-                    static item => $"{item.Name} {item.Color}");
-                var from = DateTimeOffset.UtcNow.AddYears(-1);
-                var to = DateTimeOffset.UtcNow.AddYears(2);
-                foreach (var calendar in calendars)
-                {
-                    var events = await _workspaceProvider.GetEventsAsync(
-                        account, calendar.ProviderId, from, to);
-                    await _store.ReplaceCalendarEventsAsync(
-                        account.AccountId, calendar.ProviderId, from, to, events);
-                }
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-            }
-        }
-
-        async Task RefreshTasksAsync(MailAccount account)
-        {
-            if (!account.Capabilities.HasFlag(ProviderCapabilities.Tasks))
-            {
-                return;
-            }
-            try
-            {
-                var lists = await _workspaceProvider.GetTaskListsAsync(account);
-                await _store.ReplaceWorkspaceItemsAsync(
-                    "task-list", account.AccountId, "all", lists,
-                    static item => item.ProviderId,
-                    static item => item.DisplayName);
-                foreach (var list in lists)
-                {
-                    var tasks = await _workspaceProvider.GetTasksAsync(account, list);
-                    await _store.ReplaceWorkspaceItemsAsync(
-                        "task", account.AccountId, list.ProviderId, tasks,
-                        static item => item.ProviderId,
-                        static item => $"{item.Title} {item.Notes} {string.Join(' ', item.Categories ?? [])}");
-                }
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-            }
-        }
-
-        async Task RefreshNotesAsync(MailAccount account)
-        {
-            if (!account.Capabilities.HasFlag(ProviderCapabilities.Notes))
-            {
-                return;
-            }
-            try
-            {
-                var notebooks = await _workspaceProvider.GetNotebooksAsync(account);
-                await _store.ReplaceWorkspaceItemsAsync(
-                    "note-notebook", account.AccountId, "all", notebooks,
-                    static item => item.ProviderId,
-                    static item => item.Name);
-                var notes = new List<NoteInfo>();
-                foreach (var notebook in notebooks)
-                {
-                    var sections = await _workspaceProvider.GetSectionsAsync(account, notebook);
-                    await _store.ReplaceWorkspaceItemsAsync(
-                        "note-section", account.AccountId, notebook.ProviderId, sections,
-                        static item => item.ProviderId,
-                        static item => item.Name);
-                    foreach (var section in sections)
-                    {
-                        var pages = await _workspaceProvider.GetPagesAsync(account, section);
-                        await _store.ReplaceWorkspaceItemsAsync(
-                            "note-page", account.AccountId, section.ProviderId, pages,
-                            static item => item.ProviderId,
-                            static item => item.Title);
-                        notes.AddRange(pages.Select(page => new NoteInfo(
-                            page.ProviderId, page.Title, page.ModifiedAt, page.WebUrl,
-                            page.AccountId, page.AccountProviderId, page.SectionProviderId)));
-                    }
-                }
-                await _store.ReplaceWorkspaceItemsAsync(
-                    "note", account.AccountId, "all", notes,
-                    static item => item.ProviderId,
-                    static item => item.Title);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-            }
-        }
-    }
-
-    private async Task SyncMailboxAsync(
-        IMailProvider provider,
-        EncryptedMailStore store,
-        SyncEngine engine,
-        MailAccount account,
-        Mailbox mailbox,
-        ConcurrentQueue<string> failures)
-    {
-        IReadOnlyList<MailFolder> folders;
-        try
-        {
-            folders = await provider.GetFoldersAsync(account, mailbox);
-            await store.SaveFoldersAsync(mailbox.Id, folders);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            failures.Enqueue($"{mailbox.Address}: {exception.Message}");
-            folders = await store.GetFoldersAsync(mailbox.Id);
-            if (folders.Count == 0)
-            {
-                return;
-            }
-        }
-
-        foreach (var folder in folders
-                     .Where(static folder => folder.TotalCount > 0)
-                     .OrderBy(static folder => folder.WellKnownName switch
-                     {
-                         "inbox" => 0,
-                         "sentitems" => 1,
-                         _ => 2
-                     }))
-        {
-            try
-            {
-                InboxNotificationContext? notificationContext = null;
-                var notifyThisCycle = false;
-                if (folder.WellKnownName?.Equals("inbox", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    notificationContext = new InboxNotificationContext(account, mailbox, folder);
-                    notifyThisCycle = _newMailNotifications.IsPrimed(notificationContext);
-                    if (!notifyThisCycle)
-                    {
-                        _newMailNotifications.Prime(
-                            notificationContext,
-                            await GetInboxSnapshotAsync(mailbox.Id, folder.ProviderId));
-                    }
-                }
-                await engine.SyncFolderAsync(account, mailbox, folder, MailSyncHistoryDays);
-                if (notificationContext is not null)
-                {
-                    var synced = await GetInboxSnapshotAsync(mailbox.Id, folder.ProviderId);
-                    if (notifyThisCycle)
-                    {
-                        _newMailNotifications.Observe(
-                            notificationContext,
-                            synced,
-                            DesktopNotificationsEnabled);
-                    }
-                    else
-                    {
-                        _newMailNotifications.Prime(notificationContext, synced);
-                    }
-                }
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                failures.Enqueue($"{mailbox.Address} / {folder.DisplayName}: {exception.Message}");
-            }
-        }
-        if (MailSyncHistoryDays > 0)
-        {
-            try
-            {
-                await store.PruneMessagesBeforeAsync(
-                    mailbox.Id,
-                    DateTimeOffset.UtcNow.AddDays(-MailSyncHistoryDays));
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                failures.Enqueue($"{mailbox.Address}: {exception.Message}");
-            }
-        }
-    }
-
-    private async Task<IReadOnlyList<MailMessage>> GetInboxSnapshotAsync(string mailboxId, string folderId) =>
-        (await _store!.GetMessagesPageAsync([new(mailboxId, folderId)], pageSize: 500)).Messages;
 
     private async Task<IReadOnlyList<string>> ReconcileAllDraftsAsync()
     {
@@ -3493,7 +3086,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             try
             {
                 await LoadCalendarWorkspaceAsync();
-                Status = "Up to date";
+                Status = BusyActions.Any(action => action.NeedsSendReview || action.Error is not null)
+                    ? "Mail synced — review actions in Busy" : "Up to date";
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -3509,7 +3103,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             try
             {
                 await LoadNotesWorkspaceAsync();
-                Status = "Up to date";
+                Status = BusyActions.Any(action => action.NeedsSendReview || action.Error is not null)
+                    ? "Mail synced — review actions in Busy" : "Up to date";
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -3525,7 +3120,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             try
             {
                 await LoadDriveWorkspaceAsync();
-                Status = "Up to date";
+                Status = BusyActions.Any(action => action.NeedsSendReview || action.Error is not null)
+                    ? "Mail synced — review actions in Busy" : "Up to date";
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -3541,7 +3137,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             try
             {
                 await LoadTasksWorkspaceAsync();
-                Status = "Up to date";
+                Status = BusyActions.Any(action => action.NeedsSendReview || action.Error is not null)
+                    ? "Mail synced — review actions in Busy" : "Up to date";
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -4797,71 +4394,27 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private async Task ProcessOutboxAsync()
     {
-        if (_store is null || _provider is null)
+        if (_store is null || _provider is null) return;
+        var service = new OutboxService(_provider, _store);
+        foreach (var summary in (await _store.GetLocalDraftSummariesAsync())
+            .Where(static draft => draft.IsQueued).OrderBy(static draft => draft.UpdatedAt))
         {
-            return;
-        }
-        var queued = (await _store.GetLocalDraftSummariesAsync())
-            .Where(static draft => draft.IsQueued).OrderBy(static draft => draft.UpdatedAt);
-        foreach (var summary in queued)
-        {
-            if (!TryGetDraftContext(summary, out var account, out var mailbox))
-            {
-                continue;
-            }
+            if (!TryGetDraftContext(summary, out var account, out var mailbox)) continue;
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
             var mailboxLock = _draftSyncLocks.GetOrAdd(mailbox.Id, static _ => new SemaphoreSlim(1, 1));
             try
             {
-                if (await _store.StartMailActionAsync("send:" + summary.Id) is null && !summary.SendAccepted)
-                    continue;
-                await RefreshBusyActionsAsync();
                 await mailboxLock.WaitAsync(timeout.Token);
                 try
                 {
-                    var local = await _store.GetLocalDraftAsync(summary.Id, timeout.Token);
-                    if (local is not { IsQueued: true })
-                    {
-                        continue;
-                    }
-                    if (!local.SendAccepted)
-                    {
-                        // ponytail: lost server acknowledgements need provider idempotency for exactly-once delivery.
-                        var message = new DraftMessage(
-                            local.Subject, ComposeWindowViewModel.ParseRecipients(local.To), local.Body, local.IsHtml,
-                            ComposeWindowViewModel.ParseRecipients(local.Cc), ComposeWindowViewModel.ParseRecipients(local.Bcc),
-                            local.Attachments, local.Importance, local.IsFlagged, local.RequestReadReceipt, local.RequestDeliveryReceipt);
-                        if (_provider.SupportsCloudDraftsFor(account))
-                        {
-                            var remote = local.ProviderDraftId is { Length: > 0 } providerDraftId
-                                ? await _provider.UpdateDraftAsync(account, mailbox, providerDraftId, message, timeout.Token)
-                                : await _provider.CreateDraftAsync(account, mailbox, message, timeout.Token);
-                            if (remote.AccountId != account.AccountId || remote.MailboxId != mailbox.Id)
-                            {
-                                throw new InvalidOperationException("The provider returned a draft owned by another mailbox.");
-                            }
-                            await _store.UpdateLocalDraftSyncMetadataAsync(
-                                local.Id, remote.ProviderId, local.UpdatedAt, remote.UpdatedAt, remote.ETag, timeout.Token);
-                            await _provider.SendDraftAsync(account, mailbox, remote.ProviderId, timeout.Token);
-                        }
-                        else
-                        {
-                            await _provider.SendAsync(account, mailbox, message, timeout.Token);
-                        }
-                        // Record acceptance before cleanup so a failed delete does not resend the message.
-                        await _store.MarkOutboxSendAcceptedAsync(local.Id);
-                    }
-                    await _store.DeleteLocalDraftAsync(local.Id);
+                    var processing = service.ProcessAsync(account, mailbox, summary.Id, timeout.Token);
+                    await RefreshBusyActionsAsync();
+                    await processing;
                 }
-                finally
-                {
-                    mailboxLock.Release();
-                }
+                finally { mailboxLock.Release(); }
             }
-            catch (Exception exception)
-            {
-                await _store.FailMailActionAsync("send:" + summary.Id, exception.Message);
-            }
+            catch (Exception error) { await _store.FailMailActionAsync("send:" + summary.Id, error.Message); }
+            await RefreshBusyActionsAsync();
         }
         await RefreshDraftsAsync();
     }

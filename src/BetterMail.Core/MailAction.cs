@@ -19,9 +19,11 @@ public sealed record MailAction(
     string? Error = null,
     string[]? PreviousProviderIds = null,
     string? SourceFolderId = null,
-    bool SourceWasUnread = false)
+    bool SourceWasUnread = false,
+    bool SendAttempted = false)
 {
-    public bool CanCancel => !Running && !Accepted;
+    public bool CanCancel => !Running && !Accepted && !SendAttempted;
+    public bool NeedsSendReview => Kind == MailActionKind.Send && SendAttempted && !Running && !Accepted;
     public string DisplaySubject => string.IsNullOrWhiteSpace(Subject) ? "(no subject)" : Subject;
     public string ActionText => Kind switch
     {
@@ -29,7 +31,7 @@ public sealed record MailAction(
         MailActionKind.DeleteDraft => "Delete draft",
         _ => $"Move to {DestinationName}"
     };
-    public string StatusText => Running ? Kind switch
+    public string StatusText => NeedsSendReview ? "Delivery unconfirmed — check Sent" : Running ? Kind switch
     {
         MailActionKind.Send => "Sending…",
         MailActionKind.DeleteDraft => "Deleting…",

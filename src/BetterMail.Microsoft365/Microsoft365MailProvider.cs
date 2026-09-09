@@ -475,6 +475,21 @@ public sealed class Microsoft365MailProvider(
             cancellationToken);
     }
 
+    public async Task<bool> IsDraftSentAsync(MailAccount account, Mailbox mailbox, string draftId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var document = await GetJsonAsync(account,
+                $"{DraftEndpoint(account, mailbox, draftId)}?$select=isDraft", cancellationToken).ConfigureAwait(false);
+            return document.RootElement.TryGetProperty("isDraft", out var isDraft) && isDraft.ValueKind == JsonValueKind.False;
+        }
+        catch (HttpRequestException error) when (error.StatusCode == HttpStatusCode.NotFound)
+        {
+            // IDs may change on send; absence is not evidence of successful delivery.
+            return false;
+        }
+    }
+
     public Task SendDraftAsync(
         MailAccount account,
         Mailbox mailbox,
@@ -831,7 +846,7 @@ public sealed class Microsoft365MailProvider(
                 }
                 return await _httpClient.SendAsync(request, token).ConfigureAwait(false);
             },
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken, retryTransient: method != HttpMethod.Post).ConfigureAwait(false);
     }
 
     private async Task<HttpRequestMessage> CreateRequestAsync(MailAccount account, HttpMethod method, string endpoint, CancellationToken cancellationToken)
