@@ -177,6 +177,53 @@ public sealed class McpUploadTests
         });
     }
 
+    [Theory]
+    [InlineData("report:.txt", "text/plain")]
+    [InlineData("report.txt", "not a MIME type")]
+    public async Task InvalidDriveMetadataNeverClaimsARemoteAttempt(string name, string contentType)
+    {
+        await WithStore(async (store, tools, _, files) =>
+        {
+            await Assert.ThrowsAsync<McpException>(() => tools.BeginDriveUpload("microsoft365:account", name, contentType, 1, Hash([1]), replaceItemId: "existing", expectedETag: "etag"));
+            // Also protect sessions staged by a previous app version.
+            var target = JsonSerializer.Serialize(new { ParentId = (string?)null, ReplaceItemId = "existing", ExpectedETag = "etag" });
+            var upload = await store.BeginMcpAttachmentUploadAsync("drive:microsoft365:account", target, DateTimeOffset.MinValue, name, contentType, 1, Hash([1]));
+            await store.WriteMcpAttachmentChunkAsync("drive:microsoft365:account", upload.Id, 0, [1]);
+            await Assert.ThrowsAsync<McpException>(() => tools.CompleteDriveUpload("microsoft365:account", upload.Id));
+            Assert.Equal("ready", (await tools.GetDriveUpload("microsoft365:account", upload.Id)).State);
+            Assert.Equal(0, files.Uploads);
+        });
+    }
+
+    [Fact]
+    public async Task FailedFinalTransitionReportsRemoteFileAndSuccessfulRetryClearsChunks()
+    {
+        await WithStore(async (store, tools, _, files) =>
+        {
+            var upload = await tools.BeginDriveUpload("microsoft365:account", "report", "text/plain", 1, Hash([1]));
+            await tools.UploadDriveChunk("microsoft365:account", upload.Id, 0, "AQ==");
+            var connection = (Microsoft.Data.Sqlite.SqliteConnection)typeof(EncryptedMailStore)
+                .GetField("_connection", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(store)!;
+            await using var command = connection.CreateCommand();
+            // Simulate a lost compare-and-set exactly at the last transition, after upload.
+            command.CommandText = "CREATE TRIGGER reject_completion BEFORE UPDATE OF remote_state ON mcp_attachment_uploads WHEN NEW.remote_state='complete' BEGIN SELECT RAISE(IGNORE); END;";
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+            var error = await Assert.ThrowsAsync<McpException>(() => tools.CompleteDriveUpload("microsoft365:account", upload.Id));
+            Assert.Contains("completed result could not be recorded", error.Message);
+            Assert.Contains("file", error.Message);
+            command.CommandText = "SELECT COUNT(*) FROM mcp_attachment_chunks;";
+            Assert.Equal(1L, await command.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+            command.CommandText = "DROP TRIGGER reject_completion;";
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+            var result = await tools.CompleteDriveUpload("microsoft365:account", upload.Id);
+            Assert.Equal(result, await tools.CompleteDriveUpload("microsoft365:account", upload.Id));
+            Assert.Equal(1, files.Uploads);
+            command.CommandText = "SELECT COUNT(*) FROM mcp_attachment_chunks;";
+            Assert.Equal(0L, await command.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+            Assert.Equal("complete", (await tools.GetDriveUpload("microsoft365:account", upload.Id)).State);
+        });
+    }
+
     private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
     private static async Task WithStore(Func<EncryptedMailStore, McpMailTools, LocalDraft, Files, Task> test)
     {

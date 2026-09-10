@@ -104,6 +104,7 @@ internal sealed partial class McpMailTools
     {
         var account = await DriveAccountAsync(accountKey, true);
         if (replaceItemId is not null && string.IsNullOrWhiteSpace(expectedETag)) throw new McpException("Content replacement requires the current ETag.");
+        ValidateDriveUploadMetadata(name, contentType);
         var destination = System.Text.Json.JsonSerializer.Serialize(new DriveUploadDestination(parentId, replaceItemId, expectedETag));
         AuthorizeDrive(accountKey, true);
         return await store.BeginMcpAttachmentUploadAsync("drive:" + accountKey, destination, DateTimeOffset.MinValue, name, contentType, size, sha256);
@@ -128,7 +129,8 @@ internal sealed partial class McpMailTools
         if (status.State == "complete" && status.File is not null) return status.File;
         var target = System.Text.Json.JsonSerializer.Deserialize<DriveUploadDestination>(status.Upload.DraftId)!;
         var file = await UploadStagedToDriveAsync(owner, accountKey, account, status, target);
-        await store.SetMcpUploadStateAsync(owner, uploadId, "uploaded", "complete", file);
+        if (!await store.SetMcpUploadStateAsync(owner, uploadId, "uploaded", "complete", file))
+            throw new McpException($"The remote upload completed as {file.ProviderId}, but its completed result could not be recorded. Inspect Drive before retrying or starting another upload.");
         return file;
     });
 
@@ -158,12 +160,21 @@ internal sealed partial class McpMailTools
         return status;
     });
 
+    private static void ValidateDriveUploadMetadata(string name, string contentType)
+    {
+        if (AttachmentDriveSaveViewModel.NormalizeFileName(name) != name)
+            throw new McpException("Use a valid Drive filename without reserved names or characters.");
+        if (!System.Net.Http.Headers.MediaTypeHeaderValue.TryParse(contentType, out _))
+            throw new McpException("Use a valid MIME content type, such as application/octet-stream.");
+    }
+
     private sealed record DriveUploadDestination(string? ParentId, string? ReplaceItemId, string? ExpectedETag);
     private async Task<CloudDriveItem> UploadStagedToDriveAsync(string owner, string accountKey, MailAccount account,
         McpUploadStatus status, DriveUploadDestination target)
     {
         if (status.File is not null && status.State is "uploaded" or "shared" or "complete") return status.File;
         if (status.State != "ready") throw new McpException("Upload outcome is uncertain or still running. Inspect Drive before starting another upload.");
+        ValidateDriveUploadMetadata(status.Upload.Name, status.Upload.ContentType);
         var bytes = await store.ReadMcpUploadBytesAsync(owner, status.Upload.Id);
         var parent = target.ParentId is null ? null : await Files.GetDriveItemAsync(account, target.ParentId);
         var replacing = target.ReplaceItemId is null ? null : await Files.GetDriveItemAsync(account, target.ReplaceItemId);

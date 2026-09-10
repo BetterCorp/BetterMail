@@ -1436,7 +1436,7 @@ public sealed class MainWindowViewModelTests
             var html = Decode(viewModel.SelectedMessageBodyUri);
             Assert.Contains("<b>Archive body</b>", html);
 
-            viewModel.ShowUnifiedInboxCommand.Execute(null);
+            await ((AsyncCommand)viewModel.ShowUnifiedInboxCommand).ExecuteAsync();
             await WaitUntilAsync(() => viewModel.CurrentFolderName == "Inbox" && viewModel.SelectedMessage?.Subject == "Inbox message", cancellationToken);
             Assert.Equal("Inbox message", viewModel.SelectedMessage?.Subject);
             Assert.False(archiveItem.IsSelected);
@@ -1490,7 +1490,7 @@ public sealed class MainWindowViewModelTests
             await WaitUntilAsync(() => viewModel.SelectedMessage?.IsPinned == true && viewModel.PinnedMessageCount == 1, cancellationToken);
             viewModel.ShowPinnedCommand.Execute(null);
             await WaitUntilAsync(() => viewModel.IsPinnedView && viewModel.Messages.Count == 1, cancellationToken);
-            viewModel.ShowUnifiedInboxCommand.Execute(null);
+            await ((AsyncCommand)viewModel.ShowUnifiedInboxCommand).ExecuteAsync();
             await WaitUntilAsync(() => viewModel.IsUnifiedInbox && viewModel.Messages.Count == 2, cancellationToken);
 
             provider.MoveRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);

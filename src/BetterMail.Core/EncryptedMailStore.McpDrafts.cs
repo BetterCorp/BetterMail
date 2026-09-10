@@ -218,7 +218,9 @@ public sealed partial class EncryptedMailStore
         WithLockAsync(async connection =>
         {
             await EnsureMcpUploadsAsync(connection, cancellationToken).ConfigureAwait(false);
+            await using var transaction = connection.BeginTransaction();
             await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = """
                 UPDATE mcp_attachment_uploads SET remote_state=$state, remote_json=COALESCE($file,remote_json),link_json=COALESCE($link,link_json),
                     completed_at=CASE WHEN $state='complete' THEN $completed ELSE completed_at END
@@ -231,7 +233,14 @@ public sealed partial class EncryptedMailStore
             command.Parameters.AddWithValue("$completed", (completedAt ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture));
             command.Parameters.AddWithValue("$file", file is null ? DBNull.Value : JsonSerializer.Serialize(file));
             command.Parameters.AddWithValue("$link", link is null ? DBNull.Value : JsonSerializer.Serialize(link));
-            return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 1;
+            if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1) return false;
+            if (state == "complete")
+            {
+                command.CommandText = "DELETE FROM mcp_attachment_chunks WHERE upload_id=$id;";
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return true;
         }, cancellationToken);
 
     public Task<byte[]> ReadMcpUploadBytesAsync(string owner, string id, CancellationToken cancellationToken = default) =>
