@@ -68,3 +68,5 @@ OneDrive is supported in this change. Google Drive authorization and provider su
 [Attachment viewer](screenshots/attachment-preview-light.png) · [Destination, light](screenshots/attachment-save-drive-light.png) · [Destination, dark](screenshots/attachment-save-drive-dark.png)
 
 These are the actual Avalonia views with fictional offline data. Regression tests cover account/folder selection, root uploads, exact bytes and metadata, duplicate submissions, failure, cancellation, and mail-only account exclusion. No live account upload was performed.
+
+The destination picker exposes an editable filename and blocks upload when the name exceeds 255 characters or its path through the selected folders exceeds 400 characters. Inline validation updates when the filename or destination changes; users can shorten the name or choose a folder nearer the root. Limits follow [Microsoft documentation](https://support.microsoft.com/en-us/onedrive/what-are-file-path-length-limits).

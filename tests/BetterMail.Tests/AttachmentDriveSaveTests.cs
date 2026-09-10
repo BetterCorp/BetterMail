@@ -189,6 +189,61 @@ public sealed class AttachmentDriveSaveTests
         Assert.True(model.CanSave);
     }
 
+    [Theory]
+    [InlineData(256)]
+    [InlineData(401)]
+    public async Task LongFilenameMustBeShortenedBeforeUpload(int length)
+    {
+        var token = TestContext.Current.CancellationToken;
+        var provider = new Files();
+        var model = new AttachmentDriveSaveViewModel(provider, [Account], new string('a', length - 4) + ".pdf", "application/pdf", [1]);
+        await model.Workspace.InitializeAsync(token);
+        Assert.False(model.CanSave);
+        Assert.Contains("255", model.FileNameError);
+        await model.SaveAsync(token);
+        Assert.Equal(0, provider.Uploads);
+        model.FileName = "Shortened report.pdf";
+        Assert.True(model.CanSave);
+        await model.SaveAsync(token);
+        Assert.Equal("Shortened report.pdf", provider.Name);
+        model.FileName = "Changed after saving.pdf";
+        Assert.Equal("Shortened report.pdf", model.FileName);
+    }
+
+    [Fact]
+    public async Task FilenameValidationCountsDecodedFolderNamesAndUpdatesWhenDestinationChanges()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var provider = new Files();
+        var model = new AttachmentDriveSaveViewModel(provider, [Account], new string('a', 35) + ".pdf", "application/pdf", []);
+        await model.Workspace.InitializeAsync(token);
+        var root = model.Workspace.Roots[0];
+        root.SetItems([Folder with { Name = new string('x', 178) + " %" }], _ => Task.CompletedTask);
+        var first = root.Children[0];
+        first.SetItems([Folder with { ProviderId = "nested", Name = new string('y', 180) }], _ => Task.CompletedTask);
+        var nested = first.Children[0];
+        nested.SetItems([], _ => Task.CompletedTask);
+        await model.Workspace.SelectDirectoryAsync(nested, token);
+        // 180 + '/' + 180 + '/' + 39 = 401; the literal space and percent each count once.
+        Assert.False(model.CanSave);
+        Assert.Contains("400", model.FileNameError);
+        await model.SaveAsync(token);
+        Assert.Equal(0, provider.Uploads);
+        model.FileName = new string('a', 34) + ".pdf";
+        Assert.True(model.CanSave); // Exactly 400 characters.
+        model.FileName += "x";
+        Assert.False(model.CanSave);
+        await model.Workspace.SelectDirectoryAsync(root, token);
+        Assert.True(model.CanSave);
+        model.FileName = new string('a', 251) + ".pdf";
+        Assert.True(model.CanSave); // Exactly 255 characters at the root.
+        model.FileName = "CON.pdf";
+        Assert.False(model.CanSave);
+        Assert.NotNull(model.FileNameError);
+        model.FileName = "";
+        Assert.False(model.CanSave);
+    }
+
     private sealed class Files : IFilesProvider
     {
         public TaskCompletionSource Started = new(TaskCreationOptions.RunContinuationsAsynchronously);
