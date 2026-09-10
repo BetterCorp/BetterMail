@@ -44,6 +44,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private readonly Action<string> _applyAccent;
     private readonly MailContentRenderer _renderer = new();
     private readonly TimeSpan _markReadDelay;
+    private readonly Func<TimeSpan, CancellationToken, Task> _waitForMarkRead;
     private readonly NewMailNotificationCoordinator _newMailNotifications;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _draftSyncLocks = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IAccountProvider> _accountProviders = new(StringComparer.Ordinal);
@@ -161,7 +162,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         IMailProvider? provider = null,
         TimeSpan? markReadDelay = null,
         IWorkspaceProvider? workspaceProvider = null,
-        IDesktopNotificationService? desktopNotificationService = null)
+        IDesktopNotificationService? desktopNotificationService = null,
+        Func<TimeSpan, CancellationToken, Task>? waitForMarkRead = null)
     {
         _store = store;
         _dataDirectory = dataDirectory;
@@ -171,6 +173,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         _provider = provider;
         _workspaceProvider = workspaceProvider;
         _markReadDelay = markReadDelay ?? TimeSpan.FromSeconds(2);
+        _waitForMarkRead = waitForMarkRead ?? Task.Delay;
         _newMailNotifications = new NewMailNotificationCoordinator(
             desktopNotificationService ?? NoOpDesktopNotificationService.Instance);
 
@@ -4076,7 +4079,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
         try
         {
-            await Task.Delay(_markReadDelay, cancellationToken);
+            await _waitForMarkRead(_markReadDelay, cancellationToken);
         }
         catch (OperationCanceledException)
         {
