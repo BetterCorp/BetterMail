@@ -272,6 +272,35 @@ public sealed class McpUploadTests
         await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
     }
 
+    [Theory]
+    [InlineData("stale", false)]
+    [InlineData("CURRENT", false)]
+    [InlineData("current", true)]
+    public async Task ReplacementChecksCurrentETagBeforeClaimingUpload(string expectedETag, bool matches)
+    {
+        await WithStore(async (store, tools, _, files) =>
+        {
+            var upload = await tools.BeginDriveUpload("microsoft365:account", "report", "text/plain", 1, Hash([1]),
+                replaceItemId: "file-target", expectedETag: expectedETag);
+            await tools.UploadDriveChunk("microsoft365:account", upload.Id, 0, "AQ==");
+            if (matches)
+            {
+                await tools.CompleteDriveUpload("microsoft365:account", upload.Id);
+                Assert.Equal(1, files.Replacements);
+                Assert.Equal("complete", (await tools.GetDriveUpload("microsoft365:account", upload.Id)).State);
+            }
+            else
+            {
+                var error = await Assert.ThrowsAsync<McpException>(() => tools.CompleteDriveUpload("microsoft365:account", upload.Id));
+                Assert.Contains("No upload was attempted", error.Message);
+                Assert.Equal(0, files.Replacements);
+                Assert.Equal("ready", (await tools.GetDriveUpload("microsoft365:account", upload.Id)).State);
+                Assert.Equal(new byte[] { 1 }, await store.ReadMcpUploadBytesAsync("drive:microsoft365:account", upload.Id));
+            }
+            Assert.Equal(0, files.Uploads);
+        });
+    }
+
     private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
     private static async Task WithStore(Func<EncryptedMailStore, McpMailTools, LocalDraft, Files, Task> test)
     {
@@ -295,14 +324,21 @@ public sealed class McpUploadTests
 
     private sealed class Files : IFilesProvider
     {
-        public int Uploads, Shares;
+        public int Uploads, Shares, Replacements;
         public string? UploadedName;
         public bool FailShare;
         public string? Scope;
         public DateTimeOffset Expiry;
         public Task<IReadOnlyList<CloudFile>> SearchFilesAsync(MailAccount account, string query, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CloudFile>>([]);
         public Task<IReadOnlyList<CloudDriveItem>> GetDriveItemsAsync(MailAccount account, CloudDriveItem? parent = null, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CloudDriveItem>>([new("folder", "Attachments", 0, true, null, null, account.AccountId, account.ProviderId)]);
-        public Task<CloudDriveItem> GetDriveItemAsync(MailAccount account, string itemId, CancellationToken cancellationToken = default) => Task.FromResult(new CloudDriveItem(itemId, "Attachments", 0, itemId != "file-target", null, null, account.AccountId, account.ProviderId));
+        public Task<CloudDriveItem> GetDriveItemAsync(MailAccount account, string itemId, CancellationToken cancellationToken = default) => Task.FromResult(new CloudDriveItem(itemId, "Attachments", 0, itemId != "file-target", null, null, account.AccountId, account.ProviderId, ETag: "current"));
+        public Task<CloudDriveItem> UpdateDriveFileAsync(MailAccount account, CloudDriveItem item, Stream content, long length,
+            string contentType, string expectedETag, CancellationToken cancellationToken = default)
+        {
+            Replacements++;
+            Assert.Equal("current", expectedETag);
+            return Task.FromResult(item with { Size = length, ETag = "updated" });
+        }
         public async Task<CloudDriveItem> UploadFileAsync(MailAccount account, CloudDriveItem? parent, string name, Stream content, long contentLength, string? contentType = null, CancellationToken cancellationToken = default)
         {
             Assert.Equal(AttachmentDriveSaveViewModel.NormalizeFileName(name), name);
