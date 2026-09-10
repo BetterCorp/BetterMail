@@ -11,7 +11,8 @@ internal sealed partial class McpMailTools(
     Func<McpConfiguration> configuration,
     Func<Task> refreshAndSync,
     Func<ComposeSender, string, DraftMessage, Task> queueSend,
-    EvidenceService? evidence = null)
+    EvidenceService? evidence = null,
+    Func<IFilesProvider?>? filesProvider = null)
 {
     private McpConfiguration EnabledConfiguration()
     {
@@ -103,7 +104,7 @@ internal sealed partial class McpMailTools(
         var draft = await DraftAsync(mailboxId, draftId);
         return new { draft.Id, draft.Subject, draft.To, draft.Cc, draft.Bcc, body = Clip(draft.Body), bodyTruncated = draft.Body.Length > 200_000,
             draft.IsHtml, draft.Importance, draft.IsFlagged, draft.UpdatedAt,
-            attachments = draft.Attachments.Select(item => new { item.Name, item.ContentType, item.Size, item.IsInline }) };
+            attachments = draft.Attachments.Select((item, index) => new { index, item.Name, item.ContentType, item.Size, item.IsInline }) };
     }
 
     [McpServerTool(Name = "create_draft", Destructive = false), Description("Create a new saved draft. Requires edit permission. Does not send. Recipients accept Name <address> separated by semicolons. No local file access is exposed.")]
@@ -182,7 +183,7 @@ internal sealed partial class McpMailTools(
         return action?.MailboxId == mailboxId ? action : throw new McpException("Action unavailable.");
     }
 
-    [McpServerTool(Name = "sync_mail", Destructive = false, Idempotent = true), Description("Request BetterMail's normal background sync: receive mail first, then process pending Busy actions. Requires edit permission for the specified mailbox. The app syncs all connected accounts, but only allowed mailboxes can be read through MCP.")]
+    [McpServerTool(Name = "sync_mail", Destructive = false, Idempotent = true), Description("Request BetterMail's normal background sync: process queued sends and Busy actions before receiving mail. Requires edit permission for the specified mailbox. The app syncs all connected accounts, but only allowed mailboxes can be read through MCP.")]
     public async Task<string> SyncMail(string mailboxId)
     {
         await SenderAsync(mailboxId, write: true);

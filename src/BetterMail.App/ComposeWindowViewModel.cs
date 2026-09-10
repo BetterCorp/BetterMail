@@ -77,8 +77,8 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         {
             Attachments.Add(attachment);
         }
-        SendCommand = new AsyncCommand(SendAsync, () => SelectedSender is not null && !IsSending);
-        DeleteCommand = new AsyncCommand(DeleteSavedDraftAsync, () => _deleteDraft is not null && !IsSending);
+        SendCommand = new AsyncCommand(SendAsync, () => SelectedSender is not null && !IsSending && !IsUploadingAttachment);
+        DeleteCommand = new AsyncCommand(DeleteSavedDraftAsync, () => _deleteDraft is not null && !IsSending && !IsUploadingAttachment);
         RemoveAttachmentCommand = new AsyncCommand<DraftAttachment>(RemoveAttachmentAsync);
         if (HasContent())
         {
@@ -187,14 +187,25 @@ public sealed class ComposeWindowViewModel : ViewModelBase
             if (SetProperty(ref _isSending, value))
             {
                 ((AsyncCommand)SendCommand).Refresh();
+                ((AsyncCommand)DeleteCommand).Refresh();
+                RaisePropertyChanged(nameof(CanChangeAttachments));
             }
         }
     }
+
+    public bool CanChangeAttachments => !IsSending && !IsUploadingAttachment;
 
     public string DraftStatus
     {
         get => _draftStatus;
         private set => SetProperty(ref _draftStatus, value);
+    }
+
+    private bool _isUploadingAttachment;
+    public bool IsUploadingAttachment
+    {
+        get => _isUploadingAttachment;
+        set { if (SetProperty(ref _isUploadingAttachment, value)) { ((AsyncCommand)SendCommand).Refresh(); ((AsyncCommand)DeleteCommand).Refresh(); RaisePropertyChanged(nameof(CanChangeAttachments)); } }
     }
 
     public void AddAttachment(DraftAttachment attachment)
