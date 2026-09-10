@@ -57,3 +57,14 @@ Additional Mobbin references inspected:
 [Sync activity](screenshots/sync-progress-dark.png) · [New folder](screenshots/drive-new-folder-light.png)
 
 All captures use fictional offline fixtures. The activity screenshot deliberately supplies synthetic progress values to the real UI; it is not a production sync trace or benchmark. The user's reference screenshot is not part of this repository. Responsiveness tests hold provider requests open and verify navigation and retained workspace state; no production-account performance benchmark was performed.
+
+
+## Save attachments to Drive
+
+Both inline-mail and detached conversation attachment previews offer **Save to Drive** alongside **Save as**. The destination window lists connected accounts with Files capability and their folders, including the account root. Saving uploads the existing attachment bytes in the background, disables repeat submission, and shows an indeterminate progress bar followed by the actual returned filename. Cancel upload (or closing the destination window) requests cancellation; uncertain results never claim that no file was created.
+
+OneDrive is supported in this change. Google Drive authorization and provider support remain deferred. Small OneDrive uploads now request `@microsoft.graph.conflictBehavior=rename`, matching the existing large-file upload session behavior, so duplicate filenames keep both files. See [Microsoft's conflict behavior documentation](https://learn.microsoft.com/en-us/graph/api/resources/driveitem?view=graph-rest-1.0#instance-attributes).
+
+[Attachment viewer](screenshots/attachment-preview-light.png) · [Destination, light](screenshots/attachment-save-drive-light.png) · [Destination, dark](screenshots/attachment-save-drive-dark.png)
+
+These are the actual Avalonia views with fictional offline data. Regression tests cover account/folder selection, root uploads, exact bytes and metadata, duplicate submissions, failure, cancellation, and mail-only account exclusion. No live account upload was performed.

@@ -117,12 +117,28 @@ internal static class Program
         foreach (var message in previewMessages) vm.Messages.Add(message);
         await Shot("mail-phone");
         window.Close();
+        var attachment = new FilePreviewWindow("Meeting notes.txt", "text/plain", 0,
+            System.Text.Encoding.UTF8.GetBytes("Design review\n\nThursday, 10:00\n\nDiscuss the autumn launch and agree on next steps."),
+            provider, vm.Accounts.ToArray())
+        { WindowDecorations = WindowDecorations.None, WindowStartupLocation = WindowStartupLocation.Manual, Position = new PixelPoint(0, 0) };
+        attachment.Show();
+        await Shot("attachment-preview-light", attachment);
+        attachment.Close();
+        var save = new AttachmentDriveSaveWindow(new AttachmentDriveSaveViewModel(
+            provider, vm.Accounts.ToArray(), "Meeting notes.txt", "text/plain", []))
+        { WindowDecorations = WindowDecorations.None, WindowStartupLocation = WindowStartupLocation.Manual, Position = new PixelPoint(0, 0) };
+        save.Show();
+        await Shot("attachment-save-drive-light", save);
+        Application.Current.RequestedThemeVariant = ThemeVariant.Dark;
+        await Shot("attachment-save-drive-dark", save);
+        save.Close();
         Directory.Delete(directory, true);
 
-        async Task Shot(string name)
+        async Task Shot(string name, Window? target = null)
         {
+            target ??= window;
             await Task.Delay(1800);
-            var process = Process.Start(new ProcessStartInfo("python3") { ArgumentList = { "tools/BetterMail.UiPreview/capture.py", Path.Combine(output, name + ".png"), ((int)window.Width).ToString(), ((int)window.Height).ToString() } })!;
+            var process = Process.Start(new ProcessStartInfo("python3") { ArgumentList = { "tools/BetterMail.UiPreview/capture.py", Path.Combine(output, name + ".png"), ((int)target.Width).ToString(), ((int)target.Height).ToString() } })!;
             await process.WaitForExitAsync();
             if (process.ExitCode != 0) throw new InvalidOperationException("Screenshot capture failed.");
             Console.WriteLine(name);

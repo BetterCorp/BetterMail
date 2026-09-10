@@ -1,4 +1,5 @@
 using System.Text;
+using BetterMail.Core;
 using Avalonia.Controls;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
@@ -34,17 +35,24 @@ public sealed partial class FilePreviewWindow : Window
     private byte[]? _content;
     private string? _temporaryDirectory;
     private Bitmap? _bitmap;
+    private IFilesProvider? _filesProvider;
+    private IReadOnlyList<MailAccount> _driveAccounts = [];
+    private AttachmentDriveSaveWindow? _driveWindow;
 
     public FilePreviewWindow()
     {
         InitializeComponent();
     }
 
-    public FilePreviewWindow(string name, string contentType, long size, byte[]? content) : this()
+    public FilePreviewWindow(string name, string contentType, long size, byte[]? content,
+        IFilesProvider? filesProvider = null, IReadOnlyList<MailAccount>? accounts = null) : this()
     {
         _name = string.IsNullOrWhiteSpace(name) ? "Attachment" : name;
         _contentType = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType;
         _content = content;
+        _filesProvider = filesProvider;
+        _driveAccounts = accounts ?? [];
+        SaveDriveButton.IsEnabled = content is not null;
         Title = $"{_name} — Preview";
         FileNameText.Text = _name;
         FileDetailsText.Text = $"{FormatSize(content?.LongLength ?? size)} · {_contentType}";
@@ -131,6 +139,25 @@ public sealed partial class FilePreviewWindow : Window
         {
             LoadingPreview.IsVisible = false;
         }
+    }
+
+    private void SaveDriveClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (_content is null) return;
+        if (_filesProvider is null)
+        {
+            FileDetailsText.Text = "Connect a OneDrive account in Settings to save attachments to Drive.";
+            return;
+        }
+        if (_driveWindow is not null)
+        {
+            _driveWindow.Activate();
+            return;
+        }
+        _driveWindow = new AttachmentDriveSaveWindow(new AttachmentDriveSaveViewModel(
+            _filesProvider, _driveAccounts, _name, _contentType, _content));
+        _driveWindow.Closed += (_, _) => _driveWindow = null;
+        IndependentWindow.Show(_driveWindow);
     }
 
     private async void SaveClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

@@ -1,0 +1,59 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="using:BetterMail.App"
+        x:Class="BetterMail.App.AttachmentDriveSaveWindow"
+        Title="Save to Drive" Icon="/Assets/BetterMail.ico"
+        Width="780" Height="600" MinWidth="560" MinHeight="400"
+        WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="Auto,*,Auto">
+    <StackPanel Margin="20,16" Spacing="6">
+      <TextBlock Text="Save to Drive" FontSize="20" FontWeight="SemiBold" />
+      <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis" />
+      <TextBlock Text="Choose an account and folder. Existing files will be kept." Opacity="0.65" TextWrapping="Wrap" />
+    </StackPanel>
+    <Grid Grid.Row="1" ColumnDefinitions="240,*" IsEnabled="{Binding CanBrowse}">
+      <Border Padding="12" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,1,1,1">
+        <TreeView ItemsSource="{Binding Workspace.Roots}" Classes="workspaceTree" AutomationProperties.Name="Destination accounts and folders">
+          <TreeView.Styles>
+            <Style Selector="TreeViewItem"><Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" /></Style>
+          </TreeView.Styles>
+          <TreeView.ItemTemplate>
+            <TreeDataTemplate DataType="{x:Type app:DriveTreeNode}" ItemsSource="{Binding Children}">
+              <Button Classes="workspaceItem" HorizontalContentAlignment="Stretch"
+                      Command="{Binding $parent[Window].DataContext.Workspace.SelectDirectoryCommand}"
+                      CommandParameter="{Binding}" IsEnabled="{Binding !IsPlaceholder}">
+                <TextBlock Text="{Binding DisplayName}" ToolTip.Tip="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+              </Button>
+            </TreeDataTemplate>
+          </TreeView.ItemTemplate>
+        </TreeView>
+      </Border>
+      <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*,Auto" Margin="16,12">
+        <Button Content="Up" Command="{Binding Workspace.GoUpCommand}" Margin="0,0,0,8" />
+        <TextBlock Grid.Row="1" Text="{Binding Workspace.DirectoryTitle}" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,0,0,12" />
+        <ListBox Grid.Row="2" ItemsSource="{Binding Workspace.SelectedDirectory.Children}" Classes="workspaceList">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="app:DriveTreeNode">
+              <Button Classes="workspaceItem" HorizontalContentAlignment="Stretch"
+                      Command="{Binding $parent[Window].DataContext.Workspace.SelectDirectoryCommand}"
+                      CommandParameter="{Binding}" IsEnabled="{Binding !IsPlaceholder}">
+                <TextBlock Text="{Binding DisplayName}" ToolTip.Tip="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+              </Button>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+        <ItemsControl Grid.Row="3" ItemsSource="{Binding Workspace.LoadIssues}">
+          <ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" /></DataTemplate></ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </Grid>
+    </Grid>
+    <Grid Grid.Row="2" RowDefinitions="Auto,Auto" Margin="20,12">
+      <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsSaving}" Height="3" Margin="0,0,0,10" />
+      <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+        <TextBlock Text="{Binding Status}" TextWrapping="Wrap" VerticalAlignment="Center" />
+        <Button Grid.Column="1" Content="{Binding CloseLabel}" Click="CloseClicked" />
+        <Button Grid.Column="2" Classes="primary" Content="Save here" Click="SaveClicked" IsEnabled="{Binding CanSave}" />
+      </Grid>
+    </Grid>
+  </Grid>
+</Window>

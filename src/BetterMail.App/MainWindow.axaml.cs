@@ -684,7 +684,8 @@ public sealed partial class MainWindow : Window
                         hydrated.Name,
                         hydrated.ContentType,
                         hydrated.Size,
-                        hydrated.ContentBytes));
+                        hydrated.ContentBytes,
+                        viewModel.FilesProvider, viewModel.Accounts.ToArray()));
                 }
             });
         previewViewModel.Reconcile(preview.Messages, preview.Selected);
@@ -1014,7 +1015,8 @@ public sealed partial class MainWindow : Window
             attachment.Name,
             attachment.ContentType,
             attachment.Size,
-            attachment.ContentBytes));
+            attachment.ContentBytes,
+            _viewModel?.FilesProvider, _viewModel?.Accounts.ToArray()));
     }
 
 }
