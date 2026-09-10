@@ -35,13 +35,13 @@
     <KeyBinding Gesture="F9" Command="{Binding SyncCommand}" />
   </Window.KeyBindings>
 
-  <Grid x:Name="ShellGrid" RowDefinitions="44,46,*,0" ColumnDefinitions="48,248,380,*">
-    <!-- Outlook-style application header -->
+  <Grid x:Name="ShellGrid" RowDefinitions="56,46,*,0" ColumnDefinitions="72,248,380,*">
+    <!-- Workspace header -->
     <Border Grid.ColumnSpan="4" Background="{DynamicResource BetterMailHeaderBrush}">
       <Grid x:Name="HeaderLayout" ColumnDefinitions="230,*,Auto" Margin="10,0,10,0">
         <StackPanel x:Name="HeaderBrand" Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
           <Image Source="/Assets/BetterMail.png" Width="24" Height="24" />
-          <TextBlock Text="BetterMail" Foreground="White" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+          <TextBlock Text="BetterMail" Foreground="{DynamicResource BetterMailTextBrush}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
         </StackPanel>
 
         <Grid x:Name="HeaderSearch" Grid.Column="1" MaxWidth="620" HorizontalAlignment="Stretch" ColumnDefinitions="*,Auto">
@@ -71,7 +71,7 @@
                   Content="Search"
                   Command="{Binding SearchCommand}"
                   Background="Transparent"
-                  Foreground="White"
+                  Foreground="{DynamicResource BetterMailTextBrush}"
                   Padding="10,5"
                   AutomationProperties.Name="Run mail search"
                   TabIndex="1"
@@ -85,7 +85,7 @@
             <Border x:Name="GlobalSearchResultsPanel"
                     Width="900"
                     MaxHeight="720"
-                    Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                    Background="{DynamicResource BetterMailSurfaceBrush}"
                     BorderBrush="{DynamicResource BetterMailDividerBrush}"
                     BorderThickness="1"
                     BoxShadow="0 8 24 0 #44000000"
@@ -200,7 +200,7 @@
         </Grid>
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
-          <Button Content="{Binding SyncIcon}" Command="{Binding SyncCommand}" Background="Transparent" Foreground="White" FontSize="17"
+          <Button Content="{Binding SyncIcon}" Command="{Binding SyncCommand}" Background="Transparent" Foreground="{DynamicResource BetterMailTextBrush}" FontSize="17"
                   ToolTip.Tip="Sync mail (F9)"
                   AutomationProperties.Name="Sync mail"
                   AutomationProperties.HelpText="Synchronize all connected mailboxes. Keyboard shortcut F9."
@@ -211,25 +211,25 @@
 
     <!-- Compact application rail -->
     <Border x:Name="AppRail" Grid.Row="1" Grid.RowSpan="2" Grid.Column="0"
-            Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+            Background="{DynamicResource BetterMailSidebarBrush}"
             BorderBrush="{DynamicResource BetterMailDividerBrush}"
             BorderThickness="0,0,1,0">
       <Grid x:Name="AppRailLayout" RowDefinitions="Auto,*,Auto" Margin="3,5">
         <StackPanel x:Name="RailModules" Spacing="3">
-          <Button Classes="rail" Classes.selected="{Binding IsMailModule}" Content="✉" Command="{Binding ShowUnifiedInboxCommand}" ToolTip.Tip="Mail" Click="MailModuleClicked" AutomationProperties.Name="Mail" TabIndex="10" />
-          <Button Classes="rail" Classes.selected="{Binding IsCalendarModule}" Content="▦" Command="{Binding ShowCalendarCommand}" ToolTip.Tip="Calendar" AutomationProperties.Name="Calendar" AutomationProperties.HelpText="Requires a connected Microsoft 365 account" TabIndex="11" />
-          <Button Classes="rail" Classes.selected="{Binding IsContactsModule}" Content="♙" Command="{Binding ShowContactsCommand}" ToolTip.Tip="People" AutomationProperties.Name="People" AutomationProperties.HelpText="Requires a connected Microsoft 365 account" TabIndex="12" />
-          <Button Classes="rail" Classes.selected="{Binding IsTasksModule}" Content="✓" Command="{Binding ShowTasksCommand}" ToolTip.Tip="To Do" AutomationProperties.Name="To Do" AutomationProperties.HelpText="Requires a connected Microsoft 365 account" TabIndex="13" />
-          <Button Classes="rail" Classes.selected="{Binding IsFilesModule}" Content="☁" Command="{Binding ShowFilesCommand}" ToolTip.Tip="OneDrive" AutomationProperties.Name="OneDrive" AutomationProperties.HelpText="Requires a connected Microsoft 365 account" TabIndex="14" />
-          <Button Classes="rail" Classes.selected="{Binding IsNotesModule}" Content="▤" Command="{Binding ShowNotesCommand}" ToolTip.Tip="Notes" AutomationProperties.Name="Notes" AutomationProperties.HelpText="Requires a connected Microsoft 365 account" TabIndex="15" />
+          <Button Classes="rail" Classes.selected="{Binding IsMailModule}" Command="{Binding ShowUnifiedInboxCommand}" ToolTip.Tip="Mail" Click="MailModuleClicked" AutomationProperties.Name="Mail" TabIndex="10"><StackPanel Spacing="2"><Path Data="M2,4 H22 V20 H2 Z M2,5 L12,13 L22,5" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6" Width="20" Height="20" Stretch="Uniform" HorizontalAlignment="Center" /><TextBlock Classes="moduleLabel" Text="Mail" /></StackPanel></Button>
+          <Button Classes="rail" Classes.selected="{Binding IsCalendarModule}" Command="{Binding ShowCalendarCommand}" ToolTip.Tip="Calendar" AutomationProperties.Name="Calendar" AutomationProperties.HelpText="Requires a connected Microsoft 365 account" TabIndex="11"><StackPanel Spacing="2"><Path Data="M3,5 H21 V21 H3 Z M3,10 H21 M7,2 V7 M17,2 V7" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6" Width="20" Height="20" Stretch="Uniform" HorizontalAlignment="Center" /><TextBlock Classes="moduleLabel" Text="Calendar" /></StackPanel></Button>
+          <Button Classes="rail" Classes.selected="{Binding IsContactsModule}" Command="{Binding ShowContactsCommand}" ToolTip.Tip="People" AutomationProperties.Name="People" AutomationProperties.HelpText="Requires a connected Microsoft 365 account" TabIndex="12"><StackPanel Spacing="2"><Path Data="M8,8 A4,4 0 1 0 16,8 A4,4 0 1 0 8,8 M4,22 V19 C4,12 20,12 20,19 V22" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6" Width="20" Height="20" Stretch="Uniform" HorizontalAlignment="Center" /><TextBlock Classes="moduleLabel" Text="People" /></StackPanel></Button>
+          <Button Classes="rail" Classes.selected="{Binding IsTasksModule}" Command="{Binding ShowTasksCommand}" ToolTip.Tip="To Do" AutomationProperties.Name="To Do" AutomationProperties.HelpText="Requires a connected Microsoft 365 account" TabIndex="13"><StackPanel Spacing="2"><Path Data="M4,12 L9,17 L20,5" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6" Width="20" Height="20" Stretch="Uniform" HorizontalAlignment="Center" /><TextBlock Classes="moduleLabel" Text="To Do" /></StackPanel></Button>
+          <Button Classes="rail" Classes.selected="{Binding IsFilesModule}" Command="{Binding ShowFilesCommand}" ToolTip.Tip="Files — OneDrive" AutomationProperties.Name="Files" AutomationProperties.HelpText="Requires a connected Microsoft 365 account" TabIndex="14"><StackPanel Spacing="2"><Path Data="M2,6 H10 L12,9 H22 V21 H2 Z" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6" Width="20" Height="20" Stretch="Uniform" HorizontalAlignment="Center" /><TextBlock Classes="moduleLabel" Text="Files" /></StackPanel></Button>
+          <Button Classes="rail" Classes.selected="{Binding IsNotesModule}" Command="{Binding ShowNotesCommand}" ToolTip.Tip="Notes" AutomationProperties.Name="Notes" AutomationProperties.HelpText="Requires a connected Microsoft 365 account" TabIndex="15"><StackPanel Spacing="2"><Path Data="M5,2 H19 V22 H5 Z M8,7 H16 M8,12 H16 M8,17 H14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6" Width="20" Height="20" Stretch="Uniform" HorizontalAlignment="Center" /><TextBlock Classes="moduleLabel" Text="Notes" /></StackPanel></Button>
         </StackPanel>
-        <Button x:Name="RailSettings" Grid.Row="2" Classes="rail" Content="⚙" Command="{Binding OpenSettingsCommand}" ToolTip.Tip="Settings" AutomationProperties.Name="Settings" TabIndex="16" />
+        <Button x:Name="RailSettings" Grid.Row="2" Classes="rail" Command="{Binding OpenSettingsCommand}" ToolTip.Tip="Settings" AutomationProperties.Name="Settings" TabIndex="16"><StackPanel Spacing="2"><Path Data="M12,3 L15,5 L19,5 L19,9 L21,12 L19,15 L19,19 L15,19 L12,21 L9,19 L5,19 L5,15 L3,12 L5,9 L5,5 L9,5 Z M8,12 A4,4 0 1 0 16,12 A4,4 0 1 0 8,12" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6" Width="20" Height="20" Stretch="Uniform" HorizontalAlignment="Center" /><TextBlock Classes="moduleLabel" Text="Settings" /></StackPanel></Button>
       </Grid>
     </Border>
 
     <!-- Mail command bar: only actions currently supported by BetterMail -->
     <Border x:Name="MailCommandBar" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3"
-            Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+            Background="{DynamicResource BetterMailSurfaceBrush}"
             BorderBrush="{DynamicResource BetterMailDividerBrush}"
             BorderThickness="0,0,0,1"
             IsVisible="{Binding ShowMailSurface}"
@@ -326,33 +326,33 @@
 
     <!-- Structured folder pane -->
     <Border x:Name="FolderPane" Grid.Row="2" Grid.Column="1"
-            Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+            Background="{DynamicResource BetterMailSidebarBrush}"
             BorderBrush="{DynamicResource BetterMailDividerBrush}"
             BorderThickness="0,0,1,0">
       <Grid RowDefinitions="Auto,*">
         <TextBlock Text="Mail" FontSize="20" FontWeight="SemiBold" Margin="16,14,12,10" />
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-          <StackPanel Margin="4,0,4,8" Spacing="2">
-            <TextBlock Text="FAVORITES" FontSize="11" FontWeight="SemiBold" Opacity="0.65" Margin="4,8,4,3" />
+          <StackPanel Margin="10,0,10,12" Spacing="2">
+            <TextBlock Text="FAVORITES" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource BetterMailMutedBrush}" Margin="4,8,4,3" />
             <Button Classes="folder" Classes.selected="{Binding IsUnifiedInbox}" Command="{Binding ShowUnifiedInboxCommand}" Click="FolderSelectedClicked"
                     AutomationProperties.Name="Unified Inbox" TabIndex="40">
               <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Text="Unified Inbox" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="{Binding UnifiedMessageCountText}" FontWeight="SemiBold" Foreground="#0F6CBD" Margin="6,0,1,0" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{Binding UnifiedMessageCountText}" FontWeight="SemiBold" Foreground="{DynamicResource BetterMailAccentBrush}" Margin="6,0,1,0" VerticalAlignment="Center" />
               </Grid>
             </Button>
             <Button Classes="folder" Classes.selected="{Binding IsPinnedView}" Command="{Binding ShowPinnedCommand}"
-                    Margin="18,0,0,0" Click="FolderSelectedClicked" AutomationProperties.Name="Pinned messages">
+                    Click="FolderSelectedClicked" AutomationProperties.Name="Pinned messages">
               <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Text="Pinned" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="{Binding PinnedMessageCountText}" FontWeight="SemiBold" Foreground="#0F6CBD" Margin="6,0,1,0" />
+                <TextBlock Grid.Column="1" Text="{Binding PinnedMessageCountText}" FontWeight="SemiBold" Foreground="{DynamicResource BetterMailAccentBrush}" Margin="6,0,1,0" />
               </Grid>
             </Button>
             <Button Classes="folder" Classes.selected="{Binding IsFlaggedView}" Command="{Binding ShowFlaggedCommand}"
-                    Margin="18,0,0,0" Click="FolderSelectedClicked" AutomationProperties.Name="Flagged messages">
+                    Click="FolderSelectedClicked" AutomationProperties.Name="Flagged messages">
               <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Text="Flagged" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="{Binding FlaggedMessageCountText}" FontWeight="SemiBold" Foreground="#0F6CBD" Margin="6,0,1,0" />
+                <TextBlock Grid.Column="1" Text="{Binding FlaggedMessageCountText}" FontWeight="SemiBold" Foreground="{DynamicResource BetterMailAccentBrush}" Margin="6,0,1,0" />
               </Grid>
             </Button>
             <Button Classes="folder" Classes.selected="{Binding IsAllDraftsView}"
@@ -361,7 +361,7 @@
                     AutomationProperties.Name="Open Drafts">
               <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Text="Drafts" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="{Binding Drafts.Count}" FontWeight="SemiBold" Foreground="#0F6CBD" Margin="6,0,1,0" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{Binding Drafts.Count}" FontWeight="SemiBold" Foreground="{DynamicResource BetterMailAccentBrush}" Margin="6,0,1,0" VerticalAlignment="Center" />
               </Grid>
             </Button>
             <Button Classes="folder" Classes.selected="{Binding IsOutboxView}"
@@ -370,7 +370,7 @@
               <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Text="Busy" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="1" Text="{Binding OutboxCountText}" FontWeight="SemiBold"
-                           Foreground="#0F6CBD" Margin="6,0,1,0" />
+                           Foreground="{DynamicResource BetterMailAccentBrush}" Margin="6,0,1,0" />
               </Grid>
             </Button>
             <Expander Margin="0,1" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
@@ -396,7 +396,7 @@
               </StackPanel>
             </Expander>
 
-            <TextBlock Text="ACCOUNTS" FontSize="11" FontWeight="SemiBold" Opacity="0.65" Margin="4,12,4,3" />
+            <TextBlock Text="ACCOUNTS" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource BetterMailMutedBrush}" Margin="4,12,4,3" />
             <ItemsControl ItemsSource="{Binding FolderGroups}" HorizontalAlignment="Stretch">
               <ItemsControl.ItemTemplate>
                 <DataTemplate x:DataType="app:MailboxFolderGroup">
@@ -445,7 +445,7 @@
                                   AutomationProperties.HelpText="Open mail folder">
                             <Grid ColumnDefinitions="*,Auto">
                               <TextBlock Text="{Binding Item.DisplayName}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                              <TextBlock Grid.Column="1" Text="{Binding Item.CountText}" FontWeight="SemiBold" Foreground="#0F6CBD" Margin="6,0,1,0" VerticalAlignment="Center" />
+                              <TextBlock Grid.Column="1" Text="{Binding Item.CountText}" FontWeight="SemiBold" Foreground="{DynamicResource BetterMailAccentBrush}" Margin="6,0,1,0" VerticalAlignment="Center" />
                             </Grid>
                           </Button>
                         </TreeDataTemplate>
@@ -463,11 +463,11 @@
 
     <!-- Compact message list -->
     <Border x:Name="MessageListPane" Grid.Row="2" Grid.Column="2"
-            Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+            Background="{DynamicResource BetterMailSurfaceBrush}"
             BorderBrush="{DynamicResource BetterMailDividerBrush}"
             BorderThickness="0,0,1,0">
       <Grid RowDefinitions="Auto,*">
-        <Border Padding="14,11,10,9" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1">
+        <Border Padding="18,16,14,14" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1">
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel Spacing="2">
               <TextBlock Text="{Binding CurrentFolderName}" FontSize="19" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
@@ -515,12 +515,12 @@
                 <Setter Property="Opacity" Value="0" />
                 <Setter Property="IsHitTestVisible" Value="False" />
                 <Setter Property="RenderTransform" Value="translate(160px, 0px)" />
-                <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundAltHighBrush}" />
+                <Setter Property="Background" Value="{DynamicResource BetterMailSurfaceBrush}" />
                 <Setter Property="BorderBrush" Value="{DynamicResource BetterMailDividerBrush}" />
                 <Setter Property="BorderThickness" Value="1,0,0,0" />
                 <Setter Property="BoxShadow" Value="{DynamicResource BetterMailQuickActionShadow}" />
               </Style>
-              <Style Selector="ListBoxItem:pointerover Border.quickActions">
+              <Style Selector="ListBoxItem:pointerover Border.quickActions, ListBoxItem:focus-within Border.quickActions">
                 <Setter Property="Opacity" Value="1" />
                 <Setter Property="IsHitTestVisible" Value="True" />
                 <Setter Property="RenderTransform" Value="translate(0px, 0px)" />
@@ -570,7 +570,7 @@
                     </ContextMenu>
                   </Border.ContextMenu>
                   <Grid ClipToBounds="True">
-                    <Border Width="4" Background="#0F6CBD" IsVisible="{Binding IsUnread}" HorizontalAlignment="Left" />
+                    <Border Width="4" Background="{DynamicResource BetterMailAccentBrush}" IsVisible="{Binding IsUnread}" HorizontalAlignment="Left" />
                     <Grid Margin="{ReflectionBinding $parent[Window].DataContext.MessageRowMargin}" ColumnDefinitions="5,*,Auto" RowDefinitions="18,18,18" RowSpacing="1">
 
                     <Grid Grid.Column="1" Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto">
@@ -824,7 +824,7 @@
           Grid.Row="2"
           Grid.Column="3"
           RowDefinitions="Auto,*"
-          Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
+          Background="{DynamicResource BetterMailSurfaceBrush}">
       <Button x:Name="PhoneBack"
               Classes="command"
               Content="‹"
@@ -839,7 +839,7 @@
 
       <app:ConversationThreadView Grid.Row="1"
                                   DataContext="{Binding ConversationThread}"
-                                  IsVisible="{Binding ShowMessageBody}" />
+                                  IsVisible="{Binding $parent[Window].DataContext.ShowMessageBody}" />
       <StackPanel Grid.Row="1"
                   IsVisible="{Binding HasNoSelectedMessage}"
                   HorizontalAlignment="Center"
@@ -869,7 +869,7 @@
 
     <!-- Microsoft 365 workspace modules. -->
     <Border x:Name="WorkspaceSurface" Grid.Row="1" Grid.RowSpan="2" Grid.Column="1" Grid.ColumnSpan="3"
-            Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+            Background="{DynamicResource BetterMailSurfaceBrush}"
             IsVisible="{Binding ShowWorkspaceSurface}">
       <Grid RowDefinitions="Auto,*">
         <Border Padding="22,12" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1"
@@ -953,7 +953,7 @@
               <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="app:PersonEntry" x:CompileBindings="True">
                   <Border MinHeight="152" Margin="0,0,10,10" Padding="14"
-                          BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1" CornerRadius="3">
+                          BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1" CornerRadius="8">
                     <Grid RowDefinitions="Auto,*,Auto">
                       <Border Grid.RowSpan="3" Width="4" Margin="-14,-14,0,-14" HorizontalAlignment="Left" Background="{Binding Color}" />
                       <Grid ColumnDefinitions="44,*" ColumnSpacing="11">
@@ -973,7 +973,7 @@
                                     CommandParameter="{Binding EmailText}" Click="CopyContactTextClicked"
                                     ToolTip.Tip="Copy email" AutomationProperties.Name="Copy contact email" />
                           </Grid>
-                          <Border Background="{DynamicResource SystemControlBackgroundBaseLowBrush}" Padding="5,1" CornerRadius="2">
+                          <Border Background="{DynamicResource BetterMailSelectionBrush}" Padding="6,2" CornerRadius="4" HorizontalAlignment="Left">
                             <TextBlock Text="{Binding KindText}" FontSize="10" Opacity="0.72" HorizontalAlignment="Left" />
                           </Border>
                         </StackPanel>
@@ -1014,7 +1014,7 @@
                       AutomationProperties.Name="Close contact editor backdrop" />
               <Border Width="460" MaxWidth="460" Margin="12"
                       HorizontalAlignment="Right" VerticalAlignment="Stretch"
-                      Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                      Background="{DynamicResource BetterMailSurfaceBrush}"
                       BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1">
                 <StackPanel Margin="20" Spacing="10">
                   <Grid ColumnDefinitions="*,Auto">
@@ -1069,14 +1069,14 @@
 
     <!-- Settings is a full-window special surface. -->
     <Border x:Name="SettingsSurface" Grid.Row="0" Grid.RowSpan="3" Grid.Column="0" Grid.ColumnSpan="4"
-            Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+            Background="{DynamicResource BetterMailSurfaceBrush}"
             IsVisible="{Binding IsSettingsOpen}">
       <app:SettingsView />
     </Border>
 
     <Border x:Name="FullAppLoader"
             Grid.Row="0" Grid.RowSpan="3" Grid.Column="0" Grid.ColumnSpan="4"
-            Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+            Background="{DynamicResource BetterMailSurfaceBrush}"
             IsVisible="{Binding ShowFullScreenLoader}">
       <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
         <Image Source="/Assets/BetterMail.png" Width="48" Height="48" HorizontalAlignment="Center" />
@@ -1104,7 +1104,7 @@
     </Border>
 
     <Border Grid.RowSpan="3" Grid.ColumnSpan="4" Background="#B3000000" IsVisible="{Binding ShowOnboarding}">
-      <Border MaxWidth="480" Margin="16" Padding="32" CornerRadius="6" Background="{DynamicResource SystemControlBackgroundAltHighBrush}" HorizontalAlignment="Center" VerticalAlignment="Center">
+      <Border MaxWidth="480" Margin="16" Padding="32" CornerRadius="6" Background="{DynamicResource BetterMailSurfaceBrush}" HorizontalAlignment="Center" VerticalAlignment="Center">
         <StackPanel Spacing="14">
           <Image Source="/Assets/BetterMail.png" Width="48" Height="48" HorizontalAlignment="Left" />
           <TextBlock Text="Welcome to BetterMail" FontSize="26" FontWeight="SemiBold" />

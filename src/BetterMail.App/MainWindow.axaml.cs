@@ -102,9 +102,9 @@ public sealed partial class MainWindow : Window
         var phone = _layoutMode == ResponsiveLayoutMode.Phone;
         var wide = _layoutMode == ResponsiveLayoutMode.Wide;
 
-        SetRows(ShellGrid, 44, 46, 1, phone ? 48 : 0);
+        SetRows(ShellGrid, 56, 46, 1, phone ? 48 : 0);
         SetColumns(ShellGrid,
-            phone ? 0 : 48,
+            phone ? 0 : 72,
             wide ? 248 : 0,
             phone ? 1 : wide ? 380 : 320,
             phone ? 0 : 1);
@@ -137,6 +137,7 @@ public sealed partial class MainWindow : Window
             Grid.SetColumn(RailSettings, 0);
         }
 
+        AppRail.Classes.Set("phoneRail", phone);
         HeaderBrand.IsVisible = wide;
         SetColumns(HeaderLayout, 1, GridLength.Auto);
         Grid.SetColumn(HeaderSearch, 0);
