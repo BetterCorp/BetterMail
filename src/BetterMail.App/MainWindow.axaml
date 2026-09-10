@@ -515,6 +515,8 @@
         </Border>
 
         <Grid Grid.Row="1">
+          <TextBlock Text="Loading messages…" IsVisible="{Binding IsLoadingMessages}"
+                     HorizontalAlignment="Center" VerticalAlignment="Top" Margin="12" ZIndex="1" />
           <ListBox x:Name="MessageList" ItemsSource="{Binding Messages}"
                    SelectedItem="{Binding SelectedMessage, Mode=OneWay}"
                    SelectionMode="Multiple"

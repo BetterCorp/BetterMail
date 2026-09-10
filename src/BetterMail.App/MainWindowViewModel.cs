@@ -761,7 +761,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     public string DraftEmptyDescription => IsOutboxView ? "Pending mail actions will appear here." : "Saved drafts will appear here.";
     public bool IsSyncIssuesView => IsDraftsView && _draftListFilter == DraftListFilter.SyncIssues;
     public bool IsDraftConflictsView => IsDraftsView && _draftListFilter == DraftListFilter.Conflicts;
-    public bool ShowEmptyState => IsMessageListView && Messages.Count == 0 && !IsBusy;
+    public bool ShowEmptyState => IsMessageListView && Messages.Count == 0 && !IsBusy && !IsLoadingMessages;
     public bool ShowDraftEmptyState => IsDraftsView && (IsOutboxView ? BusyActions.Count == 0 : VisibleDrafts.Count == 0);
     public string MessageCountText => $"{Messages.Count:N0} messages";
     public bool HasMoreMessages => _messagePageCursor is not null && !IsSearchResultsView;
@@ -2794,41 +2794,66 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     }
 
     private int _messageLoadVersion;
+    private CancellationTokenSource? _messageLoadCancellation;
+    private bool _isLoadingMessages;
+    public bool IsLoadingMessages
+    {
+        get => _isLoadingMessages;
+        private set
+        {
+            if (SetProperty(ref _isLoadingMessages, value)) RaisePropertyChanged(nameof(ShowEmptyState));
+        }
+    }
     private async Task LoadMessagesAsync()
     {
         var loadVersion = ++_messageLoadVersion;
-        var requestedFolder = _selectedFolder;
-        var requestedModule = ActiveModule;
-        if (_store is null)
+        _messageLoadCancellation?.Cancel();
+        _messageLoadCancellation?.Dispose();
+        var cancellation = _messageLoadCancellation = new CancellationTokenSource();
+        var token = cancellation.Token;
+        IsLoadingMessages = true;
+        try
         {
-            return;
-        }
-        if (IsSearchResultsView && SearchText.Trim().Length >= 2)
-        {
-            _messagePageCursor = null;
-            await SearchCachedMailGloballyAsync(SearchText.Trim(), CancellationToken.None);
-            ReconcileMessages(_latestMailSearchResults);
+            var requestedFolder = _selectedFolder;
+            var requestedModule = ActiveModule;
+            if (_store is null)
+            {
+                return;
+            }
+            if (IsSearchResultsView && SearchText.Trim().Length >= 2)
+            {
+                _messagePageCursor = null;
+                await SearchCachedMailGloballyAsync(SearchText.Trim(), token);
+                if (loadVersion != _messageLoadVersion) return;
+                ReconcileMessages(_latestMailSearchResults);
+                RaiseMessageState();
+                RaisePropertyChanged(nameof(HasMoreMessages));
+                return;
+            }
+
+            IReadOnlyList<MailFolderKey> requestedFolders = requestedFolder is not null
+                ? [new(requestedFolder.MailboxId, requestedFolder.ProviderId)]
+                : Folders.Where(static folder => folder.WellKnownName == "inbox")
+                    .Select(static folder => new MailFolderKey(folder.MailboxId, folder.ProviderId))
+                    .ToArray();
+            var filter = requestedFolder is null ? _unifiedFilter : MailMessageFilter.All;
+            var page = await _store.GetMessagesPageAsync(requestedFolders, cancellationToken: token, filter: filter);
+            if (loadVersion != _messageLoadVersion || requestedFolder != _selectedFolder || requestedModule != ActiveModule) return;
+            _messagePageFolders = requestedFolders;
+            _messagePageCursor = page.NextCursor;
+            ReconcileMessages(page.Messages);
             RaiseMessageState();
             RaisePropertyChanged(nameof(HasMoreMessages));
-            return;
+            ((AsyncCommand)LoadMoreMessagesCommand).Refresh();
+            IsLoadingMessages = false;
+            _ = RepairMissingSubjectsAsync(page.Messages);
+            if (requestedFolder is null) await RefreshUnifiedCountsAsync();
         }
-
-        IReadOnlyList<MailFolderKey> requestedFolders = requestedFolder is not null
-            ? [new(requestedFolder.MailboxId, requestedFolder.ProviderId)]
-            : Folders.Where(static folder => folder.WellKnownName == "inbox")
-                .Select(static folder => new MailFolderKey(folder.MailboxId, folder.ProviderId))
-                .ToArray();
-        var filter = requestedFolder is null ? _unifiedFilter : MailMessageFilter.All;
-        var page = await _store.GetMessagesPageAsync(requestedFolders, filter: filter);
-        if (loadVersion != _messageLoadVersion || requestedFolder != _selectedFolder || requestedModule != ActiveModule) return;
-        _messagePageFolders = requestedFolders;
-        _messagePageCursor = page.NextCursor;
-        ReconcileMessages(page.Messages);
-        RaiseMessageState();
-        RaisePropertyChanged(nameof(HasMoreMessages));
-        ((AsyncCommand)LoadMoreMessagesCommand).Refresh();
-        _ = RepairMissingSubjectsAsync(page.Messages);
-        if (requestedFolder is null) await RefreshUnifiedCountsAsync();
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        finally
+        {
+            if (loadVersion == _messageLoadVersion) IsLoadingMessages = false;
+        }
     }
 
     private async Task LoadMoreMessagesAsync()

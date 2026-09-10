@@ -1414,7 +1414,21 @@ public sealed class MainWindowViewModelTests
             Assert.Equal("client", Assert.Single(projectsNode.Children).Item.ProviderId);
 
             var archiveItem = Assert.Single(viewModel.Folders, folder => folder.ProviderId == "archive");
-            viewModel.SelectFolderCommand.Execute(archiveItem);
+            var readerGate = (SemaphoreSlim)typeof(EncryptedMailStore).GetField("_folderReadGate",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(store)!;
+            await readerGate.WaitAsync(cancellationToken);
+            Task current;
+            try
+            {
+                var obsolete = ((AsyncCommand<MailFolderItem>)viewModel.SelectFolderCommand).ExecuteAsync(projectsNode.Item);
+                current = ((AsyncCommand<MailFolderItem>)viewModel.SelectFolderCommand).ExecuteAsync(archiveItem);
+                await obsolete.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+                Assert.True(viewModel.IsLoadingMessages);
+                Assert.False(viewModel.ShowEmptyState);
+            }
+            finally { readerGate.Release(); }
+            await current;
+            Assert.False(viewModel.IsLoadingMessages);
             await WaitUntilAsync(() => viewModel.CurrentFolderName == "Archive" && viewModel.SelectedMessage?.Body?.Contains("Archive body", StringComparison.Ordinal) == true, cancellationToken);
 
             Assert.Equal("Archive message", viewModel.SelectedMessage?.Subject);
@@ -1470,9 +1484,9 @@ public sealed class MainWindowViewModelTests
             var viewModel = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
             await viewModel.InitializeAsync();
 
-            viewModel.ToggleFlagCommand.Execute(null);
+            await ((AsyncCommand)viewModel.ToggleFlagCommand).ExecuteAsync();
             await WaitUntilAsync(() => provider.Flagged == true && viewModel.SelectedMessage?.IsFlagged == true, cancellationToken);
-            viewModel.TogglePinCommand.Execute(null);
+            await ((AsyncCommand)viewModel.TogglePinCommand).ExecuteAsync();
             await WaitUntilAsync(() => viewModel.SelectedMessage?.IsPinned == true && viewModel.PinnedMessageCount == 1, cancellationToken);
             viewModel.ShowPinnedCommand.Execute(null);
             await WaitUntilAsync(() => viewModel.IsPinnedView && viewModel.Messages.Count == 1, cancellationToken);
