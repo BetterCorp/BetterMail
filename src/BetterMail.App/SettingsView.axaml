@@ -490,6 +490,15 @@
                          TextWrapping="Wrap" Opacity="0.7" />
             </StackPanel>
           </Border>
+          <Border Classes="settingsCard">
+            <StackPanel Spacing="8">
+              <TextBlock Text="Mail images" FontWeight="SemiBold" />
+              <ToggleSwitch Content="Show sender images in mail" IsChecked="{Binding MailSenderImagesEnabled}"
+                            AutomationProperties.Name="Show sender images in mail" />
+              <TextBlock Text="Off by default and separate from People images. Shows images in the message list and headers. Shared email services use Gravatar only; business domains also try BIMI and favicons. External services can see your IP address and request timing; Gravatar receives an email hash. Images are visual cues, not identity verification. Turning this off cancels mail image loads and hides sender images."
+                         TextWrapping="Wrap" Opacity="0.7" />
+            </StackPanel>
+          </Border>
           <ItemsControl ItemsSource="{Binding SettingsAccounts}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="app:AccountSettingsItem">

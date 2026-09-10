@@ -10,6 +10,8 @@ namespace BetterMail.App;
 /// <summary>Loads only while in the viewport; recycled rows cannot receive stale images.</summary>
 public sealed class AsyncImage : Grid
 {
+    public static readonly StyledProperty<string?> EmailAddressProperty = AvaloniaProperty.Register<AsyncImage, string?>(nameof(EmailAddress));
+    public string? EmailAddress { get => GetValue(EmailAddressProperty); set => SetValue(EmailAddressProperty, value); }
     public static readonly StyledProperty<bool> AllowLoadingProperty = AvaloniaProperty.Register<AsyncImage, bool>(nameof(AllowLoading), false);
     public bool AllowLoading { get => GetValue(AllowLoadingProperty); set => SetValue(AllowLoadingProperty, value); }
     public static readonly StyledProperty<ImageRequest?> RequestProperty = AvaloniaProperty.Register<AsyncImage, ImageRequest?>(nameof(Request));
@@ -40,6 +42,8 @@ public sealed class AsyncImage : Grid
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
+        if (change.Property == EmailAddressProperty)
+            Request = string.IsNullOrWhiteSpace(EmailAddress) ? null : BackgroundImages.Contact(EmailAddress);
         if (change.Property == RequestProperty || change.Property == AllowLoadingProperty) { Stop(); if (_inViewport) Start(); }
         if (change.Property == FallbackPathProperty) _fallback.Data = Geometry.Parse(FallbackPath);
     }

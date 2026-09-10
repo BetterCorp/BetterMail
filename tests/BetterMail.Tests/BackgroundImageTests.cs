@@ -8,6 +8,25 @@ namespace BetterMail.Tests;
 
 public sealed class BackgroundImageTests
 {
+    [Fact]
+    public void MailImagePreferenceDefaultsOffAndIsIndependentOfPeople()
+    {
+        Assert.False(new AppPreferences().MailSenderImagesEnabled);
+        Assert.False(JsonSerializer.Deserialize<AppPreferences>("{\"ContactImagesEnabled\":true}")!.MailSenderImagesEnabled);
+        var preferences = JsonSerializer.Deserialize<AppPreferences>(JsonSerializer.Serialize(new AppPreferences(MailSenderImagesEnabled: true)))!;
+        Assert.True(preferences.MailSenderImagesEnabled);
+        Assert.False(preferences.ContactImagesEnabled);
+        var vm = new MainWindowViewModel(null, "data", _ => { }, _ => { }, null);
+        var changes = new List<string?>();
+        vm.PropertyChanged += (_, args) => changes.Add(args.PropertyName);
+        vm.MailSenderImagesEnabled = true;
+        Assert.False(vm.ContactImagesEnabled);
+        Assert.Contains(nameof(vm.MailSenderImagesEnabled), changes);
+        vm.ContactImagesEnabled = true;
+        vm.MailSenderImagesEnabled = false;
+        Assert.True(vm.ContactImagesEnabled);
+    }
+
     [Theory]
     [InlineData("gmail.com")]
     [InlineData("GOOGLEMAIL.COM")]

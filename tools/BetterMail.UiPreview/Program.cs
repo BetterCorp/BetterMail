@@ -58,6 +58,20 @@ internal static class Program
         await CheckImageConsentAsync();
         window.Activate();
         await Shot("mail-light");
+        var senderImages = window.FindControl<ListBox>("MessageList")!.GetVisualDescendants().OfType<AsyncImage>().ToArray();
+        if (senderImages.Length == 0 || senderImages.Any(i => i.AllowLoading || i.IsVisible))
+            throw new InvalidOperationException("Mail images must start hidden with loading disabled.");
+        vm.MailSenderImagesEnabled = true;
+        await Task.Delay(200);
+        if (senderImages.Any(i => !i.AllowLoading || !i.IsVisible || i.Request?.Key != "contact:hello@studio.example"))
+            throw new InvalidOperationException("Mail sender binding did not enable the expected image request.");
+        foreach (var senderImage in senderImages)
+            senderImage.Request = new("mail-preview-photo", _ => Task.FromResult<byte[]?>(PreviewProvider.SampleThumbnail()));
+        await Shot("mail-sender-images-light");
+        vm.MailSenderImagesEnabled = false;
+        if (senderImages.Any(i => i.AllowLoading || i.IsVisible || i.GetVisualDescendants().OfType<Image>().Single().Source is not null))
+            throw new InvalidOperationException("Mail images remained visible or enabled after disabling the setting.");
+        Console.WriteLine("Mail sender image binding and disable checks passed.");
         var list = window.FindControl<ListBox>("MessageList")!;
         async Task ClickRow(int index, string modifier)
         {
@@ -76,6 +90,16 @@ internal static class Program
         if (vm.SelectedMessages.Count != previewMessages.Length || list.SelectedItems!.Count != previewMessages.Length)
             throw new InvalidOperationException("A message metadata refresh collapsed multi-selection.");
         await Shot("mail-multiselect-light");
+        vm.MailSenderImagesEnabled = true;
+        await Task.Delay(200);
+        var threadView = window.GetVisualDescendants().OfType<ConversationThreadView>().Single();
+        var headerImages = threadView.GetVisualDescendants().OfType<AsyncImage>().ToArray();
+        if (!threadView.ShowSenderImages || headerImages.Length == 0 || headerImages.Any(i => !i.AllowLoading || !i.IsVisible))
+            throw new InvalidOperationException("Conversation sender images did not follow the mail setting.");
+        vm.MailSenderImagesEnabled = false;
+        if (threadView.ShowSenderImages || headerImages.Any(i => i.AllowLoading || i.IsVisible))
+            throw new InvalidOperationException("Conversation sender images remained enabled.");
+        Console.WriteLine("Conversation sender image toggle checks passed.");
         list.SelectedItems!.Clear();
         vm.SelectedMessage = null;
         Console.WriteLine("Native Ctrl-click, Shift-click and Ctrl+A checks passed.");

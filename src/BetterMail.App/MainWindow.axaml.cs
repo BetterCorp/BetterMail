@@ -730,6 +730,8 @@ public sealed partial class MainWindow : Window
             MinHeight = 360,
             Content = new ConversationThreadView { DataContext = previewViewModel }
         };
+        ((ConversationThreadView)window.Content!).Bind(ConversationThreadView.ShowSenderImagesProperty,
+            new Avalonia.Data.Binding(nameof(MainWindowViewModel.MailSenderImagesEnabled)) { Source = viewModel });
         _previewWindows[session] = window;
         window.Closing += (_, _) =>
         {
