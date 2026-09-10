@@ -329,6 +329,9 @@ public sealed record DriveDownloadChunk(byte[] Bytes, long Offset, long? NextOff
 
 public interface IFilesProvider
 {
+    Task<byte[]?> GetThumbnailAsync(MailAccount account, CloudDriveItem item, CancellationToken cancellationToken = default) =>
+        Task.FromResult<byte[]?>(null);
+
     Task<CloudDriveItem> GetDriveItemAsync(MailAccount account, string itemId, CancellationToken cancellationToken = default) =>
         Task.FromException<CloudDriveItem>(new NotSupportedException("Drive item lookup is unavailable."));
     Task<CloudDriveItem> MoveDriveItemAsync(MailAccount account, CloudDriveItem item, CloudDriveItem? parent, CancellationToken cancellationToken = default) =>

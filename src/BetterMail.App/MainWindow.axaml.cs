@@ -31,6 +31,7 @@ public sealed partial class MainWindow : Window
     private CalendarWorkspaceViewModel? _subscribedCalendarWorkspace;
     private bool _isClosing;
     private bool _preservingMessageSelection;
+    private bool _updatingMessageSelection;
 
     private void EditPersonClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
@@ -260,7 +261,9 @@ public sealed partial class MainWindow : Window
         {
             SelectMessage(message);
         }
-        ShowPhoneMessage();
+        if (MessageList.SelectedItems?.Count == 0 && _viewModel is not null)
+            _viewModel.SelectedMessage = null;
+        if (MessageList.SelectedItems?.Count == 1) ShowPhoneMessage();
     }
 
     private void MessageSelectionChanged(object? sender, SelectionChangedEventArgs args)
@@ -269,9 +272,30 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
-        _viewModel?.SetSelectedMessages(
-            MessageList.SelectedItems?.OfType<MailMessage>() ?? [],
-            args.AddedItems.OfType<MailMessage>().LastOrDefault());
+        // A sync/read-state refresh replaces immutable message records. Keep the
+        // selected identities even when ListBox reports the old record removed.
+        if (_viewModel is not null && MessageList.SelectedItems is { } selection)
+        {
+            _preservingMessageSelection = true;
+            try
+            {
+                foreach (var old in args.RemovedItems.OfType<MailMessage>())
+                {
+                    var replacement = _viewModel.Messages.FirstOrDefault(message =>
+                        message.MailboxId == old.MailboxId && message.ProviderId == old.ProviderId && !ReferenceEquals(message, old));
+                    if (replacement is not null && !selection.Contains(replacement)) selection.Add(replacement);
+                }
+            }
+            finally { _preservingMessageSelection = false; }
+        }
+        _updatingMessageSelection = true;
+        try
+        {
+            _viewModel?.SetSelectedMessages(
+                MessageList.SelectedItems?.OfType<MailMessage>() ?? [],
+                args.AddedItems.OfType<MailMessage>().LastOrDefault());
+        }
+        finally { _updatingMessageSelection = false; }
     }
 
     private void MessagesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs args)
@@ -352,6 +376,7 @@ public sealed partial class MainWindow : Window
             selectedItems.Clear();
             selectedItems.Add(message);
         }
+        MessageList.Focus();
         _mailDragStart = args;
         _mailDragOrigin = args.GetPosition(this);
     }
@@ -414,7 +439,12 @@ public sealed partial class MainWindow : Window
 
     private void MessageListKeyDown(object? sender, KeyEventArgs args)
     {
-        if (args.Key == Key.Enter)
+        if (args.Key == Key.A && (args.KeyModifiers.HasFlag(KeyModifiers.Control) || args.KeyModifiers.HasFlag(KeyModifiers.Meta)))
+        {
+            MessageList.SelectAll();
+            args.Handled = true;
+        }
+        else if (args.Key == Key.Enter)
         {
             ShowPhoneMessage();
         }
@@ -807,7 +837,7 @@ public sealed partial class MainWindow : Window
     }
 
     internal static bool PreservesMultiSelection(KeyModifiers modifiers) =>
-        modifiers.HasFlag(KeyModifiers.Control) || modifiers.HasFlag(KeyModifiers.Shift);
+        modifiers.HasFlag(KeyModifiers.Control) || modifiers.HasFlag(KeyModifiers.Meta) || modifiers.HasFlag(KeyModifiers.Shift);
 
     private static bool IsButtonSource(object? source) =>
         source is Visual visual &&
@@ -881,6 +911,7 @@ public sealed partial class MainWindow : Window
             _viewModel.PropertyChanged += ViewModelPropertyChanged;
             _viewModel.Messages.CollectionChanged += MessagesCollectionChanged;
             AttachCalendarWorkspace(_viewModel.CalendarWorkspace);
+            MessageList.SelectedItem = _viewModel.SelectedMessage;
         }
         UpdateMailPanes();
         UpdateLoadOlderVisibility();
@@ -888,6 +919,14 @@ public sealed partial class MainWindow : Window
 
     private void ViewModelPropertyChanged(object? sender, PropertyChangedEventArgs args)
     {
+        if (args.PropertyName == nameof(MainWindowViewModel.SelectedMessage) && !_updatingMessageSelection)
+        {
+            var primary = _viewModel?.SelectedMessage;
+            if (primary is null) MessageList.SelectedItems?.Clear();
+            else if (MessageList.SelectedItems?.OfType<MailMessage>().Any(message =>
+                message.MailboxId == primary.MailboxId && message.ProviderId == primary.ProviderId) != true)
+                MessageList.SelectedItem = primary;
+        }
         if (args.PropertyName is nameof(MainWindowViewModel.ShowMailSurface)
             or nameof(MainWindowViewModel.IsSettingsOpen)
             or nameof(MainWindowViewModel.ActiveModule))

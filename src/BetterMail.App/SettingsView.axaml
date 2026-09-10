@@ -481,6 +481,15 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
+          <Border Classes="settingsCard">
+            <StackPanel Spacing="8">
+              <TextBlock Text="People images" FontWeight="SemiBold" />
+              <ToggleSwitch Content="Load external contact images" IsChecked="{Binding ContactImagesEnabled}"
+                            AutomationProperties.Name="Load external contact images" />
+              <TextBlock Text="Optional. Looks up BIMI logos, Gravatar photos and domain favicons. These services and image hosts can see your IP address and request timing; Gravatar receives a hash of the email address. Off by default. Turning it off stops image loads and removes displayed contact artwork."
+                         TextWrapping="Wrap" Opacity="0.7" />
+            </StackPanel>
+          </Border>
           <ItemsControl ItemsSource="{Binding SettingsAccounts}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="app:AccountSettingsItem">

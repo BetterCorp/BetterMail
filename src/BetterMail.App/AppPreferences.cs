@@ -15,7 +15,8 @@ public sealed record AppPreferences(
     Dictionary<string, MailboxSignaturePreferences>? MailboxSignatures = null,
     List<string>? MailQuickActions = null,
     bool DefaultMailPromptShown = false,
-    List<string>? AccountOrder = null);
+    List<string>? AccountOrder = null,
+    bool ContactImagesEnabled = false);
 
 public static class AppPreferencesStore
 {

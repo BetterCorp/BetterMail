@@ -197,6 +197,7 @@ public sealed class MainWindowViewModelTests
     [Theory]
     [InlineData(KeyModifiers.None, false)]
     [InlineData(KeyModifiers.Control, true)]
+    [InlineData(KeyModifiers.Meta, true)]
     [InlineData(KeyModifiers.Shift, true)]
     public void PreservesMultipleMailSelectionOnlyWithASelectionModifier(
         KeyModifiers modifiers,
@@ -692,6 +693,47 @@ public sealed class MainWindowViewModelTests
         viewModel.ConversationThread.ForwardCommand.Execute(null);
         await WaitUntilAsync(() => request is not null, cancellationToken);
         Assert.Equal("Fwd: RE: Thread", request!.Subject);
+    }
+
+    [Theory]
+    [InlineData("archive")]
+    [InlineData("deleteditems")]
+    public async Task BulkMailActionQueuesEverySelectedMessage(string destination)
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-bulk-" + Guid.NewGuid().ToString("N"));
+        var provider = new RecordingProvider { MoveRelease = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        MainWindowViewModel? vm = null;
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "account", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, "Me");
+            await store.SaveAccountAsync(account, token);
+            await store.SaveMailboxAsync(mailbox, token);
+            vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
+            vm.Accounts.Add(account);
+            vm.Mailboxes.Add(mailbox);
+            var messages = Enumerable.Range(0, 4).Select(i => Message(mailbox.Id, "inbox", "Mail " + i, "Body") with { ProviderId = "bulk-" + i, IsRead = true }).ToArray();
+            foreach (var message in messages) vm.Messages.Add(message);
+            vm.SetSelectedMessages(messages.Take(3), messages[2]);
+            Assert.Contains("3 selected", vm.MailSelectionText);
+            if (destination == "deleteditems") await ((AsyncCommand)vm.DeleteCommand).ExecuteAsync();
+            else await vm.MoveSelectionToFolderAsync(new(new(mailbox.Id, destination, "Archive", 0, 0), "Me"));
+            var actions = await store.GetMailActionsAsync(token);
+            Assert.Equal(3, actions.Count);
+            Assert.All(actions, action => Assert.Equal(destination, action.DestinationId));
+            Assert.Equal(new[] { "bulk-0", "bulk-1", "bulk-2" }, actions.Select(action => action.ItemId).Order());
+            Assert.Equal("bulk-3", Assert.Single(vm.Messages).ProviderId);
+            provider.MoveRelease.SetResult();
+            await WaitUntilAsync(() => !vm.IsSyncing, token);
+        }
+        finally
+        {
+            provider.MoveRelease.TrySetResult();
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
     }
 
     [Fact]
