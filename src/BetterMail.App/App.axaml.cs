@@ -76,16 +76,24 @@ public sealed partial class App : Application
         string dataDirectory,
         AppPreferences preferences)
     {
-        string? startupError = null;
+        string? key;
         try
         {
-            var key = DatabaseKeyProvider.GetOrCreate(dataDirectory);
-            _store = new EncryptedMailStore(Path.Combine(dataDirectory, "mail.db"), key);
+            // Native keyrings may prompt the user; keep the startup window responsive.
+            key = await Task.Run(() => DatabaseKeyProvider.GetOrCreate(dataDirectory));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            startupError = exception.Message;
+            var unlockWindow = new DatabaseUnlockWindow(dataDirectory, exception);
+            await IndependentWindow.ShowAsync(unlockWindow);
+            key = unlockWindow.Key;
         }
+        if (key is null)
+        {
+            desktop.Shutdown();
+            return;
+        }
+        _store = new EncryptedMailStore(Path.Combine(dataDirectory, "mail.db"), key);
 
         MainWindow? mainWindow = null;
         MainWindowViewModel? viewModel = null;
@@ -113,7 +121,7 @@ public sealed partial class App : Application
             dataDirectory,
             ApplyTheme,
             ApplyAccent,
-            startupError,
+            startupError: null,
             desktopNotificationService: _desktopNotificationService);
         viewModel.SelectedThemeMode = preferences.ThemeMode;
         viewModel.SelectedAccentName = preferences.AccentName;

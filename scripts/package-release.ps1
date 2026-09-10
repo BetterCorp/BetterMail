@@ -75,6 +75,10 @@ elseif ($Runtime -eq "osx-arm64") {
     $platformArguments = @("--plist", $plist)
 }
 
+. (Join-Path $PSScriptRoot "signing.ps1")
+$signing = Initialize-BetterMailSigning $Runtime
+$signingArguments = $signing.Arguments
+try {
 dotnet tool run vpk -- pack `
     --packId BetterCorp.BetterMail `
     --packVersion $Version `
@@ -86,6 +90,10 @@ dotnet tool run vpk -- pack `
     --runtime $Runtime `
     --outputDir $releaseDirectory `
     --delta None `
-    @platformArguments
+    @platformArguments `
+    @signingArguments
 
 if ($LASTEXITCODE -ne 0) { throw "Velopack packaging failed for $Runtime" }
+
+}
+finally { Remove-BetterMailSigning $signing }

@@ -206,9 +206,23 @@ tokens. Continue until `hasMore` is false; an empty page can still have a contin
 `Authorization: Bearer` header. Access keys never appear in source links. Export downloads expire
 after 24 hours; expired encrypted archives are purged at startup and when another export is created.
 
+## Sync and delivery recovery
+
+Settings > Accounts shows each mailbox's last complete mail sync and its latest error. These states
+survive restart. Requested sync history is shown explicitly; search remains limited to cached mail.
+Use F9 to retry now, or Re-authenticate for a sign-in error. Background retries run every minute.
+
+A send interrupted after submission is held in Busy as **Delivery unconfirmed**. It is not automatically
+resent, even after restart. Microsoft 365 can resolve the state when the original message ID still
+provides positive sent evidence; a missing draft alone does not prove delivery. Otherwise, check Sent
+in your provider and choose **I found it in Sent** or **Return to drafts**. Returning to drafts preserves
+the body and attachments; sending again is an explicit action. Requests explicitly rejected by the
+provider can retry at the next sync. This does not guarantee exactly-once provider delivery.
+
 ## Builds, releases, and updates
 
-`build.yml` runs on `master` and can also be called by the release workflow. It resolves a build
+`checks.yml` builds and tests pull requests on Windows, Linux and macOS without OAuth secrets,
+publishes smoke artifacts, and checks Linux desktop startup. `build.yml` runs on `master` and can also be called by the release workflow. It resolves a build
 version from the latest stable release as `<release>-build.<run>.<UTC timestamp>`, then builds
 Windows, Linux, and macOS in parallel. Master build artifacts are retained for 14 days.
 
@@ -233,6 +247,7 @@ dotnet tool restore
 
 Supported CI runtimes are `win-x64`, `linux-x64`, and `osx-arm64`. Public production releases
 should be code-signed and macOS builds notarized before they are presented as trusted downloads.
+See [release signing setup](docs/release-signing.md) for optional CI credentials and validation.
 
 ## Microsoft sign-in
 
@@ -322,13 +337,16 @@ On Windows, the database is normally:
 ```
 
 The path is resolved through the operating system rather than hard-coded. The SQLite database is
-encrypted; Windows protects its generated key with DPAPI for the current user. On Linux, provide a
-strong passphrase because BetterMail will not store an unprotected database key beside the cache:
+encrypted. First launch automatically generates and securely saves a random database key:
+Windows uses DPAPI for the current user, macOS uses Keychain, and Linux uses the desktop Secret
+Service keyring through libsecret. Normal onboarding requires no environment variables or database
+password. If secure storage is locked or unavailable, BetterMail shows an unlock/retry dialog.
 
-```bash
-export BETTERMAIL_DATABASE_KEY="use-a-long-random-passphrase"
-dotnet run --project src/BetterMail.App
-```
+`BETTERMAIL_DATABASE_KEY` remains an optional override for existing installations and custom setups;
+its original derivation is unchanged. After removing an old override, BetterMail asks for the previous
+database password once, verifies it against the existing database, and remembers it in secure storage.
+It does not re-encrypt or reset your mail. If you lose an automatically generated key, restore the
+original key and database from a backup; BetterMail will not replace the missing key over existing data.
 
 Remote images remain blocked until explicitly allowed, scripts are removed from HTML mail, and
 attachment bytes are normally loaded on demand. Evidence indexing explicitly retains captured
@@ -350,8 +368,8 @@ cloud data.
 
 ## Platform notes
 
-- Linux HTML rendering requires WPE WebKit. On Debian/Ubuntu:
-  `sudo apt install libwpewebkit-2.0-1`.
+- On Ubuntu, install the WebKitGTK fallback: `sudo apt install libwebkit2gtk-4.1-0 libsoup-3.0-0`.
+  Debian 13+ can optionally use WPE WebKit (`libwpewebkit-2.0-1`); Ubuntu does not package WPE.
 - Linux secure token storage requires Secret Service/libsecret.
 - Self-contained builds include the .NET runtime and managed dependencies, but platform graphics,
   credential-store, and WebView libraries remain operating-system dependencies.

@@ -6,6 +6,40 @@ namespace BetterMail.App;
 public sealed partial class MainWindowViewModel
 {
     public AsyncCommand<MailAction> CancelBusyActionCommand { get; }
+    public AsyncCommand<MailAction> ReturnUnconfirmedSendCommand { get; }
+    public AsyncCommand<MailAction> ConfirmSentCommand { get; }
+
+    private Task ReturnUnconfirmedSendAsync(MailAction action) => ResolveUnconfirmedSendAsync(action, false);
+    private Task ConfirmSentAsync(MailAction action) => ResolveUnconfirmedSendAsync(action, true);
+
+    private async Task ResolveUnconfirmedSendAsync(MailAction action, bool sent)
+    {
+        if (_store is null) return;
+        var gate = _draftSyncLocks.GetOrAdd(action.MailboxId, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync();
+        try
+        {
+            if (await _store.GetMailActionAsync(action.Id) is not { NeedsSendReview: true }) return;
+            if (sent)
+            {
+                await _store.MarkOutboxSendAcceptedAsync(action.ItemId);
+                await _store.DeleteLocalDraftAsync(action.ItemId);
+            }
+            else
+            {
+                var account = Accounts.Single(account => account.AccountId == action.AccountId);
+                var mailbox = Mailboxes.Single(mailbox => mailbox.Id == action.MailboxId);
+                if (_provider is null) throw new InvalidOperationException("Reconnect the account before returning this message to drafts.");
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                await new OutboxService(_provider, _store).ReturnToDraftAsync(account, mailbox, action.Id, timeout.Token);
+            }
+            await RefreshDraftsAsync();
+            Status = sent ? "Send marked as confirmed" : "Returned to drafts. Check Sent before sending again.";
+        }
+        catch (Exception error) { Error = error.Message; }
+        finally { gate.Release(); }
+    }
+
 
     private async Task CancelBusyActionAsync(MailAction action)
     {

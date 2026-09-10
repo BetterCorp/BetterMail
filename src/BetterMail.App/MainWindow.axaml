@@ -783,7 +783,7 @@
                 <Border Padding="14,7,9,7" HorizontalAlignment="Stretch" Background="Transparent"
                         BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1"
                         ToolTip.Tip="{Binding Error}">
-                  <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="3">
+                  <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="3">
                     <TextBlock Text="{Binding ActionText}" Foreground="{DynamicResource BetterMailAccentBrush}"
                                FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                     <TextBlock Grid.Column="1" Text="{Binding LocalCreatedAt, StringFormat='{}{0:MMM d, HH:mm}'}" FontSize="11" Opacity="0.62" />
@@ -794,6 +794,13 @@
                             Command="{Binding $parent[Window].DataContext.CancelBusyActionCommand}"
                             CommandParameter="{Binding}" IsEnabled="{Binding CanCancel}"
                             ToolTip.Tip="Cancel a waiting action. Actions already executing cannot be recalled." />
+                    <StackPanel Grid.Row="4" Grid.ColumnSpan="2" Spacing="6" IsVisible="{Binding NeedsSendReview}">
+                      <TextBlock Text="Check Sent in your provider before retrying. This message will not be sent again automatically." TextWrapping="Wrap" FontSize="12" />
+                      <WrapPanel>
+                        <Button Content="I found it in Sent" Margin="0,0,8,0" Command="{Binding $parent[Window].DataContext.ConfirmSentCommand}" CommandParameter="{Binding}" />
+                        <Button Content="Return to drafts" Command="{Binding $parent[Window].DataContext.ReturnUnconfirmedSendCommand}" CommandParameter="{Binding}" />
+                      </WrapPanel>
+                    </StackPanel>
                   </Grid>
                 </Border>
               </DataTemplate>

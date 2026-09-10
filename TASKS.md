@@ -33,12 +33,13 @@ Status: `[ ]` queued, `[-]` in progress, `[x]` verified complete, `[!]` blocked 
 - [x] Folder hierarchy, local search, delta cursors, F9, 60-second sync, read/unread, flag, archive, junk, and delete.
 - [x] Compose, send, reply, forward, Cc/Bcc, default signature, and small attachments.
 - [x] Autosave encrypted local drafts, reopen them with the original sender/attachments, and remove them after successful send.
-- [x] Synchronize drafts with Microsoft Graph at startup/F9/60-second sync boundaries, including provider CRUD/send, encrypted ID mapping, attachment upload sessions, mailbox locks, exactly-once mapped send/delete, and non-destructive conflict handling. Local autosave remains immediate; cloud writes are sync-boundary based.
+- [x] Synchronize drafts with Microsoft Graph at startup/F9/60-second sync boundaries, including provider CRUD/send, encrypted ID mapping, attachment upload sessions, mailbox locks, mapped send/delete with persisted acceptance, and non-destructive conflict handling. Local autosave remains immediate; cloud writes are sync-boundary based.
 - [x] Render conversation threads with expand/collapse, quoted-message separation, stable selection, one active body WebView, CID attachments, and responsive action overflow.
 - [x] Add Microsoft Graph upload sessions for attachments from 3 MiB through the client cap, with chunking, resume offsets, cancellation, and transient retries.
 - [x] Add per-account/mailbox signatures and sender defaults with migration from the previous global signature.
 - [x] Add native desktop notifications with account/folder context and a persisted setting to disable them; baseline/deduplication prevents startup, metadata-update, and newly-linked shared-mailbox history floods.
-- [ ] Add offline/error states, retry affordances, cancellation, and actionable Graph error messages.
+- [x] Persist mailbox sync health, show cached-history limits and retry/re-authentication guidance, and hold ambiguous sends for review across restart.
+- [ ] Extend cancellation and structured error guidance across every workspace operation.
 - [ ] Finish shared-mailbox send/read validation for Send As and Send on behalf failure cases.
 - [-] Add keyboard commands for compose, reply, reply-all, forward, delete, archive, search, folders, next/previous message, and escape/back. All listed commands except dedicated keyboard folder navigation are verified.
 
@@ -85,6 +86,11 @@ Status: `[ ]` queued, `[-]` in progress, `[x]` verified complete, `[!]` blocked 
 - [ ] Compare against current Outlook at 1920×1080 and retain before/after/reference screenshots.
 - [ ] Add focused UI checks covering navigation, live resize, folder selection, message selection, settings/module overlays, rendering, and compose.
 
+## Local database onboarding
+
+- [x] Automatically generate and securely persist database keys with Windows DPAPI, macOS Keychain, and Linux Secret Service; preserve existing environment overrides and offer verified password migration in the desktop UI.
+- [ ] Verify native Keychain behavior and existing DPAPI-key compatibility on macOS and Windows release builds.
+
 ## Release gate
 
 - [x] Eliminate competing `win-x64`/`win-x64-update` outputs; the documented and launched executable is the canonical verified artifact.
@@ -100,3 +106,11 @@ Status: `[ ]` queued, `[-]` in progress, `[x]` verified complete, `[!]` blocked 
 - Google Calendar, Contacts, Tasks, and Drive provider implementation.
 - Android and iOS application projects, mobile WebView integration, device testing, and store releases.
 - MSI/MSIX/macOS/Linux-specific installers and store packaging beyond development artifacts.
+
+## Reliability and release checks
+
+- [x] Retry failed update downloads without restarting the app; retain successful/in-flight downloads.
+- [x] Separate outbox delivery into a core service and sync orchestration into a focused partial file.
+- [x] Run credential-free Windows/Linux/macOS PR checks and a published Linux startup smoke check.
+- [x] Wire optional signing/notarization credentials into release packaging with cleanup and incomplete-configuration failures.
+- [ ] Provision production signing credentials and validate signed installers on native systems.

@@ -458,6 +458,20 @@
                       AutomationProperties.Name="Add Google account" />
             </StackPanel>
           </Grid>
+          <TextBlock Text="{Binding MailSyncRange, StringFormat='Requested cached history: {0}. Search covers locally cached mail.'}" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding SyncHealth}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <StackPanel Spacing="3" Margin="0,0,0,10">
+                  <TextBlock Text="{Binding Address}" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding Summary}" />
+                  <TextBlock Text="{Binding State}" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding Error}" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding Recovery}" TextWrapping="Wrap" Opacity="0.7" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
           <ItemsControl ItemsSource="{Binding SettingsAccounts}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="app:AccountSettingsItem">

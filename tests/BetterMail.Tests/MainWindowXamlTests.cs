@@ -15,7 +15,7 @@ public sealed class MainWindowXamlTests
         XNamespace ui = "https://github.com/avaloniaui";
         var busyList = xaml.Descendants(ui + "ListBox")
             .Single(element => (string?)element.Attribute("ItemsSource") == "{Binding BusyActions}");
-        var cancel = busyList.Descendants(ui + "Button").Single();
+        var cancel = busyList.Descendants(ui + "Button").Single(button => (string?)button.Attribute("Content") == "Cancel");
         var command = (string)cancel.Attribute("Command")!;
         Assert.StartsWith("{Binding ", command);
         using var binding = new Button().Bind(Button.CommandProperty, new Binding(command[9..^1])

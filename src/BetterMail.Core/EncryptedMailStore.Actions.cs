@@ -149,7 +149,7 @@ public sealed partial class EncryptedMailStore
         WithLockAsync<MailAction?>(async connection =>
         {
             var actions = await ReadActionsAsync(connection, null, cancellationToken).ConfigureAwait(false);
-            var action = actions.FirstOrDefault(action => action.Id == id && !action.Accepted && !action.Running);
+            var action = actions.FirstOrDefault(action => action.Id == id && !action.Accepted && !action.Running && !action.SendAttempted);
             if (action is null) return null;
             action = action with { Running = true, Error = null };
             await WriteActionAsync(connection, null, action, cancellationToken).ConfigureAwait(false);
@@ -163,6 +163,49 @@ public sealed partial class EncryptedMailStore
                 .FirstOrDefault(action => action.Id == id);
             if (action is not null)
                 await WriteActionAsync(connection, null, action with { Running = false, Error = error }, cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+
+    public Task MarkSendAttemptedAsync(string draftId, CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            var action = (await ReadActionsAsync(connection, null, cancellationToken).ConfigureAwait(false))
+                .Single(action => action.Id == "send:" + draftId && action.Running && !action.Accepted);
+            await WriteActionAsync(connection, null, action with { SendAttempted = true }, cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+
+    public Task MarkSendRejectedAsync(string draftId, string error, CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            var action = (await ReadActionsAsync(connection, null, cancellationToken).ConfigureAwait(false))
+                .Single(action => action.Id == "send:" + draftId && !action.Accepted);
+            await WriteActionAsync(connection, null, action with { SendAttempted = false, Running = false, Error = error }, cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+
+    public Task<bool> ReturnUnconfirmedSendToDraftAsync(string actionId, bool clearProviderMapping = false, CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            var action = (await ReadActionsAsync(connection, transaction, cancellationToken).ConfigureAwait(false))
+                .FirstOrDefault(action => action.Id == actionId && action.NeedsSendReview);
+            if (action is null) return false;
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                UPDATE local_drafts SET is_queued = 0,
+                    provider_draft_id = CASE WHEN $clear THEN NULL ELSE provider_draft_id END,
+                    synced_local_updated_at = CASE WHEN $clear THEN NULL ELSE synced_local_updated_at END,
+                    provider_updated_at = CASE WHEN $clear THEN NULL ELSE provider_updated_at END,
+                    provider_etag = CASE WHEN $clear THEN NULL ELSE provider_etag END,
+                    sync_status = NULL, sync_error = NULL
+                WHERE id = $item AND send_accepted = 0;
+                DELETE FROM mail_actions WHERE id = $id;
+                """;
+            command.Parameters.AddWithValue("$item", action.ItemId);
+            command.Parameters.AddWithValue("$id", action.Id);
+            command.Parameters.AddWithValue("$clear", clearProviderMapping);
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return true;
         }, cancellationToken);
 
     public Task CompleteMoveAsync(MailAction completed, MailMessage result, CancellationToken cancellationToken = default) =>

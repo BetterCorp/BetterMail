@@ -8,6 +8,17 @@ namespace BetterMail.Tests;
 
 public sealed class Microsoft365MailProviderTests
 {
+    [Theory]
+    [InlineData("{\"isDraft\":false,\"parentFolderId\":\"sent\"}", true)]
+    [InlineData("{\"isDraft\":false,\"parentFolderId\":\"inbox\"}", false)]
+    [InlineData("{\"isDraft\":true,\"parentFolderId\":\"sent\"}", false)]
+    [InlineData("{\"parentFolderId\":\"sent\"}", false)]
+    public void DeliveryConfirmationRequiresNonDraftInSentFolder(string json, bool expected)
+    {
+        using var message = JsonDocument.Parse(json);
+        Assert.Equal(expected, Microsoft365MailProvider.IsSentMessage(message.RootElement, "sent"));
+    }
+
     [Fact]
     public void RequestsOnlySupportedMailFolderProperties()
     {

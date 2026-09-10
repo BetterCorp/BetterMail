@@ -9,6 +9,28 @@ public sealed class Microsoft365RequestSchedulerTests
     private static readonly MailAccount Account = new(
         "microsoft365", "account", "tenant", "person@example.com", "Person", ProviderCapabilities.Mail);
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NonIdempotentRequestsAreNotReplayed(bool lostResponse)
+    {
+        var attempts = 0;
+        var scheduler = new Microsoft365RequestScheduler();
+        try
+        {
+            using var response = await scheduler.SendAsync(Account, "me/messages/draft/send", (_, _) =>
+            {
+                attempts++;
+                return lostResponse
+                    ? Task.FromException<HttpResponseMessage>(new HttpRequestException("Lost acknowledgement"))
+                    : Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+            }, TestContext.Current.CancellationToken, retryTransient: false);
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        }
+        catch (HttpRequestException) when (lostResponse) { }
+        Assert.Equal(1, attempts);
+    }
+
     [Fact]
     public async Task LimitsOneMailboxToFourConcurrentRequests()
     {

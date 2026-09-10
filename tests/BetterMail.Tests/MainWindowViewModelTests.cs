@@ -1805,10 +1805,9 @@ public sealed class MainWindowViewModelTests
                 workspaceProvider: workspace);
             await viewModel.InitializeAsync();
 
-            viewModel.ShowContactsCommand.Execute(null);
-            await WaitUntilAsync(
-                () => viewModel.People.Count == 2 && viewModel.HasPeopleErrors,
-                cancellationToken);
+            await ((AsyncCommand)viewModel.ShowContactsCommand).ExecuteAsync();
+            Assert.Equal(2, viewModel.People.Count);
+            Assert.True(viewModel.HasPeopleErrors);
 
             Assert.Equal(viewModel.People.OrderBy(person => person.DisplayName, StringComparer.OrdinalIgnoreCase), viewModel.People);
             var saved = Assert.Single(viewModel.People, static person => person.IsSaved);
@@ -1826,28 +1825,26 @@ public sealed class MainWindowViewModelTests
             await WaitUntilAsync(() => viewModel.IsEditingContact, cancellationToken);
             viewModel.ContactName = "Known Updated";
             viewModel.ContactEmails = "known@example.com; second@example.com";
-            viewModel.SaveContactCommand.Execute(null);
-            await WaitUntilAsync(
-                () => workspace.Updated &&
-                    viewModel.People.Any(person => person.IsSaved && person.DisplayName == "Known Updated"),
-                cancellationToken);
+            await ((AsyncCommand)viewModel.SaveContactCommand).ExecuteAsync();
+            Assert.True(workspace.Updated);
+            Assert.Contains(viewModel.People, person => person.IsSaved && person.DisplayName == "Known Updated");
 
             var updated = Assert.Single(viewModel.People, static person => person.IsSaved);
             viewModel.RequestDeleteContactCommand.Execute(updated);
             await WaitUntilAsync(() => viewModel.IsConfirmingContactDelete, cancellationToken);
-            viewModel.ConfirmDeleteContactCommand.Execute(null);
-            await WaitUntilAsync(
-                () => workspace.Deleted && viewModel.People.All(static person => !person.IsSaved),
-                cancellationToken);
+            Assert.True(viewModel.ConfirmDeleteContactCommand.CanExecute(null));
+            await ((AsyncCommand)viewModel.ConfirmDeleteContactCommand).ExecuteAsync();
+            Assert.True(workspace.Deleted);
+            Assert.All(viewModel.People, person => Assert.False(person.IsSaved));
 
-            viewModel.NewContactCommand.Execute(null);
-            await WaitUntilAsync(() => viewModel.IsCreatingContact, cancellationToken);
+            Assert.True(viewModel.NewContactCommand.CanExecute(null));
+            await ((AsyncCommand)viewModel.NewContactCommand).ExecuteAsync();
+            Assert.True(viewModel.IsCreatingContact);
             viewModel.ContactName = "Created Person";
             viewModel.ContactEmails = "created@example.com";
-            viewModel.SaveContactCommand.Execute(null);
-            await WaitUntilAsync(
-                () => workspace.Created && viewModel.People.Any(person => person.DisplayName == "Created Person"),
-                cancellationToken);
+            await ((AsyncCommand)viewModel.SaveContactCommand).ExecuteAsync();
+            Assert.True(workspace.Created);
+            Assert.Contains(viewModel.People, person => person.DisplayName == "Created Person");
         }
         finally
         {
@@ -1930,7 +1927,7 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public async Task SendClosesComposerAndRetriesFailedOutboxOnlyOnTheNextSync()
+    public async Task SendClosesComposerAndRetriesExplicitlyRejectedOutboxOnlyOnTheNextSync()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var directory = Path.Combine(Path.GetTempPath(), $"bettermail-outbox-{Guid.NewGuid():N}");
@@ -1975,7 +1972,7 @@ public sealed class MainWindowViewModelTests
             // Delivery must wait for the normal incoming-mail sync to finish.
             provider.SyncRelease.SetResult();
             await WaitUntilAsync(() => provider.SendCalls == 1, cancellationToken);
-            provider.SendRelease.SetException(new HttpRequestException("Offline"));
+            provider.SendRelease.SetException(new HttpRequestException("Throttled", null, System.Net.HttpStatusCode.TooManyRequests));
             await WaitUntilAsync(() => !viewModel.IsSyncing, cancellationToken);
             Assert.Null(viewModel.Error);
             Assert.Single(viewModel.Outbox);

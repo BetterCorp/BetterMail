@@ -45,6 +45,9 @@ public sealed class MailProviderRouter(IEnumerable<(string ProviderId, IMailProv
         For(account).SendAsync(account, mailbox, draft, cancellationToken);
     public Task<IReadOnlyList<CloudDraft>> GetDraftsAsync(MailAccount account, Mailbox mailbox, CancellationToken cancellationToken = default) =>
         For(account).GetDraftsAsync(account, mailbox, cancellationToken);
+    public Task<bool> IsDraftSentAsync(MailAccount account, Mailbox mailbox, string draftId, CancellationToken cancellationToken = default) =>
+        For(account).IsDraftSentAsync(account, mailbox, draftId, cancellationToken);
+
     public Task<CloudDraft> GetDraftAsync(MailAccount account, Mailbox mailbox, string draftId, CancellationToken cancellationToken = default) =>
         For(account).GetDraftAsync(account, mailbox, draftId, cancellationToken);
     public Task<CloudDraft> CreateDraftAsync(MailAccount account, Mailbox mailbox, DraftMessage draft, CancellationToken cancellationToken = default) =>

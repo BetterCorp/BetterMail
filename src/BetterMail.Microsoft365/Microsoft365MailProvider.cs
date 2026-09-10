@@ -475,6 +475,28 @@ public sealed class Microsoft365MailProvider(
             cancellationToken);
     }
 
+    public async Task<bool> IsDraftSentAsync(MailAccount account, Mailbox mailbox, string draftId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var document = await GetJsonAsync(account,
+                $"{DraftEndpoint(account, mailbox, draftId)}?$select=isDraft,parentFolderId", cancellationToken).ConfigureAwait(false);
+            using var sentFolder = await GetJsonAsync(account,
+                $"{MailboxPath(account, mailbox)}/mailFolders/sentitems?$select=id", cancellationToken).ConfigureAwait(false);
+            return IsSentMessage(document.RootElement, RequiredString(sentFolder.RootElement, "id"));
+        }
+        catch (HttpRequestException error) when (error.StatusCode == HttpStatusCode.NotFound)
+        {
+            // IDs may change on send; absence is not evidence of successful delivery.
+            return false;
+        }
+    }
+
+    internal static bool IsSentMessage(JsonElement message, string sentFolderId) =>
+        message.TryGetProperty("isDraft", out var isDraft) && isDraft.ValueKind == JsonValueKind.False &&
+        message.TryGetProperty("parentFolderId", out var folder) && folder.ValueKind == JsonValueKind.String &&
+        !string.IsNullOrWhiteSpace(sentFolderId) && folder.GetString() == sentFolderId;
+
     public Task SendDraftAsync(
         MailAccount account,
         Mailbox mailbox,
@@ -831,7 +853,7 @@ public sealed class Microsoft365MailProvider(
                 }
                 return await _httpClient.SendAsync(request, token).ConfigureAwait(false);
             },
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken, retryTransient: method != HttpMethod.Post).ConfigureAwait(false);
     }
 
     private async Task<HttpRequestMessage> CreateRequestAsync(MailAccount account, HttpMethod method, string endpoint, CancellationToken cancellationToken)

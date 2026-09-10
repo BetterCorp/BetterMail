@@ -1,0 +1,58 @@
+name: Checks
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: Linux
+            runner: blacksmith-2vcpu-ubuntu-2404
+          - platform: Windows
+            runner: windows-2025
+          - platform: macOS
+            runner: blacksmith-6vcpu-macos-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.201
+          cache: true
+          cache-dependency-path: Directory.Packages.props
+      - run: dotnet restore BetterMail.slnx
+      - run: dotnet build BetterMail.slnx --configuration Release --no-restore -m:1
+      - name: Test signing certificate selection and cleanup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/test-signing.ps1
+      - name: Run tests
+        timeout-minutes: 3
+        run: dotnet run --project tests/BetterMail.Tests --configuration Release --no-build -- -reporter verbose -longRunning 30
+      - name: Publish smoke artifact
+        run: dotnet publish src/BetterMail.App --configuration Release --no-restore --output artifacts/smoke -p:UseAppHost=false
+      - name: Install Linux desktop libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y xvfb libice6 libsm6 libfontconfig1 libsecret-1-0 libwebkit2gtk-4.1-0
+      - name: Smoke test published Linux app
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python3 scripts/smoke-startup.py artifacts/smoke/BetterMail.dll
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ matrix.platform }}
+          path: artifacts/smoke/
+          retention-days: 3
