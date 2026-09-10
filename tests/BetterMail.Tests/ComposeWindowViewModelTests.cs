@@ -6,6 +6,47 @@ namespace BetterMail.Tests;
 public sealed class ComposeWindowViewModelTests
 {
     [Fact]
+    public void SuccessfulFilesPreserveAllEarlierBatchErrorsUntilDismissed()
+    {
+        var vm = new ComposeWindowViewModel([], [], new ComposeRequest(), (_, _, _) => Task.CompletedTask);
+        Assert.True(vm.TryBeginFileAttachmentUpload(["large.bin", "small.txt"]));
+        vm.ReportError("large.bin uploaded to Attachments, but link creation failed");
+        vm.AddAttachment(new("small.txt", "text/plain", [1]));
+        vm.ReportError("another.bin could not be uploaded");
+        vm.AddAttachment(new("another-small.txt", "text/plain", [2]));
+        vm.IsUploadingAttachment = false;
+        Assert.Equal(2, vm.Attachments.Count);
+        Assert.Contains("large.bin uploaded to Attachments", vm.Error);
+        Assert.Contains("another.bin could not be uploaded", vm.Error);
+        Assert.True(vm.HasError);
+        vm.AddAttachment(new("later.txt", "text/plain", [3]));
+        Assert.True(vm.HasError);
+        vm.DismissError();
+        Assert.False(vm.HasError);
+    }
+
+    [Fact]
+    public async Task FailedLargeEditorDropRemainsVisibleAfterQueuedSmallFileSucceeds()
+    {
+        var vm = new ComposeWindowViewModel([], [], new ComposeRequest(), (_, _, _) => Task.CompletedTask);
+        var release = new TaskCompletionSource();
+        async Task Upload(DraftAttachment file)
+        {
+            await release.Task;
+            throw new InvalidOperationException("Upload failed");
+        }
+        var processing = vm.AttachDroppedAsync(new("large.bin", "application/octet-stream",
+            new byte[LargeAttachmentPolicy.DirectAttachmentBudgetBytes + 1]), Upload);
+        await vm.AttachDroppedAsync(new("small.txt", "text/plain", [1]), Upload);
+        release.SetResult();
+        await processing;
+        Assert.Equal("small.txt", Assert.Single(vm.Attachments).Name);
+        Assert.Contains("large.bin", vm.Error);
+        Assert.Contains("Upload failed", vm.Error);
+        Assert.False(vm.IsUploadingAttachment);
+    }
+
+    [Fact]
     public void OsFileUploadsReportAllRejectedNamesAndKeepTheActiveUploadBusy()
     {
         var vm = new ComposeWindowViewModel([], [], new ComposeRequest(), (_, _, _) => Task.CompletedTask);

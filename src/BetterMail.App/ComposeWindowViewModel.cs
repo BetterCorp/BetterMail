@@ -260,12 +260,12 @@ public sealed class ComposeWindowViewModel : ViewModelBase
             return;
         }
 
-        Error = null;
         Attachments.Add(attachment);
         ScheduleAutosave();
     }
 
-    public void ReportError(string error) => Error = error;
+    public void ReportError(string error) =>
+        Error = IsUploadingAttachment && HasError ? Error + Environment.NewLine + error : error;
 
     public void DismissError() => Error = null;
 
@@ -273,7 +273,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
     {
         if (size is < 0 or > DraftAttachment.MaximumSizeBytes)
         {
-            Error = $"'{name}' is larger than the 150 MB Microsoft Graph attachment limit.";
+            ReportError($"'{name}' is larger than the 150 MB Microsoft Graph attachment limit.");
             return false;
         }
         return true;
@@ -295,7 +295,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            Error = $"Draft could not be saved: {exception.Message}";
+            ReportError($"Draft could not be saved: {exception.Message}");
         }
     }
 
@@ -428,7 +428,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         }
         catch (Exception exception)
         {
-            Error = $"Draft could not be saved: {exception.Message}";
+            ReportError($"Draft could not be saved: {exception.Message}");
             DraftStatus = "Not saved";
         }
     }
