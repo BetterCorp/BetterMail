@@ -1221,7 +1221,7 @@ public sealed class Microsoft365WorkspaceProvider(
         var parentPath = parent is null
             ? "me/drive/root"
             : $"me/drive/items/{Uri.EscapeDataString(parent.ProviderId)}";
-        return $"{parentPath}:/{Uri.EscapeDataString(name.Trim())}:/{(createSession ? "createUploadSession" : "content")}";
+        return $"{parentPath}:/{Uri.EscapeDataString(name.Trim())}:/{(createSession ? "createUploadSession" : "content?@microsoft.graph.conflictBehavior=rename")}";
     }
 
     internal static CloudDriveItem MapDriveItem(JsonElement item, MailAccount account)

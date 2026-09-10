@@ -736,16 +736,28 @@ public sealed class MainWindowViewModelTests
             await store.SaveFoldersAsync(mailbox.Id, [inbox], cancellationToken);
             await store.ApplySyncPageAsync("test", new MailSyncPage([first, second], null, false), cancellationToken);
 
+            var delays = new System.Collections.Concurrent.ConcurrentQueue<(TaskCompletionSource Release, CancellationToken Token)>();
+            Task WaitForMarkRead(TimeSpan delay, CancellationToken token)
+            {
+                var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                delays.Enqueue((release, token));
+                return release.Task.WaitAsync(token);
+            }
             var provider = new RecordingProvider();
             var viewModel = new MainWindowViewModel(
-                store, directory, _ => { }, _ => { }, null, provider, TimeSpan.FromMilliseconds(80));
+                store, directory, _ => { }, _ => { }, null, provider, waitForMarkRead: WaitForMarkRead);
             await viewModel.InitializeAsync();
-            await WaitUntilAsync(
-                () => viewModel.SelectedMessage?.Body is not null,
-                cancellationToken);
+            var oldDelay = Assert.Single(delays);
+            Assert.Empty(provider.MarkedReadIds);
             var oldSelection = viewModel.SelectedMessage!;
             var newSelection = viewModel.Messages.Single(message => message.ProviderId != oldSelection.ProviderId);
             viewModel.SelectedMessage = newSelection;
+            Assert.True(oldDelay.Token.IsCancellationRequested);
+            Assert.Equal(2, delays.Count);
+            Assert.Empty(provider.MarkedReadIds);
+            // Deliberately release the stale delay too; it must never mark the old message read.
+            oldDelay.Release.TrySetResult();
+            delays.Last().Release.TrySetResult();
 
             await WaitUntilAsync(
                 () => provider.MarkedReadIds.Count == 1 && viewModel.SelectedMessage?.IsRead == true,

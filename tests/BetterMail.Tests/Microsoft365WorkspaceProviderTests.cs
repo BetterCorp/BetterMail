@@ -382,7 +382,7 @@ public sealed class Microsoft365WorkspaceProviderTests
             Account.ProviderId);
 
         Assert.Equal(
-            "me/drive/items/folder%2Fid:/report%20final.pdf:/content",
+            "me/drive/items/folder%2Fid:/report%20final.pdf:/content?@microsoft.graph.conflictBehavior=rename",
             Microsoft365WorkspaceProvider.DriveUploadEndpoint(
                 Account, folder, "report final.pdf", createSession: false));
         Assert.Equal(

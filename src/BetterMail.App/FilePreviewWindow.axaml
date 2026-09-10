@@ -8,7 +8,7 @@
     <Border Padding="16,10"
             BorderBrush="{DynamicResource BetterMailDividerBrush}"
             BorderThickness="0,0,0,1">
-      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+      <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
         <StackPanel Spacing="2">
           <SelectableTextBlock x:Name="FileNameText"
                                FontSize="16"
@@ -22,6 +22,8 @@
                 Content="Save as"
                 Click="SaveClicked"
                 AutomationProperties.Name="Save previewed file" />
+        <Button x:Name="SaveDriveButton" Grid.Column="2" Classes="command" Content="Save to Drive"
+                Click="SaveDriveClicked" AutomationProperties.Name="Save attachment to Drive" />
       </Grid>
     </Border>
 
