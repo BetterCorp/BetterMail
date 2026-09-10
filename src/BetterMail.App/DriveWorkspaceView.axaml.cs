@@ -14,6 +14,24 @@ public sealed partial class DriveWorkspaceView : UserControl
     private bool _isPhoneLayout;
     private bool _showPhoneTree = true;
 
+    private async void CreateFolderClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is DriveWorkspaceViewModel vm && vm.CreateFolderCommand.CanExecute(null))
+        {
+            await ((AsyncCommand)vm.CreateFolderCommand).ExecuteAsync();
+            if (!vm.HasOperationError) NewFolderButton.Flyout?.Hide();
+        }
+    }
+
+    private async void RenameItemClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is DriveWorkspaceViewModel vm && vm.RenameCommand.CanExecute(null))
+        {
+            await ((AsyncCommand)vm.RenameCommand).ExecuteAsync();
+            if (!vm.HasOperationError) RenameItemButton.Flyout?.Hide();
+        }
+    }
+
     public DriveWorkspaceView()
     {
         InitializeComponent();

@@ -33,7 +33,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     ];
     private static readonly string[] DefaultMailQuickActionIds = ["read", "flag", "archive", "delete"];
     private static readonly string[] GlobalSearchCategoryOrder =
-        ["Mail", "People", "Calendar", "To Do", "OneDrive", "Notes"];
+        ["Mail", "People", "Calendar", "To Do", "Drive", "Notes"];
     private const ProviderCapabilities WorkspaceCapabilities =
         ProviderCapabilities.Calendar | ProviderCapabilities.Contacts | ProviderCapabilities.Tasks |
         ProviderCapabilities.Files | ProviderCapabilities.Notes;
@@ -198,14 +198,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         ShowOutboxCommand = new AsyncCommand(() => ShowDraftListAsync(DraftListFilter.Outbox));
         ShowSyncIssuesCommand = new AsyncCommand(() => ShowDraftListAsync(DraftListFilter.SyncIssues));
         ShowDraftConflictsCommand = new AsyncCommand(() => ShowDraftListAsync(DraftListFilter.Conflicts));
-        ShowCalendarCommand = new AsyncCommand(() => ShowWorkspaceModuleAsync("Calendar"), CanOpenWorkspaceModule);
-        ShowContactsCommand = new AsyncCommand(() => ShowWorkspaceModuleAsync("People"), CanOpenWorkspaceModule);
-        ShowTasksCommand = new AsyncCommand(() => ShowWorkspaceModuleAsync("To Do"), CanOpenWorkspaceModule);
-        ShowFilesCommand = new AsyncCommand(() => ShowWorkspaceModuleAsync("OneDrive"), CanOpenWorkspaceModule);
-        ShowNotesCommand = new AsyncCommand(() => ShowWorkspaceModuleAsync("Notes"), CanOpenWorkspaceModule);
+        ShowCalendarCommand = new AsyncCommand(() => ShowWorkspaceModuleAsync("Calendar"), CanOpenWorkspaceModule, allowConcurrent: true);
+        MoveAccountUpCommand = new AsyncCommand<MailAccount>(account => MoveAccountAsync(account, -1), account => OrderedAccounts.FirstOrDefault() != account);
+        MoveAccountDownCommand = new AsyncCommand<MailAccount>(account => MoveAccountAsync(account, 1), account => OrderedAccounts.LastOrDefault() != account);
+        ShowContactsCommand = new AsyncCommand(() => ShowWorkspaceModuleAsync("People"), CanOpenWorkspaceModule, allowConcurrent: true);
+        ShowTasksCommand = new AsyncCommand(() => ShowWorkspaceModuleAsync("To Do"), CanOpenWorkspaceModule, allowConcurrent: true);
+        ShowFilesCommand = new AsyncCommand(() => ShowWorkspaceModuleAsync("Drive"), CanOpenWorkspaceModule, allowConcurrent: true);
+        ShowNotesCommand = new AsyncCommand(() => ShowWorkspaceModuleAsync("Notes"), CanOpenWorkspaceModule, allowConcurrent: true);
         RefreshWorkspaceCommand = new AsyncCommand(RefreshWorkspaceAsync, CanOpenWorkspaceModule);
         SearchWorkspaceCommand = new AsyncCommand(RefreshWorkspaceAsync, CanOpenWorkspaceModule);
-        SelectFolderCommand = new AsyncCommand<MailFolderItem>(SelectFolderAsync);
+        SelectFolderCommand = new AsyncCommand<MailFolderItem>(SelectFolderAsync, allowConcurrent: true);
         LoadMoreMessagesCommand = new AsyncCommand(LoadMoreMessagesAsync, () => HasMoreMessages && !_isLoadingMoreMessages);
         SearchCommand = new AsyncCommand(() => StartGlobalSearchAsync(debounce: false, forceOpen: true), () => _store is not null);
         OpenGlobalSearchResultCommand = new AsyncCommand<GlobalSearchResult>(OpenGlobalSearchResultAsync);
@@ -320,7 +322,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     public ObservableCollection<MailAccount> Accounts { get; } = [];
     public ObservableCollection<Mailbox> Mailboxes { get; } = [];
     public IEnumerable<Mailbox> SharedMailboxes => Mailboxes.Where(static mailbox => mailbox.IsShared);
-    public IEnumerable<AccountSettingsItem> SettingsAccounts => Accounts.Select(account => new AccountSettingsItem(
+    public IEnumerable<AccountSettingsItem> SettingsAccounts => OrderedAccounts.Select(account => new AccountSettingsItem(
         account,
         Mailboxes.Where(mailbox => mailbox.AccountId == account.AccountId && mailbox.IsShared)
             .Select(mailbox => new SharedMailboxSettingsItem(
@@ -356,7 +358,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     public IReadOnlyList<string> ThemeModes { get; } = ["System", "Light", "Dark"];
     public IReadOnlyList<string> AccentNames { get; } = Accents.Keys.ToArray();
     public IReadOnlyList<string> MailSyncRanges { get; } = ["1 month", "3 months", "6 months", "1 year", "All mail"];
-    public IReadOnlyList<string> SearchScopes { get; } = ["Everything", "Mail", "OneDrive", "People", "Calendar", "To Do", "Notes"];
+    public IReadOnlyList<string> SearchScopes { get; } = ["Everything", "Mail", "Drive", "People", "Calendar", "To Do", "Notes"];
     public IReadOnlyList<MailQuickActionOption> MailQuickActionOptions => AvailableMailQuickActions;
     public bool IsLoadingMailStatistics
     {
@@ -692,13 +694,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         IsWorkspaceModule && !IsCalendarModule && !IsNotesModule && !IsFilesModule && !IsTasksModule;
     public bool IsContactsModule => ActiveModule == "People";
     public bool IsTasksModule => ActiveModule == "To Do";
-    public bool IsFilesModule => ActiveModule == "OneDrive";
+    public bool IsFilesModule => ActiveModule == "Drive";
     public bool IsNotesModule => ActiveModule == "Notes";
     public object? ActiveWorkspace => ActiveModule switch
     {
         "Calendar" => CalendarWorkspace,
         "To Do" => TasksWorkspace,
-        "OneDrive" => DriveWorkspace,
+        "Drive" => DriveWorkspace,
         "Notes" => NotesWorkspace,
         _ => null
     };
@@ -709,7 +711,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         "Calendar" => false,
         "People" => People.Count == 0,
         "To Do" => false,
-        "OneDrive" => false,
+        "Drive" => false,
         "Notes" => false,
         _ => false
     };
@@ -2025,7 +2027,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             AddSearch("People", () => SearchPeopleGloballyAsync(query, source.Token));
             AddSearch("Calendar", () => SearchCalendarGloballyAsync(query, source.Token));
             AddSearch("To Do", () => SearchTasksGloballyAsync(query, source.Token));
-            AddSearch("OneDrive", () => SearchDriveGloballyAsync(query, source.Token));
+            AddSearch("Drive", () => SearchDriveGloballyAsync(query, source.Token));
             AddSearch("Notes", () => SearchNotesGloballyAsync(query, source.Token));
             await Task.WhenAll(searches);
 
@@ -2398,7 +2400,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         return DriveResults(files);
 
         static IReadOnlyList<GlobalSearchResult> DriveResults(IEnumerable<CloudFile> source) => source.Take(40)
-            .Select(item => new GlobalSearchResult("OneDrive", item.Name, item.Path, "OneDrive", item))
+            .Select(item => new GlobalSearchResult("Drive", item.Name, item.Path, "Drive", item))
             .ToArray();
     }
 
@@ -2464,7 +2466,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         value?.Contains(query, StringComparison.OrdinalIgnoreCase) == true;
 
     private MailAccount[] AccountsWith(ProviderCapabilities capability) =>
-        Accounts.Where(account => account.Capabilities.HasFlag(capability)).ToArray();
+        OrderedAccounts.Where(account => account.Capabilities.HasFlag(capability)).ToArray();
 
     private async Task<IReadOnlyList<ContactInfo>> GetSavedContactsAsync(
         MailAccount account,
@@ -2707,8 +2709,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                     TasksWorkspace.SearchCommand.Execute(null);
                 }
                 break;
-            case "OneDrive":
-                await ShowWorkspaceModuleAsync("OneDrive");
+            case "Drive":
+                await ShowWorkspaceModuleAsync("Drive");
                 if (DriveWorkspace is not null)
                 {
                     DriveWorkspace.SearchQuery = SearchText;
@@ -2788,8 +2790,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         return Task.CompletedTask;
     }
 
+    private int _messageLoadVersion;
     private async Task LoadMessagesAsync()
     {
+        var loadVersion = ++_messageLoadVersion;
+        var requestedFolder = _selectedFolder;
+        var requestedModule = ActiveModule;
         if (_store is null)
         {
             return;
@@ -2804,23 +2810,22 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        _messagePageFolders = _selectedFolder is not null
-            ? [new(_selectedFolder.MailboxId, _selectedFolder.ProviderId)]
+        IReadOnlyList<MailFolderKey> requestedFolders = requestedFolder is not null
+            ? [new(requestedFolder.MailboxId, requestedFolder.ProviderId)]
             : Folders.Where(static folder => folder.WellKnownName == "inbox")
                 .Select(static folder => new MailFolderKey(folder.MailboxId, folder.ProviderId))
                 .ToArray();
-        if (_selectedFolder is null)
-        {
-            await RefreshUnifiedCountsAsync();
-        }
-        var filter = _selectedFolder is null ? _unifiedFilter : MailMessageFilter.All;
-        var page = await _store.GetMessagesPageAsync(_messagePageFolders, filter: filter);
+        var filter = requestedFolder is null ? _unifiedFilter : MailMessageFilter.All;
+        var page = await _store.GetMessagesPageAsync(requestedFolders, filter: filter);
+        if (loadVersion != _messageLoadVersion || requestedFolder != _selectedFolder || requestedModule != ActiveModule) return;
+        _messagePageFolders = requestedFolders;
         _messagePageCursor = page.NextCursor;
         ReconcileMessages(page.Messages);
         RaiseMessageState();
         RaisePropertyChanged(nameof(HasMoreMessages));
         ((AsyncCommand)LoadMoreMessagesCommand).Refresh();
         _ = RepairMissingSubjectsAsync(page.Messages);
+        if (requestedFolder is null) await RefreshUnifiedCountsAsync();
     }
 
     private async Task LoadMoreMessagesAsync()
@@ -2830,11 +2835,15 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             return;
         }
         _isLoadingMoreMessages = true;
+        var loadVersion = _messageLoadVersion;
+        var requestedFolder = _selectedFolder;
+        var requestedModule = ActiveModule;
         ((AsyncCommand)LoadMoreMessagesCommand).Refresh();
         try
         {
             var filter = _selectedFolder is null ? _unifiedFilter : MailMessageFilter.All;
             var page = await _store.GetMessagesPageAsync(_messagePageFolders, _messagePageCursor, filter: filter);
+            if (loadVersion != _messageLoadVersion || requestedFolder != _selectedFolder || requestedModule != ActiveModule) return;
             _messagePageCursor = page.NextCursor;
             ReconcileMessages(Messages.Concat(page.Messages).DistinctBy(MessageKey).ToArray());
             RaiseMessageState();
@@ -2909,7 +2918,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 pair.First.ProviderId == pair.Second.ProviderId &&
                 pair.First.ParentProviderId == pair.Second.ParentProviderId) ||
             !FolderGroups.Select(static group => group.Mailbox.Id)
-                .SequenceEqual(Mailboxes.Select(static mailbox => mailbox.Id));
+                .SequenceEqual(OrderedMailboxes.Select(static mailbox => mailbox.Id));
         var filtersChanged = structureChanged;
         if (structureChanged)
         {
@@ -2918,7 +2927,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             Replace(Folders, refreshed);
             SetSelectedFolder(Folders.FirstOrDefault(folder =>
                 folder.ProviderId == selectedFolderId && folder.MailboxId == selectedMailboxId));
-            Replace(FolderGroups, Mailboxes.Select(mailbox => new MailboxFolderGroup(
+            Replace(FolderGroups, OrderedMailboxes.Select(mailbox => new MailboxFolderGroup(
                 mailbox,
                 BuildFolderTree(Folders.Where(folder => folder.MailboxId == mailbox.Id)))));
         }
@@ -3055,20 +3064,19 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private bool CanOpenWorkspaceModule() =>
         _workspaceProvider is not null &&
-        Accounts.Any(static account => (account.Capabilities & WorkspaceCapabilities) != 0) &&
-        !IsWorkspaceLoading;
+        Accounts.Any(static account => (account.Capabilities & WorkspaceCapabilities) != 0);
 
     private Task RefreshWorkspaceAsync() => IsMailModule
         ? Task.CompletedTask
         : IsCalendarModule
-            ? LoadCalendarWorkspaceAsync()
+            ? CalendarWorkspace is null ? LoadCalendarWorkspaceAsync() : ((AsyncCommand)CalendarWorkspace.RefreshCommand).ExecuteAsync()
             : IsFilesModule
-                ? LoadDriveWorkspaceAsync()
+                ? DriveWorkspace is null ? LoadDriveWorkspaceAsync() : ((AsyncCommand)DriveWorkspace.RefreshCommand).ExecuteAsync()
             : IsNotesModule
-                ? LoadNotesWorkspaceAsync()
+                ? NotesWorkspace is null ? LoadNotesWorkspaceAsync() : ((AsyncCommand)NotesWorkspace.RefreshCommand).ExecuteAsync()
             : IsTasksModule
-                ? LoadTasksWorkspaceAsync()
-            : ShowWorkspaceModuleAsync(ActiveModule);
+                ? TasksWorkspace is null ? LoadTasksWorkspaceAsync() : ((AsyncCommand)TasksWorkspace.RefreshCommand).ExecuteAsync()
+            : LoadPeopleAsync();
 
     private async Task ShowWorkspaceModuleAsync(string module)
     {
@@ -3113,10 +3121,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             }
             return;
         }
-        if (module == "OneDrive")
+        if (module == "Drive")
         {
             Error = null;
-            Status = "Loading OneDrive...";
+            Status = "Loading Drive...";
             try
             {
                 await LoadDriveWorkspaceAsync();
@@ -3126,7 +3134,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 Error = exception.Message;
-                Status = "OneDrive could not be loaded";
+                Status = "Drive could not be loaded";
             }
             return;
         }
@@ -3157,7 +3165,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             switch (module)
             {
                 case "People":
-                    await LoadPeopleAsync();
+                    if (_loadedPeopleQuery != ModuleSearchText || People.Count == 0)
+                    {
+                        await LoadPeopleAsync();
+                    }
                     break;
             }
             Status = "Up to date";
@@ -3175,7 +3186,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private async Task LoadCalendarWorkspaceAsync()
+    private readonly Dictionary<string, Task> _workspaceLoads = [];
+    private Task LoadWorkspaceOnceAsync(string module, Func<Task> load)
+    {
+        if (_workspaceLoads.TryGetValue(module, out var pending) && !pending.IsCompleted) return pending;
+        return _workspaceLoads[module] = load();
+    }
+
+    private Task LoadCalendarWorkspaceAsync() => LoadWorkspaceOnceAsync("Calendar", LoadCalendarWorkspaceCoreAsync);
+
+    private async Task LoadCalendarWorkspaceCoreAsync()
     {
         if (_workspaceProvider is null)
         {
@@ -3241,7 +3261,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(FlaggedMessageCountText));
     }
 
-    private async Task LoadNotesWorkspaceAsync()
+    private Task LoadNotesWorkspaceAsync() => LoadWorkspaceOnceAsync("Notes", LoadNotesWorkspaceCoreAsync);
+
+    private async Task LoadNotesWorkspaceCoreAsync()
     {
         if (_workspaceProvider is null)
         {
@@ -3253,7 +3275,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         await NotesWorkspace.UpdateAccountsAsync(AccountsWith(ProviderCapabilities.Notes));
     }
 
-    private async Task LoadDriveWorkspaceAsync()
+    private Task LoadDriveWorkspaceAsync() => LoadWorkspaceOnceAsync("Drive", LoadDriveWorkspaceCoreAsync);
+
+    private async Task LoadDriveWorkspaceCoreAsync()
     {
         if (_workspaceProvider is null)
         {
@@ -3271,7 +3295,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         await DriveWorkspace.InitializeAsync();
     }
 
-    private async Task LoadTasksWorkspaceAsync()
+    private Task LoadTasksWorkspaceAsync() => LoadWorkspaceOnceAsync("Tasks", LoadTasksWorkspaceCoreAsync);
+
+    private async Task LoadTasksWorkspaceCoreAsync()
     {
         if (_workspaceProvider is null)
         {
@@ -3313,7 +3339,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     {
         if (selection.Item.WebUrl is null)
         {
-            Error = "OneDrive did not provide a sharing link for this file.";
+            Error = "Drive did not provide a sharing link for this file.";
             return;
         }
 
@@ -3333,7 +3359,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     {
         if (_workspaceProvider is null)
         {
-            Error = "OneDrive is unavailable.";
+            Error = "Drive is unavailable.";
             return;
         }
         if (selection.Item.IsFolder)
@@ -3366,7 +3392,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         var previous = Interlocked.Exchange(ref _driveAttachmentCancellation, linkedCancellation);
         previous?.Cancel();
         Error = null;
-        Status = $"Downloading {selection.Item.Name} from OneDrive...";
+        Status = $"Downloading {selection.Item.Name} from Drive...";
         try
         {
             await using var content = new LimitedMemoryStream(DraftAttachment.MaximumSizeBytes);
@@ -3419,7 +3445,19 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         RefreshContactCommands();
     }
 
+    private Task? _peopleLoadTask;
+    private string? _loadedPeopleQuery;
     private async Task LoadPeopleAsync()
+    {
+        if (_peopleLoadTask is { IsCompleted: false })
+        {
+            await _peopleLoadTask;
+            if (_loadedPeopleQuery == ModuleSearchText) return;
+        }
+        await (_peopleLoadTask = LoadPeopleCoreAsync(ModuleSearchText));
+    }
+
+    private async Task LoadPeopleCoreAsync(string query)
     {
         if (_workspaceProvider is null)
         {
@@ -3432,11 +3470,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             {
                 var contacts = owner.Mailbox.IsShared
                     ? await _workspaceProvider.SearchSharedContactsAsync(
-                        owner.Account, owner.Mailbox.Address, ModuleSearchText)
-                    : await _workspaceProvider.SearchContactsAsync(owner.Account, ModuleSearchText);
+                        owner.Account, owner.Mailbox.Address, query)
+                    : await _workspaceProvider.SearchContactsAsync(owner.Account, query);
                 if (_store is not null)
                 {
-                    if (string.IsNullOrWhiteSpace(ModuleSearchText))
+                    if (string.IsNullOrWhiteSpace(query))
                     {
                         await _store.ReplaceWorkspaceItemsAsync(
                             "contact", owner.CacheId, "all", contacts,
@@ -3455,15 +3493,19 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                return new AccountContactResult(owner, [], exception.Message);
+                return new AccountContactResult(owner, Contacts.Where(contact =>
+                    contact.AccountId == owner.Account.AccountId && contact.OwnerAddress == owner.OwnerAddress &&
+                    (string.IsNullOrWhiteSpace(query) || Contains(contact.DisplayName, query) || contact.EmailAddresses.Any(email => Contains(email, query)))).ToArray(), exception.Message);
             }
         }));
+        if (query != ModuleSearchText) return;
+        _loadedPeopleQuery = query;
         var saved = results.SelectMany(static result => result.Contacts).ToArray();
         Replace(Contacts, saved);
 
         IReadOnlyList<DiscoveredPerson> discovered = _store is null
             ? Array.Empty<DiscoveredPerson>()
-            : await _store.GetDiscoveredPeopleAsync(ModuleSearchText);
+            : await _store.GetDiscoveredPeopleAsync(query);
         var ownAddresses = Accounts.Select(static account => account.EmailAddress)
             .Concat(Mailboxes.Select(static mailbox => mailbox.Address))
             .Select(NormalizeEmail)
@@ -5681,7 +5723,7 @@ public sealed record GlobalSearchResult(
         "People" => "♙",
         "Calendar" => "▦",
         "To Do" => "✓",
-        "OneDrive" => "☁",
+        "Drive" => "☁",
         "Notes" => "▤",
         _ => "•"
     };

@@ -16,6 +16,16 @@ public sealed class NotesWorkspaceViewModelTests
         ProviderCapabilities.Notes);
 
     [Fact]
+    public async Task UnchangedAccountsRetainLoadedNavigation()
+    {
+        var vm = new NotesWorkspaceViewModel(new FakeNotesProvider(), [Account]);
+        await vm.UpdateAccountsAsync([Account], TestContext.Current.CancellationToken);
+        var original = Assert.Single(vm.AccountRoots);
+        await vm.UpdateAccountsAsync([Account], TestContext.Current.CancellationToken);
+        Assert.Same(original, Assert.Single(vm.AccountRoots));
+    }
+
+    [Fact]
     public void UsesPhoneFriendlyNotesBreakpoint()
     {
         Assert.True(NotesWorkspaceView.IsCompactWidth(759));

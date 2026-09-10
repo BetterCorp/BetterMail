@@ -485,6 +485,8 @@
                         <TextBlock Text="{Binding ProviderName}" FontSize="11" Foreground="{Binding ProviderColor}" />
                       </StackPanel>
                       <WrapPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Classes="command" Content="Move up" Command="{Binding $parent[UserControl].DataContext.MoveAccountUpCommand}" CommandParameter="{Binding Account}" AutomationProperties.Name="Move account up" />
+                        <Button Classes="command" Content="Move down" Command="{Binding $parent[UserControl].DataContext.MoveAccountDownCommand}" CommandParameter="{Binding Account}" AutomationProperties.Name="Move account down" />
                         <Button Content="Re-authenticate" Background="#0F6CBD" Foreground="White" Margin="0,0,5,5"
                                 Command="{Binding $parent[UserControl].DataContext.ReauthenticateAccountCommand}"
                                 CommandParameter="{Binding Account}"

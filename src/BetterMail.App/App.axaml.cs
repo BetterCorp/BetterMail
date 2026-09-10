@@ -130,6 +130,7 @@ public sealed partial class App : Application
         viewModel.DefaultMailPromptShown = preferences.DefaultMailPromptShown;
         viewModel.MailSyncRange = preferences.MailSyncRange;
         viewModel.ConfigureMailQuickActions(preferences.MailQuickActions);
+        viewModel.ConfigureAccountOrder(preferences.AccountOrder);
         viewModel.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName is nameof(MainWindowViewModel.SelectedThemeMode) or
@@ -139,7 +140,8 @@ public sealed partial class App : Application
                 nameof(MainWindowViewModel.DefaultMailPromptShown) or
                 nameof(MainWindowViewModel.MailSyncRange) or
                 nameof(MainWindowViewModel.MailQuickActionsVersion) or
-                nameof(MainWindowViewModel.SenderPreferencesVersion))
+                nameof(MainWindowViewModel.SenderPreferencesVersion) or
+                nameof(MainWindowViewModel.AccountOrderVersion))
             {
                 AppPreferencesStore.Save(dataDirectory, new AppPreferences(
                     ThemeMode: viewModel.SelectedThemeMode,
@@ -151,7 +153,8 @@ public sealed partial class App : Application
                     Signatures: viewModel.GetSignaturePreferences(),
                     MailboxSignatures: viewModel.GetMailboxSignaturePreferences(),
                     MailQuickActions: viewModel.GetMailQuickActionPreferences(),
-                    DefaultMailPromptShown: viewModel.DefaultMailPromptShown));
+                    DefaultMailPromptShown: viewModel.DefaultMailPromptShown,
+                    AccountOrder: viewModel.GetAccountOrderPreferences()));
             }
         };
         viewModel.ConfigureSenderPreferences(

@@ -70,13 +70,13 @@ internal static class CollectionUpdates
     }
 }
 
-public sealed class AsyncCommand(Func<Task> execute, Func<bool>? canExecute = null) : ICommand
+public sealed class AsyncCommand(Func<Task> execute, Func<bool>? canExecute = null, bool allowConcurrent = false) : ICommand
 {
     private bool _running;
 
     public event EventHandler? CanExecuteChanged;
 
-    public bool CanExecute(object? parameter) => !_running && (canExecute?.Invoke() ?? true);
+    public bool CanExecute(object? parameter) => (allowConcurrent || !_running) && (canExecute?.Invoke() ?? true);
 
     public async void Execute(object? parameter) => await ExecuteAsync(parameter);
 
@@ -103,15 +103,17 @@ public sealed class AsyncCommand(Func<Task> execute, Func<bool>? canExecute = nu
     public void Refresh() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
 }
 
-public sealed class AsyncCommand<T>(Func<T, Task> execute, Func<T, bool>? canExecute = null) : ICommand where T : class
+public sealed class AsyncCommand<T>(Func<T, Task> execute, Func<T, bool>? canExecute = null, bool allowConcurrent = false) : ICommand where T : class
 {
     private bool _running;
 
     public event EventHandler? CanExecuteChanged;
 
-    public bool CanExecute(object? parameter) => !_running && parameter is T value && (canExecute?.Invoke(value) ?? true);
+    public bool CanExecute(object? parameter) => (allowConcurrent || !_running) && parameter is T value && (canExecute?.Invoke(value) ?? true);
 
-    public async void Execute(object? parameter)
+    public async void Execute(object? parameter) => await ExecuteAsync(parameter);
+
+    public async Task ExecuteAsync(object? parameter)
     {
         if (!CanExecute(parameter))
         {

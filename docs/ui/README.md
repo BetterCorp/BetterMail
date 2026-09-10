@@ -38,3 +38,22 @@ xvfb-run -a -s '-screen 0 1440x960x24' dotnet run --project tools/BetterMail.UiP
 ```
 
 The preview is a separate development tool, not a production app mode. It loads the real application resources and view models with an offline provider that rejects writes, uses a temporary profile, and captures X11 pixels (no additional Python packages). Calendar samples use the current local day and offset so they remain visible when regenerated. The capture also checks that navigation neither overlaps nor clips at the 480-pixel minimum window height. The preview project is Linux-only and is built by Linux CI; it is not shipped in application packages.
+
+## Responsive sync and workspace follow-up
+
+Navigation stays available while mailbox sync or another workspace load is pending. Calendar, Notes, and To Do retain their loaded trees for unchanged accounts; repeated navigation shares an in-flight load. Explicit refresh remains available. Mail page requests apply only to the current navigation selection. Provider folder discovery, mailbox sync, and workspace-cache refresh run on worker threads; collection changes return to the UI context.
+
+The sync button opens activity details during a running sync, including the current mailbox/folder, completed mailbox count, queued sends, Busy actions, view refresh, draft reconciliation, health reporting, workspace cache, and maintenance. Indeterminate indicators are used where the provider supplies no total.
+
+Settings → Accounts includes Move up / Move down controls. Order persists across restarts and groups shared mailboxes beneath their owning account. Generic navigation/search/attachment labels use Drive; provider labels next to an account retain OneDrive or Google Drive as appropriate. This does not add Google Drive provider support.
+
+People uses compact virtualized rows with secondary actions in an overflow menu. Mail and Calendar share a neutral expandable account header. Drive new-folder and rename inputs appear in action flyouts rather than occupying the toolbar.
+
+Additional Mobbin references inspected:
+
+- [Workable people directory](https://mobbin.com/screens/68f0b023-8b26-47bb-858b-ebeb3cf90e45): simple searchable rows with identity and contact information.
+- [Twenty contacts](https://mobbin.com/screens/806b70c1-22a1-4278-a736-e5abb6d77f43): compact people list, restrained surfaces, and contextual details.
+
+[Sync activity](screenshots/sync-progress-dark.png) · [New folder](screenshots/drive-new-folder-light.png)
+
+All captures use fictional offline fixtures. The activity screenshot deliberately supplies synthetic progress values to the real UI; it is not a production sync trace or benchmark. The user's reference screenshot is not part of this repository. Responsiveness tests hold provider requests open and verify navigation and retained workspace state; no production-account performance benchmark was performed.

@@ -21,6 +21,16 @@ public sealed class TasksWorkspaceViewModelTests
     };
 
     [Fact]
+    public async Task UnchangedAccountsRetainLoadedNavigation()
+    {
+        var vm = new TasksWorkspaceViewModel(new FakeTasksProvider(), [AccountA]);
+        await vm.UpdateAccountsAsync([AccountA], TestContext.Current.CancellationToken);
+        var original = Assert.Single(vm.AccountGroups);
+        await vm.UpdateAccountsAsync([AccountA], TestContext.Current.CancellationToken);
+        Assert.Same(original, Assert.Single(vm.AccountGroups));
+    }
+
+    [Fact]
     public void UsesPhoneFriendlyTasksBreakpoint()
     {
         Assert.True(TasksWorkspaceView.IsCompactWidth(759));

@@ -98,18 +98,30 @@
                   Margin="0,0,8,0" />
           <Button Classes="command" Content="Up" Command="{Binding GoUpCommand}" IsEnabled="{Binding CanGoUp}"
                   AutomationProperties.Name="Go to parent drive folder" Margin="0,0,8,0" />
-          <TextBox Width="180" Text="{Binding NewFolderName}" PlaceholderText="New folder name"
-                   AutomationProperties.Name="New drive folder name" TabIndex="320" />
-          <Button Classes="command" Content="New folder" Command="{Binding CreateFolderCommand}"
-                  AutomationProperties.Name="Create drive folder" TabIndex="321" Margin="5,0,10,0" />
+          <Button x:Name="NewFolderButton" Classes="command" Content="New folder" TabIndex="321" IsEnabled="{Binding !IsBusy}">
+            <Button.Flyout><Flyout Placement="BottomEdgeAlignedLeft">
+              <StackPanel Width="280" Spacing="10">
+                <TextBlock Text="New folder" FontWeight="SemiBold" FontSize="16" />
+                <TextBox Text="{Binding NewFolderName}" PlaceholderText="Folder name" AutomationProperties.Name="New drive folder name" />
+                <TextBlock Text="{Binding OperationError}" IsVisible="{Binding HasOperationError}" TextWrapping="Wrap" />
+                <Button Classes="primary" Content="Create" Click="CreateFolderClicked" HorizontalAlignment="Right" />
+              </StackPanel>
+            </Flyout></Button.Flyout>
+          </Button>
           <Button Classes="command" Content="Upload" Command="{Binding UploadCommand}"
                   AutomationProperties.Name="Upload local file" TabIndex="322" />
           <Button Classes="command" Content="Download" Command="{Binding DownloadCommand}"
                   AutomationProperties.Name="Download selected file" TabIndex="323" />
-          <TextBox Width="170" Text="{Binding RenameName}" PlaceholderText="Rename selected item"
-                   AutomationProperties.Name="New name for selected drive item" TabIndex="324" Margin="10,0,0,0" />
-          <Button Classes="command" Content="Rename" Command="{Binding RenameCommand}"
-                  AutomationProperties.Name="Rename selected drive item" TabIndex="325" />
+          <Button x:Name="RenameItemButton" Classes="command" Content="Rename" TabIndex="325" IsEnabled="{Binding CanRenameItem}">
+            <Button.Flyout><Flyout Placement="BottomEdgeAlignedLeft">
+              <StackPanel Width="280" Spacing="10">
+                <TextBlock Text="Rename item" FontWeight="SemiBold" FontSize="16" />
+                <TextBox Text="{Binding RenameName}" PlaceholderText="Item name" AutomationProperties.Name="New name for selected drive item" />
+                <TextBlock Text="{Binding OperationError}" IsVisible="{Binding HasOperationError}" TextWrapping="Wrap" />
+                <Button Classes="primary" Content="Save" Click="RenameItemClicked" HorizontalAlignment="Right" />
+              </StackPanel>
+            </Flyout></Button.Flyout>
+          </Button>
           <Button Classes="command" Content="Delete" Command="{Binding RequestDeleteCommand}"
                   AutomationProperties.Name="Delete selected drive item" TabIndex="326" />
           <Button Classes="command" Content="Refresh" Command="{Binding RefreshCommand}"

@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using BetterMail.App;
 using BetterMail.Core;
 using System.Reflection;
@@ -58,6 +59,16 @@ internal static class Program
         Application.Current!.RequestedThemeVariant = ThemeVariant.Dark;
         vm.ConversationThread.RefreshTheme();
         await Shot("mail-dark");
+        // Synthetic progress state for visual review; no provider operation runs here.
+        vm.SyncSteps.Add(new SyncStep("Send queued mail") { Detail = "Complete", Progress = 100, Indeterminate = false });
+        vm.SyncSteps.Add(new SyncStep("Sync mailboxes") { Detail = "1 of 2 mailboxes complete", Running = true, Progress = 50, Indeterminate = false });
+        vm.SyncSteps.Add(new SyncStep("alex@work.example") { Detail = "Inbox", Running = true });
+        vm.SyncSteps.Add(new SyncStep("Reconcile drafts"));
+        var syncButton = window.FindControl<Button>("SyncStatusButton")!;
+        syncButton.Flyout!.ShowAt(syncButton);
+        await Shot("sync-progress-dark");
+        syncButton.Flyout.Hide();
+        vm.SyncSteps.Clear();
         Application.Current.RequestedThemeVariant = ThemeVariant.Light;
         foreach (var (name, command) in new[] { ("calendar", vm.ShowCalendarCommand), ("files", vm.ShowFilesCommand), ("notes", vm.ShowNotesCommand), ("people", vm.ShowContactsCommand), ("todos", vm.ShowTasksCommand) })
         {
@@ -81,6 +92,13 @@ internal static class Program
                 _ = page;
             }
             await Shot(name + "-light");
+            if (name == "files")
+            {
+                var button = window.GetVisualDescendants().OfType<Button>().Single(control => control.Name == "NewFolderButton");
+                button.Flyout!.ShowAt(button);
+                await Shot("drive-new-folder-light");
+                button.Flyout.Hide();
+            }
             Application.Current.RequestedThemeVariant = ThemeVariant.Dark;
             await Shot(name + "-dark");
             Application.Current.RequestedThemeVariant = ThemeVariant.Light;

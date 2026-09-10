@@ -67,6 +67,118 @@ public sealed class MainWindowViewModelTests
         }
     }
 
+    [Fact]
+    public async Task SyncKeepsNavigationEnabledAndRetainsLoadedWorkspaceObjects()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-responsive-" + Guid.NewGuid().ToString("N"));
+        var provider = new RecordingProvider { SyncRelease = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), new string('A', 64));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "account", "tenant", "me@example.test", "Me",
+                ProviderCapabilities.Mail | ProviderCapabilities.Calendar | ProviderCapabilities.Contacts | ProviderCapabilities.Tasks);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, "Me");
+            provider.FolderResults = [new(mailbox.Id, "inbox", "Inbox", 0, 1, "inbox")];
+            var vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider, workspaceProvider: new FakeWorkspaceProvider());
+            vm.Accounts.Add(account);
+            vm.Mailboxes.Add(mailbox);
+            vm.ContactOwners.Add(new(account, mailbox));
+            await ((AsyncCommand)vm.ShowCalendarCommand).ExecuteAsync();
+            var group = Assert.Single(vm.CalendarWorkspace!.CalendarGroups);
+            var sync = ((AsyncCommand)vm.SyncCommand).ExecuteAsync();
+            await provider.SyncEntered.Task.WaitAsync(TimeSpan.FromSeconds(10), token);
+            Assert.True(vm.IsSyncing);
+            Assert.False(vm.IsBusy);
+            Assert.True(vm.ShowContactsCommand.CanExecute(null));
+            vm.ModuleSearchText = "Planning";
+            await ((AsyncCommand)vm.ShowContactsCommand).ExecuteAsync();
+            Assert.Single(vm.People);
+            Assert.True(vm.ShowCalendarCommand.CanExecute(null));
+            await ((AsyncCommand)vm.ShowCalendarCommand).ExecuteAsync();
+            Assert.Same(group, Assert.Single(vm.CalendarWorkspace.CalendarGroups));
+            await ((AsyncCommand)vm.ShowUnifiedInboxCommand).ExecuteAsync();
+            Assert.True(vm.IsMailModule);
+            Assert.Contains(vm.SyncSteps, step => step.Running);
+            provider.SyncRelease.TrySetResult();
+            await sync.WaitAsync(TimeSpan.FromSeconds(10), token);
+            Assert.All(vm.SyncSteps, step => Assert.False(step.Running));
+        }
+        finally
+        {
+            provider.SyncRelease.TrySetResult();
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public async Task AccountOrderPersistsAndOrdersPrimaryAndSharedMailboxes()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-order-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), new string('B', 64));
+            await store.InitializeAsync(TestContext.Current.CancellationToken);
+            var provider = new FakeWorkspaceProvider();
+            var vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, workspaceProvider: provider);
+            var first = new MailAccount("microsoft365", "first", "tenant", "first@example.test", "First", ProviderCapabilities.Mail | ProviderCapabilities.Calendar | ProviderCapabilities.Notes | ProviderCapabilities.Tasks | ProviderCapabilities.Files);
+            var second = first with { AccountId = "second", EmailAddress = "second@example.test", DisplayName = "Second" };
+            vm.Accounts.Add(first); vm.Accounts.Add(second);
+            vm.Mailboxes.Add(new(first.AccountId, first.EmailAddress, "First"));
+            vm.Mailboxes.Add(new(second.AccountId, second.EmailAddress, "Second"));
+            vm.Mailboxes.Add(new(second.AccountId, "shared@example.test", "Shared", IsShared: true));
+            foreach (var command in new[] { vm.ShowCalendarCommand, vm.ShowNotesCommand, vm.ShowTasksCommand, vm.ShowFilesCommand })
+                await ((AsyncCommand)command).ExecuteAsync();
+            var calendarGroups = vm.CalendarWorkspace!.CalendarGroups.ToArray();
+            var notesRoots = vm.NotesWorkspace!.AccountRoots.ToArray();
+            var taskGroups = vm.TasksWorkspace!.AccountGroups.ToArray();
+            var driveRoots = vm.DriveWorkspace!.Roots.ToArray();
+            var selectedDrive = vm.DriveWorkspace.SelectedDirectory;
+            var calendarRequests = provider.CalendarRequests;
+            await ((AsyncCommand<MailAccount>)vm.MoveAccountUpCommand).ExecuteAsync(second);
+            Assert.Equal(calendarGroups.Reverse(), vm.CalendarWorkspace.CalendarGroups);
+            Assert.Same(calendarGroups[0], vm.CalendarWorkspace.CalendarGroups[1]);
+            Assert.Equal(notesRoots.Reverse(), vm.NotesWorkspace.AccountRoots);
+            Assert.Equal(taskGroups.Reverse(), vm.TasksWorkspace.AccountGroups);
+            Assert.Equal(driveRoots.Reverse(), vm.DriveWorkspace.Roots);
+            Assert.Same(selectedDrive, vm.DriveWorkspace.SelectedDirectory);
+            Assert.Equal(calendarRequests, provider.CalendarRequests);
+            Assert.Equal(new[] { "second", "first" }, vm.CalendarWorkspace.EditableCalendars.Select(option => option.Account.AccountId));
+            Assert.Equal(["second", "second", "first"], vm.FolderGroups.Select(group => group.Mailbox.AccountId));
+            AppPreferencesStore.Save(directory, new AppPreferences(AccountOrder: vm.GetAccountOrderPreferences()));
+            var restored = new MainWindowViewModel(null, directory, _ => { }, _ => { }, null);
+            restored.Accounts.Add(first); restored.Accounts.Add(second);
+            restored.ConfigureAccountOrder(AppPreferencesStore.Load(directory).AccountOrder);
+            Assert.Equal("second", restored.SettingsAccounts.First().Account.AccountId);
+            Assert.False(restored.MoveAccountUpCommand.CanExecute(second));
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task NavigationCanReturnToLoadingCalendarWithoutDuplicateRequests()
+    {
+        var provider = new FakeWorkspaceProvider { CalendarGate = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        var vm = new MainWindowViewModel(null, Path.GetTempPath(), _ => { }, _ => { }, null, workspaceProvider: provider);
+        vm.Accounts.Add(new("microsoft365", "account", "tenant", "me@example.test", "Me", ProviderCapabilities.Calendar | ProviderCapabilities.Contacts));
+        var first = ((AsyncCommand)vm.ShowCalendarCommand).ExecuteAsync();
+        try
+        {
+            Assert.Equal(1, provider.CalendarRequests);
+            Assert.True(vm.ShowContactsCommand.CanExecute(null));
+            await ((AsyncCommand)vm.ShowContactsCommand).ExecuteAsync();
+            Assert.True(vm.ShowCalendarCommand.CanExecute(null));
+            var back = ((AsyncCommand)vm.ShowCalendarCommand).ExecuteAsync();
+            Assert.True(vm.IsCalendarModule);
+            Assert.Equal(1, provider.CalendarRequests);
+            provider.CalendarGate.TrySetResult();
+            await Task.WhenAll(first, back);
+            Assert.Single(vm.CalendarWorkspace!.CalendarGroups);
+        }
+        finally { provider.CalendarGate.TrySetResult(); await first; }
+    }
+
     [Theory]
     [InlineData(390, 0)]
     [InlineData(719, 0)]
@@ -748,24 +860,20 @@ public sealed class MainWindowViewModelTests
             viewModel.Accounts.Add(account);
             viewModel.Accounts.Add(secondAccount);
 
-            viewModel.ShowFilesCommand.Execute(null);
-            await WaitUntilAsync(() => viewModel.ActiveModule == "OneDrive", cancellationToken);
+            await ((AsyncCommand)viewModel.ShowFilesCommand).ExecuteAsync();
 
             viewModel.SearchText = "Planning";
             for (var attempt = 0; attempt < 10; attempt++)
             {
-                viewModel.SearchCommand.Execute(null);
-                await WaitUntilAsync(
-                    () => !viewModel.IsGlobalSearchRunning && viewModel.GlobalSearchResults.Count >= 6,
-                    cancellationToken);
+                await ((AsyncCommand)viewModel.SearchCommand).ExecuteAsync();
             }
 
             Assert.False(viewModel.IsBusy);
             Assert.True(viewModel.IsGlobalSearchOpen);
             Assert.Equal(
-                ["Calendar", "Mail", "Notes", "OneDrive", "People", "To Do"],
+                ["Calendar", "Drive", "Mail", "Notes", "People", "To Do"],
                 viewModel.GlobalSearchResults.Select(result => result.Category).Distinct().Order().ToArray());
-            Assert.Equal("OneDrive", viewModel.GlobalSearchResults[0].Category);
+            Assert.Equal("Drive", viewModel.GlobalSearchResults[0].Category);
             Assert.All(viewModel.GlobalSearchResults, result => Assert.False(string.IsNullOrWhiteSpace(result.AccountGroup)));
             var mailResults = viewModel.GlobalSearchResults.Where(result => result.Category == "Mail").ToArray();
             Assert.Equal(2, mailResults.Length);
@@ -775,8 +883,7 @@ public sealed class MainWindowViewModelTests
             Assert.DoesNotContain(account.EmailAddress, mailResult.Subtitle);
             Assert.True(mailResult.StartsAccountGroup);
 
-            viewModel.OpenGlobalSearchGroupCommand.Execute(mailResult);
-            await WaitUntilAsync(() => !viewModel.IsGlobalSearchOpen, cancellationToken);
+            await ((AsyncCommand<GlobalSearchResult>)viewModel.OpenGlobalSearchGroupCommand).ExecuteAsync(mailResult);
             Assert.Single(viewModel.Messages);
             Assert.Equal(mailbox.Id, viewModel.Messages[0].MailboxId);
         }
@@ -2387,10 +2494,15 @@ public sealed class MainWindowViewModelTests
     {
         public int DownloadCount { get; private set; }
 
-        public Task<IReadOnlyList<CalendarInfo>> GetCalendarsAsync(
-            MailAccount account, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<CalendarInfo>>(
-                [new("calendar", "Calendar", "#0F6CBD", true, account.AccountId)]);
+        public TaskCompletionSource? CalendarGate { get; init; }
+        public int CalendarRequests { get; private set; }
+        public async Task<IReadOnlyList<CalendarInfo>> GetCalendarsAsync(
+            MailAccount account, CancellationToken cancellationToken = default)
+        {
+            CalendarRequests++;
+            if (CalendarGate is not null) await CalendarGate.Task.WaitAsync(cancellationToken);
+            return [new("calendar", "Calendar", "#0F6CBD", true, account.AccountId)];
+        }
 
         public Task<IReadOnlyList<CalendarEvent>> GetEventsAsync(
             MailAccount account,
