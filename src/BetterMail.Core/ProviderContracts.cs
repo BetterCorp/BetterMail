@@ -324,8 +324,22 @@ public interface ITasksProvider
         Task.FromException(new NotSupportedException("This provider does not support deleting tasks."));
 }
 
+public sealed record DriveShareLink(string PermissionId, Uri Url, DateTimeOffset ExpiresAt, string Scope);
+public sealed record DriveDownloadChunk(byte[] Bytes, long Offset, long? NextOffset, long TotalSize, string? ETag);
+
 public interface IFilesProvider
 {
+    Task<CloudDriveItem> GetDriveItemAsync(MailAccount account, string itemId, CancellationToken cancellationToken = default) =>
+        Task.FromException<CloudDriveItem>(new NotSupportedException("Drive item lookup is unavailable."));
+    Task<CloudDriveItem> MoveDriveItemAsync(MailAccount account, CloudDriveItem item, CloudDriveItem? parent, CancellationToken cancellationToken = default) =>
+        Task.FromException<CloudDriveItem>(new NotSupportedException("Drive moves are unavailable."));
+    Task<DriveDownloadChunk> ReadDriveChunkAsync(MailAccount account, CloudDriveItem item, long offset, int length, string expectedETag, CancellationToken cancellationToken = default) =>
+        Task.FromException<DriveDownloadChunk>(new NotSupportedException("Drive chunk downloads are unavailable."));
+    Task<CloudDriveItem> UpdateDriveFileAsync(MailAccount account, CloudDriveItem item, Stream content, long length, string contentType, string expectedETag, CancellationToken cancellationToken = default) =>
+        Task.FromException<CloudDriveItem>(new NotSupportedException("Drive file updates are unavailable."));
+    Task<DriveShareLink> CreateReadOnlyLinkAsync(MailAccount account, CloudDriveItem item, DateTimeOffset expiresAt, string scope, IReadOnlyList<string> recipients, CancellationToken cancellationToken = default) =>
+        Task.FromException<DriveShareLink>(new NotSupportedException("Drive sharing is unavailable."));
+
     Task<IReadOnlyList<CloudFile>> SearchFilesAsync(MailAccount account, string query, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<CloudDriveItem>> GetDriveItemsAsync(

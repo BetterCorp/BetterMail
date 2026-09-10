@@ -67,7 +67,16 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
-              <ToggleSwitch Content="Allow creating drafts, moving mail and deleting drafts" IsChecked="{Binding AllowWrites}" />
+              <TextBlock Text="Allowed Drive accounts" FontWeight="SemiBold" />
+              <TextBlock Text="Select accounts whose files MCP may access. Drive uploads, edits, deletion and sharing also require edit permission." TextWrapping="Wrap" Opacity="0.7" />
+              <ItemsControl ItemsSource="{Binding Drives}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="app:McpDriveChoice">
+                    <CheckBox IsChecked="{Binding IsSelected}"><TextBlock Text="{Binding Label}" TextWrapping="Wrap" /></CheckBox>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <ToggleSwitch Content="Allow draft/attachment edits, mail moves, and Drive changes" IsChecked="{Binding AllowWrites}" />
               <ToggleSwitch Content="Also allow sending saved drafts" IsChecked="{Binding AllowSending}" IsEnabled="{Binding AllowWrites}" />
               <TextBlock Text="Sending uses the Busy queue and retries on the next sync. With both permissions off, clients can only read cached mail." TextWrapping="Wrap" Opacity="0.7" />
               <Button Classes="primary" Content="Apply MCP settings" Command="{Binding ApplyCommand}" />

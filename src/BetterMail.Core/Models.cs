@@ -464,7 +464,8 @@ public sealed record CloudDriveItem(
     string AccountId,
     string AccountProviderId,
     string? ContentType = null,
-    string? ParentPath = null)
+    string? ParentPath = null,
+    string? ETag = null)
 {
     public string SizeText => IsFolder ? "" : Size < 1024 * 1024
         ? $"{Math.Max(1, Size / 1024):N0} KB"

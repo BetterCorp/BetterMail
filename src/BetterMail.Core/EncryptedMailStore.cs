@@ -484,12 +484,13 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
         int pageSize = 200,
         CancellationToken cancellationToken = default,
         MailMessageFilter filter = MailMessageFilter.All) =>
-        WithLockAsync(async connection =>
+        WithFolderReadAsync(async connection =>
         {
             var messages = new List<MailMessage>();
             long lastRowId = 0;
             var filters = new List<string>();
             await using var command = connection.CreateCommand();
+            using var cancellation = cancellationToken.Register(command.Cancel);
             if (folders.Count > 0)
             {
                 var folderFilters = new List<string>(folders.Count);
@@ -1399,6 +1400,7 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
+            await DisposeFolderReaderAsync().ConfigureAwait(false);
             if (_connection is not null)
             {
                 var connection = _connection;

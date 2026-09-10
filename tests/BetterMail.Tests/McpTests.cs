@@ -318,6 +318,8 @@ public sealed class McpTests
             var available = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
             Assert.Contains(available, tool => tool.Name == "search_mail");
             Assert.Contains(available, tool => tool.Name == "send_draft");
+            foreach (var name in new[] { "begin_attachment_upload", "upload_attachment_chunk", "complete_attachment_upload", "update_draft", "get_drive_upload", "move_drive_item", "download_drive_file", "complete_drive_upload", "share_drive_file" })
+                Assert.Contains(available, tool => tool.Name == name);
             var result = await client.CallToolAsync("list_mailboxes", cancellationToken: TestContext.Current.CancellationToken);
             Assert.False(result.IsError == true);
             Assert.Contains(mailbox.Id, Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text);
@@ -333,6 +335,22 @@ public sealed class McpTests
             }, cancellationToken: TestContext.Current.CancellationToken);
             Assert.False(created.IsError == true);
             Assert.Equal(MailImportance.High, Assert.Single(await store.GetLocalDraftSummariesAsync()).Importance);
+            var uploadDraft = (await store.GetLocalDraftAsync(Assert.Single(await store.GetLocalDraftSummariesAsync()).Id))!;
+            var uploadBytes = new byte[EncryptedMailStore.McpUploadChunkBytes];
+            RandomNumberGenerator.Fill(uploadBytes);
+            var upload = await tools.BeginAttachmentUpload(mailbox.Id, uploadDraft.Id, uploadDraft.UpdatedAt, "test.bin", "application/octet-stream", uploadBytes.Length, Convert.ToHexString(SHA256.HashData(uploadBytes)), TestContext.Current.CancellationToken);
+            var uploaded = await client.CallToolAsync("upload_attachment_chunk", new Dictionary<string, object?>
+            {
+                ["mailboxId"] = mailbox.Id, ["uploadId"] = upload.Id, ["offset"] = 0,
+                ["contentBase64"] = Convert.ToBase64String(uploadBytes)
+            }, cancellationToken: TestContext.Current.CancellationToken);
+            Assert.False(uploaded.IsError == true);
+            var completed = await client.CallToolAsync("complete_attachment_upload", new Dictionary<string, object?>
+            {
+                ["mailboxId"] = mailbox.Id, ["uploadId"] = upload.Id
+            }, cancellationToken: TestContext.Current.CancellationToken);
+            Assert.False(completed.IsError == true);
+            Assert.Equal(uploadBytes, Assert.Single((await store.GetLocalDraftAsync(uploadDraft.Id))!.Attachments).ContentBytes);
             var oldKey = key;
             key = await store.RotateMcpAccessKeyAsync();
             Assert.Equal(HttpStatusCode.Unauthorized, await Status(oldKey));

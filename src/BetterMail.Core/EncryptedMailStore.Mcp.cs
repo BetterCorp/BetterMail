@@ -9,7 +9,8 @@ public sealed record McpConfiguration(
     int Port = 47831,
     bool AllowWrites = false,
     bool AllowSending = false,
-    string[]? MailboxIds = null);
+    string[]? MailboxIds = null,
+    string[]? DriveAccountIds = null);
 
 public sealed record BetterTunnelsConfiguration(bool Enabled = false, string Token = "", string Email = "");
 

@@ -446,9 +446,9 @@ public sealed class GoogleGmailProvider(
             foreach (var attachment in draft.Attachments)
             {
                 builder.Append("\r\n--").Append(boundary).Append("\r\n");
-                HeaderLine(builder, "Content-Type", $"{SafeHeader(attachment.ContentType)}; name=\"{EncodeHeader(attachment.Name)}\"");
+                HeaderLine(builder, "Content-Type", $"{SafeHeader(attachment.ContentType)}; name=\"{EncodeQuotedParameter(attachment.Name)}\"");
                 HeaderLine(builder, "Content-Transfer-Encoding", "base64");
-                HeaderLine(builder, "Content-Disposition", $"{(attachment.IsInline ? "inline" : "attachment")}; filename=\"{EncodeHeader(attachment.Name)}\"");
+                HeaderLine(builder, "Content-Disposition", $"{(attachment.IsInline ? "inline" : "attachment")}; filename=\"{EncodeQuotedParameter(attachment.Name)}\"");
                 if (!string.IsNullOrWhiteSpace(attachment.ContentId))
                 {
                     HeaderLine(builder, "Content-ID", $"<{SafeHeader(attachment.ContentId)}>" );
@@ -895,6 +895,9 @@ public sealed class GoogleGmailProvider(
     private static string EncodeHeader(string value) => value.All(static character => character is >= ' ' and <= '~')
         ? SafeHeader(value)
         : $"=?UTF-8?B?{Convert.ToBase64String(Encoding.UTF8.GetBytes(SafeHeader(value)))}?=";
+    private static string EncodeQuotedParameter(string value) => EncodeHeader(value)
+        .Replace("\\", "\\\\", StringComparison.Ordinal)
+        .Replace("\"", "\\\"", StringComparison.Ordinal);
     private static string WrapBase64(string value) => string.Join("\r\n", value.Chunk(76).Select(static chunk => new string(chunk)));
     private static string Header(IReadOnlyDictionary<string, string> headers, string name) => headers.GetValueOrDefault(name) ?? "";
     private static string Escape(string value) => Uri.EscapeDataString(value);
