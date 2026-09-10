@@ -17,11 +17,21 @@ public sealed class AttachmentDriveSaveViewModel : ViewModelBase
         _provider = provider;
         _content = content;
         _contentType = contentType;
-        FileName = name;
+        FileName = NormalizeFileName(name);
         var driveAccounts = accounts.Where(account => account.Capabilities.HasFlag(ProviderCapabilities.Files)).ToArray();
         Workspace = new DriveWorkspaceViewModel(provider, driveAccounts);
         Status = driveAccounts.Length == 0 ? "Connect a OneDrive account in Settings to save attachments to Drive." : null;
         Workspace.PropertyChanged += (_, _) => Refresh();
+    }
+
+    internal static string NormalizeFileName(string name)
+    {
+        // Mail attachment names need not follow the destination filesystem's rules.
+        // Use a fixed character set so Linux, macOS, and Windows behave identically.
+        var clean = string.Concat(name.Select(character =>
+            char.IsControl(character) || "<>:\"/\\|?*".Contains(character) ? '_' : character))
+            .Trim().TrimEnd('.', ' ');
+        return string.IsNullOrWhiteSpace(clean) ? "attachment" : clean;
     }
 
     public DriveWorkspaceViewModel Workspace { get; }

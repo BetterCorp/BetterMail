@@ -8,6 +8,29 @@ public sealed class AttachmentDriveSaveTests
     private static readonly MailAccount Account = new("microsoft365", "work", "tenant", "alex@example.test", "Alex", ProviderCapabilities.Files);
     private static readonly CloudDriveItem Folder = new("projects", "Projects", 0, true, null, null, Account.AccountId, Account.ProviderId);
 
+    [Theory]
+    [InlineData("report:final.pdf", "report_final.pdf")]
+    [InlineData("a<b>c:d\"e/f\\g|h?i*.pdf", "a_b_c_d_e_f_g_h_i_.pdf")]
+    [InlineData("report\nfinal.pdf", "report_final.pdf")]
+    [InlineData("  résumé final.pdf  ", "résumé final.pdf")]
+    [InlineData("report.pdf...", "report.pdf")]
+    [InlineData("", "attachment")]
+    [InlineData("   ", "attachment")]
+    [InlineData("..", "attachment")]
+    [InlineData(" . . ", "attachment")]
+    public async Task DisplaysAndUploadsANormalizedAttachmentName(string original, string expected)
+    {
+        var provider = new Files();
+        var model = new AttachmentDriveSaveViewModel(provider, [Account], original, "application/pdf", [1, 2]);
+        Assert.Equal(expected, model.FileName);
+        BetterMail.Microsoft365.Microsoft365WorkspaceProvider.ValidateDriveName(model.FileName);
+        await model.Workspace.InitializeAsync(TestContext.Current.CancellationToken);
+        await model.SaveAsync(TestContext.Current.CancellationToken);
+        Assert.True(model.IsSaved);
+        Assert.Equal(expected, provider.Name);
+        Assert.Equal(new byte[] { 1, 2 }, provider.Bytes);
+    }
+
     [Fact]
     public async Task SavesExactBytesAndMetadataToChosenAccountAndFolderOnce()
     {
