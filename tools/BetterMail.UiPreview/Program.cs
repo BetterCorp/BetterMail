@@ -40,7 +40,7 @@ internal static class Program
         vm.Accounts.Add(account);
         vm.Mailboxes.Add(mailbox);
         vm.ContactOwners.Add(new(account, mailbox));
-        vm.Accounts.Add(account with { ProviderId = "google-workspace", AccountId = "studio", EmailAddress = "alex@studio.example", DisplayName = "Studio", Capabilities = ProviderCapabilities.Mail | ProviderCapabilities.Files });
+        vm.Accounts.Add(account with { ProviderId = "microsoft365", AccountId = "studio", EmailAddress = "alex@studio.example", DisplayName = "Studio", Capabilities = ProviderCapabilities.Mail | ProviderCapabilities.Files });
         await vm.InitializeAsync();
         var folders = new[] { "Inbox", "Sent", "Drafts", "Archive", "Trash" }.Select(name => new MailFolderItem(new(mailbox.Id, name.ToLowerInvariant(), name, name == "Inbox" ? 3 : 0, 8), mailbox.DisplayName)).ToArray();
         foreach (var folder in folders) vm.Folders.Add(folder);
@@ -85,6 +85,14 @@ internal static class Program
             await Shot(name + "-dark");
             Application.Current.RequestedThemeVariant = ThemeVariant.Light;
         }
+        window.Width = 1024;
+        window.Height = 480;
+        await Shot("minimum-height");
+        var rail = window.FindControl<Grid>("AppRailLayout")!;
+        var modules = window.FindControl<StackPanel>("RailModules")!;
+        var settings = window.FindControl<Button>("RailSettings")!;
+        if (modules.Bounds.Bottom > settings.Bounds.Top || settings.Bounds.Bottom > rail.Bounds.Height)
+            throw new InvalidOperationException("Navigation overlaps or clips at the minimum window height.");
         window.Width = 390;
         window.Height = 844;
         await ((AsyncCommand)vm.ShowUnifiedInboxCommand).ExecuteAsync();
@@ -107,7 +115,7 @@ internal static class Program
 
 public class PreviewProvider : DispatchProxy
 {
-    public static readonly DateTimeOffset Today = new(DateTime.Today, TimeSpan.Zero);
+    public static readonly DateTimeOffset Today = new(DateTime.Today);
     public static readonly MailAccount Account = new("microsoft365", "work", "sample", "alex@work.example", "Alex Morgan", ProviderCapabilities.Mail | ProviderCapabilities.Calendar | ProviderCapabilities.Contacts | ProviderCapabilities.Tasks | ProviderCapabilities.Files | ProviderCapabilities.Notes);
     protected override object? Invoke(MethodInfo? method, object?[]? args)
     {
