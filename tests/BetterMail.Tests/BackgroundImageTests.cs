@@ -9,6 +9,39 @@ namespace BetterMail.Tests;
 public sealed class BackgroundImageTests
 {
     [Theory]
+    [InlineData("gmail.com")]
+    [InlineData("GOOGLEMAIL.COM")]
+    [InlineData("outlook.com")]
+    [InlineData("hotmail.co.uk")]
+    [InlineData("yahoo.co.jp")]
+    [InlineData("icloud.com")]
+    [InlineData("proton.me")]
+    [InlineData("fastmail.com")]
+    [InlineData("gmx.de")]
+    [InlineData("qq.com")]
+    public async Task SharedMailServicesOnlyRequestGravatarEvenWhenNoImageExists(string domain)
+    {
+        var requests = new List<Uri>();
+        var result = await BackgroundImages.ContactAsync("person@" + domain, TestContext.Current.CancellationToken,
+            (uri, _, _, _) => { requests.Add(uri); return Task.FromResult<byte[]?>(null); });
+        Assert.Null(result);
+        var request = Assert.Single(requests);
+        Assert.Equal("www.gravatar.com", request.Host);
+        Assert.StartsWith("/avatar/", request.AbsolutePath);
+    }
+
+    [Theory]
+    [InlineData("company-business.com")]
+    [InlineData("gmail.com.company-business.com")]
+    public async Task CustomDomainsRetainDomainArtworkFallbacks(string domain)
+    {
+        var requests = new List<Uri>();
+        await BackgroundImages.ContactAsync("person@" + domain, TestContext.Current.CancellationToken,
+            (uri, _, _, _) => { requests.Add(uri); return Task.FromResult<byte[]?>(null); });
+        Assert.Equal(new[] { "cloudflare-dns.com", "www.gravatar.com", domain }, requests.Select(uri => uri.Host));
+    }
+
+    [Theory]
     [InlineData("https://example.com/image.png", true)]
     [InlineData("https://example.com:443/image.png", true)]
     [InlineData("https://example.com:80/image.png", false)]

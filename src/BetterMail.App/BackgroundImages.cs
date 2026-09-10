@@ -41,28 +41,48 @@ internal static class BackgroundImages
         finally { Slots.Release(); }
     }
 
-    public static ImageRequest Contact(string email) => new("contact:" + email.Trim().ToLowerInvariant(), token => ContactAsync(email, token));
+    // Exact mailbox domains only: custom domains hosted by these providers still
+    // have their own identity. Extend this list when another shared service is found.
+    private static readonly HashSet<string> SharedMailDomains = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "gmail.com", "googlemail.com",
+        "outlook.com", "hotmail.com", "hotmail.co.uk", "hotmail.fr", "hotmail.de",
+        "hotmail.it", "hotmail.es", "live.com", "live.co.uk", "live.com.au", "msn.com",
+        "yahoo.com", "yahoo.co.uk", "yahoo.co.in", "yahoo.in", "yahoo.ca", "yahoo.com.au",
+        "yahoo.fr", "yahoo.de", "yahoo.it", "yahoo.es", "yahoo.co.jp", "ymail.com", "rocketmail.com",
+        "icloud.com", "me.com", "mac.com", "aol.com", "aim.com",
+        "proton.me", "protonmail.com", "protonmail.ch", "pm.me",
+        "fastmail.com", "fastmail.fm", "hey.com", "tuta.com", "tuta.io", "tutanota.com", "tutanota.de", "tutamail.com", "keemail.me",
+        "gmx.com", "gmx.net", "gmx.de", "gmx.at", "gmx.ch", "web.de", "mail.com", "email.com",
+        "zoho.com", "zohomail.com", "yandex.com", "yandex.ru", "ya.ru", "mail.ru", "inbox.ru", "list.ru", "bk.ru",
+        "qq.com", "foxmail.com", "163.com", "126.com", "naver.com", "daum.net", "hanmail.net"
+    };
 
-    private static async Task<byte[]?> ContactAsync(string email, CancellationToken token)
+    public static ImageRequest Contact(string email) => new("contact:" + email.Trim().ToLowerInvariant(), token => ContactAsync(email, token, PublicImageHttp.GetAsync));
+
+    internal static async Task<byte[]?> ContactAsync(string email, CancellationToken token,
+        Func<Uri, int, CancellationToken, string?, Task<byte[]?>> download)
     {
         if (!System.Net.Mail.MailAddress.TryCreate(email, out var address)) return null;
         var domain = new System.Globalization.IdnMapping().GetAscii(address.Host).ToLowerInvariant();
         if (!domain.Contains('.') || new[] { ".example", ".test", ".invalid", ".localhost" }.Any(domain.EndsWith)) return null;
-        var logo = await DomainArtworkAsync("bimi:" + domain, async () =>
+        var sharedMailService = SharedMailDomains.Contains(domain.TrimEnd('.'));
+        var logo = sharedMailService ? null : await DomainArtworkAsync("bimi:" + domain, async () =>
         {
-            var dns = await PublicImageHttp.GetAsync(new Uri("https://cloudflare-dns.com/dns-query?name=" +
+            var dns = await download(new Uri("https://cloudflare-dns.com/dns-query?name=" +
                 Uri.EscapeDataString("default._bimi." + domain) + "&type=TXT"), 32768, token, "application/dns-json");
             if (dns is null) return null;
             using var document = JsonDocument.Parse(dns);
             var uri = BimiLogo(document.RootElement);
-            return uri is null ? null : Normalize(await PublicImageHttp.GetAsync(uri, 256 * 1024, token), allowSvg: true);
+            return uri is null ? null : Normalize(await download(uri, 256 * 1024, token, null), allowSvg: true);
         }, token);
         if (logo is not null) return logo;
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(address.Address.Trim().ToLowerInvariant()))).ToLowerInvariant();
-        var gravatar = await AttemptAsync(async () => Normalize(await PublicImageHttp.GetAsync(
-            new Uri($"https://www.gravatar.com/avatar/{hash}?s=128&d=404&r=g"), 1024 * 1024, token)), token);
-        return gravatar ?? await DomainArtworkAsync("favicon:" + domain, async () => Normalize(await PublicImageHttp.GetAsync(
-            new Uri($"https://{domain}/favicon.ico"), 256 * 1024, token)), token);
+        var gravatar = await AttemptAsync(async () => Normalize(await download(
+            new Uri($"https://www.gravatar.com/avatar/{hash}?s=128&d=404&r=g"), 1024 * 1024, token, null)), token);
+        if (sharedMailService) return gravatar;
+        return gravatar ?? await DomainArtworkAsync("favicon:" + domain, async () => Normalize(await download(
+            new Uri($"https://{domain}/favicon.ico"), 256 * 1024, token, null)), token);
     }
 
     private static async Task<byte[]?> DomainArtworkAsync(string key, Func<Task<byte[]?>> load, CancellationToken token)
