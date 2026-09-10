@@ -24,6 +24,9 @@ public sealed class MainWindowViewModelTests
             var viewModel = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
             viewModel.Accounts.Add(account);
             viewModel.Mailboxes.Add(mailbox);
+            // Hold an already-running sync so the newly queued send remains cancellable.
+            viewModel.SyncCommand.Execute(null);
+            await provider.SyncEntered.Task.WaitAsync(token);
             await viewModel.QueueSendAsync(new(account, mailbox), "cancel-send",
                 new("Draft", [new("To", "to@example.com")], "Body", false, RequestReadReceipt: true, RequestDeliveryReceipt: true));
             await ((AsyncCommand)viewModel.ShowOutboxCommand).ExecuteAsync();
@@ -1156,6 +1159,7 @@ public sealed class MainWindowViewModelTests
 
             Assert.Equal(2, provider.SyncCalls);
             Assert.Equal(1, provider.MaxConcurrent);
+            Assert.Equal([1], provider.SyncCountsAtSend);
         }
         finally
         {
@@ -1944,7 +1948,7 @@ public sealed class MainWindowViewModelTests
             {
                 SendRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
                 SyncRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
-                FolderResults = [new MailFolder(mailbox.Id, "inbox", "Inbox", 0, 0, "inbox")]
+                FolderResults = [new MailFolder(mailbox.Id, "inbox", "Inbox", 0, 1, "inbox")]
             };
             var viewModel = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
             viewModel.Accounts.Add(account);
@@ -1964,15 +1968,16 @@ public sealed class MainWindowViewModelTests
             Assert.Empty(viewModel.Drafts);
             Assert.Single(viewModel.Outbox);
             Assert.True(viewModel.HasOutbox);
-            Assert.Equal(0, provider.SendCalls);
+            await WaitUntilAsync(() => provider.SendCalls == 1, cancellationToken);
+            Assert.False(provider.SyncEntered.Task.IsCompleted);
             viewModel.ShowOutboxCommand.Execute(null);
             Assert.Equal("Busy", viewModel.CurrentFolderName);
             Assert.False(viewModel.OpenDraftCommand.CanExecute(Assert.Single(viewModel.VisibleDrafts)));
 
-            // Delivery must wait for the normal incoming-mail sync to finish.
-            provider.SyncRelease.SetResult();
-            await WaitUntilAsync(() => provider.SendCalls == 1, cancellationToken);
+            // Send is attempted before any incoming sync, even when it is rejected.
             provider.SendRelease.SetException(new HttpRequestException("Throttled", null, System.Net.HttpStatusCode.TooManyRequests));
+            await provider.SyncEntered.Task.WaitAsync(cancellationToken);
+            provider.SyncRelease.SetResult();
             await WaitUntilAsync(() => !viewModel.IsSyncing, cancellationToken);
             Assert.Null(viewModel.Error);
             Assert.Single(viewModel.Outbox);
@@ -2077,6 +2082,7 @@ public sealed class MainWindowViewModelTests
         public TaskCompletionSource? SearchRelease { get; set; }
         public TaskCompletionSource? MoveRelease { get; set; }
         public TaskCompletionSource? SyncRelease { get; set; }
+        public TaskCompletionSource SyncEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource? SendRelease { get; set; }
         public int SendCalls { get; private set; }
         public IReadOnlyList<MailFolder> FolderResults { get; set; } = [];
@@ -2102,6 +2108,7 @@ public sealed class MainWindowViewModelTests
             string? cursor,
             CancellationToken cancellationToken = default)
         {
+            SyncEntered.TrySetResult();
             if (SyncRelease is not null)
             {
                 await SyncRelease.Task.WaitAsync(cancellationToken);
@@ -2210,6 +2217,7 @@ public sealed class MainWindowViewModelTests
     private sealed class BlockingSyncProvider(MailFolder folder, params MailMessage[] messages) : IMailProvider
     {
         private int _concurrent;
+        public List<int> SyncCountsAtSend { get; } = [];
         public int SyncCalls { get; private set; }
         public int MaxConcurrent { get; private set; }
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -2256,8 +2264,11 @@ public sealed class MainWindowViewModelTests
             Task.CompletedTask;
         public Task<IReadOnlyList<MailAttachment>> GetAttachmentsAsync(MailAccount account, Mailbox mailbox, string messageId, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<MailAttachment>>([]);
-        public Task SendAsync(MailAccount account, Mailbox mailbox, DraftMessage draft, CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
+        public Task SendAsync(MailAccount account, Mailbox mailbox, DraftMessage draft, CancellationToken cancellationToken = default)
+        {
+            SyncCountsAtSend.Add(SyncCalls);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class ParallelMailboxProvider : IMailProvider
