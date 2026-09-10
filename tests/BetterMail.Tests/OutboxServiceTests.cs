@@ -52,6 +52,55 @@ public sealed class OutboxServiceTests
         });
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CompletedCloudActionCannotBeReimportedFromStaleListingEvenAfterRestart(bool delete)
+    {
+        await WithStore(async (store, reopen, account, mailbox) =>
+        {
+            var provider = new Provider { SupportsCloudDrafts = true, KeepRemoteDraft = true };
+            if (delete)
+            {
+                var local = new LocalDraft("draft", account.AccountId, mailbox.Id, "to@example.test", "", "",
+                    "Subject", "Body", [], DateTimeOffset.UtcNow);
+                await store.SaveLocalDraftAsync(local);
+                await new DraftSynchronizationService(provider, store).SynchronizeAsync(account, mailbox);
+                local = (await store.GetLocalDraftAsync(local.Id))!;
+                await store.QueueDraftDeletionAsync(local);
+                var action = Assert.Single(await store.GetMailActionsAsync());
+                await store.StartMailActionAsync(action.Id);
+                await provider.DeleteDraftAsync(account, mailbox, local.ProviderDraftId!);
+                await store.CompleteDraftDeletionAsync(action, local.ProviderDraftId);
+            }
+            else
+            {
+                await Queue(store, account, mailbox);
+                await new OutboxService(provider, store).ProcessAsync(account, mailbox, "draft");
+            }
+            Assert.Empty(await store.GetLocalDraftsAsync());
+            Assert.Empty(await store.GetMailActionsAsync());
+            // The completed action's remote ID remains in the provider's stale listing.
+            Assert.Equal("remote", Assert.Single(await provider.GetDraftsAsync(account, mailbox)).ProviderId);
+            provider.IncludeUnrelatedDraft = true;
+            await VerifyReconciliation(store);
+            await using var restarted = reopen();
+            await restarted.InitializeAsync();
+            await VerifyReconciliation(restarted);
+            Assert.Equal(delete ? 0 : 1, provider.Sends);
+            Assert.Equal(1, provider.Creates);
+
+            async Task VerifyReconciliation(EncryptedMailStore current)
+            {
+                await new DraftSynchronizationService(provider, current).SynchronizeAsync(account, mailbox);
+                var remaining = Assert.Single(await current.GetLocalDraftsAsync());
+                Assert.Equal("unrelated", remaining.ProviderDraftId);
+                Assert.Null(await current.GetLocalDraftAsync("draft"));
+                Assert.Empty(await current.GetMailActionsAsync());
+            }
+        });
+    }
+
     [Fact]
     public async Task CrashAfterRecordingAttemptCannotResend()
     {
@@ -146,9 +195,10 @@ public sealed class OutboxServiceTests
         public int Sends { get; private set; }
         public int Creates { get; private set; }
         public bool KeepRemoteDraft { get; init; }
+        public bool IncludeUnrelatedDraft { get; set; }
         private CloudDraft? _remote;
         public Task<IReadOnlyList<CloudDraft>> GetDraftsAsync(MailAccount account, Mailbox mailbox, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<CloudDraft>>(KeepRemoteDraft && _remote is not null ? [_remote] : []);
+            Task.FromResult<IReadOnlyList<CloudDraft>>(KeepRemoteDraft && _remote is not null ? IncludeUnrelatedDraft ? [_remote, _remote with { ProviderId = "unrelated" }] : [_remote] : []);
         public Task<bool> IsDraftSentAsync(MailAccount account, Mailbox mailbox, string draftId, CancellationToken cancellationToken = default) => Task.FromResult(SentConfirmed);
         public Task<CloudDraft> CreateDraftAsync(MailAccount account, Mailbox mailbox, DraftMessage draft, CancellationToken cancellationToken = default)
         {
@@ -156,6 +206,8 @@ public sealed class OutboxServiceTests
             _remote = new CloudDraft("remote", account.AccountId, mailbox.Id, draft, DateTimeOffset.UtcNow);
             return Task.FromResult(_remote);
         }
+        // Simulate a successful deletion whose listing has not caught up yet.
+        public Task DeleteDraftAsync(MailAccount account, Mailbox mailbox, string draftId, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task SendDraftAsync(MailAccount account, Mailbox mailbox, string draftId, CancellationToken cancellationToken = default) => Send();
         public Task SendAsync(MailAccount account, Mailbox mailbox, DraftMessage draft, CancellationToken cancellationToken = default) => Send();
         private Task Send() { Sends++; return SendError is { } error ? Task.FromException(error) : Task.CompletedTask; }
