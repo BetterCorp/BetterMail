@@ -187,7 +187,8 @@ public sealed class McpUploadTests
             await Assert.ThrowsAsync<McpException>(() => tools.BeginDriveUpload("microsoft365:account", name, contentType, 1, Hash([1]), replaceItemId: "existing", expectedETag: "etag"));
             // Also protect sessions staged by a previous app version.
             var target = JsonSerializer.Serialize(new { ParentId = (string?)null, ReplaceItemId = "existing", ExpectedETag = "etag" });
-            var upload = await store.BeginMcpAttachmentUploadAsync("drive:microsoft365:account", target, DateTimeOffset.MinValue, name, contentType, 1, Hash([1]));
+            var upload = await store.BeginMcpAttachmentUploadAsync("drive:microsoft365:account", target, DateTimeOffset.MinValue, name, "application/octet-stream", 1, Hash([1]));
+            await SeedLegacyContentTypeAsync(store, upload, contentType);
             await store.WriteMcpAttachmentChunkAsync("drive:microsoft365:account", upload.Id, 0, [1]);
             await Assert.ThrowsAsync<McpException>(() => tools.CompleteDriveUpload("microsoft365:account", upload.Id));
             Assert.Equal("ready", (await tools.GetDriveUpload("microsoft365:account", upload.Id)).State);
@@ -240,6 +241,35 @@ public sealed class McpUploadTests
             Assert.Equal(new byte[] { 1 }, await store.ReadMcpUploadBytesAsync("drive:microsoft365:account", upload.Id));
             Assert.Equal(0, files.Uploads);
         });
+    }
+
+    [Theory]
+    [InlineData("not a MIME type")]
+    [InlineData("text/plain\r\nBcc: hidden@example.com")]
+    [InlineData("text/plain;\r\n charset=utf-8")]
+    public async Task MailAttachmentsRejectInvalidMimeBeforeStagingAndOnLegacyCompletion(string contentType)
+    {
+        await WithStore(async (store, tools, draft, _) =>
+        {
+            await Assert.ThrowsAsync<McpException>(() => tools.BeginAttachmentUpload(draft.MailboxId, draft.Id, draft.UpdatedAt,
+                "report.txt", contentType, 0, Hash([]), TestContext.Current.CancellationToken));
+            var upload = await tools.BeginAttachmentUpload(draft.MailboxId, draft.Id, draft.UpdatedAt, "report.txt", "text/plain", 0, Hash([]));
+            await SeedLegacyContentTypeAsync(store, upload, contentType);
+            await Assert.ThrowsAsync<McpException>(() => tools.CompleteAttachmentUpload(draft.MailboxId, upload.Id, TestContext.Current.CancellationToken));
+            Assert.Empty((await store.GetLocalDraftAsync(draft.Id))!.Attachments);
+            Assert.Equal("ready", (await tools.GetAttachmentUpload(draft.MailboxId, upload.Id)).State);
+        });
+    }
+
+    private static async Task SeedLegacyContentTypeAsync(EncryptedMailStore store, McpAttachmentUpload upload, string contentType)
+    {
+        var connection = (Microsoft.Data.Sqlite.SqliteConnection)typeof(EncryptedMailStore)
+            .GetField("_connection", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(store)!;
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE mcp_attachment_uploads SET metadata=$metadata WHERE id=$id;";
+        command.Parameters.AddWithValue("$metadata", JsonSerializer.Serialize(upload with { ContentType = contentType }));
+        command.Parameters.AddWithValue("$id", upload.Id);
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
     }
 
     private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));

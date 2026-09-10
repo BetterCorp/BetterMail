@@ -26,10 +26,11 @@ public static class LargeAttachmentPolicy
         try
         {
             var items = await provider.GetDriveItemsAsync(account, cancellationToken: token);
+            var hasNameCollision = items.Any(item => !item.IsFolder && item.Name.Equals("Attachments", StringComparison.OrdinalIgnoreCase));
             var folder = items.FirstOrDefault(item => item.IsFolder && item.ProviderId == selection.FolderId)
                 ?? items.FirstOrDefault(item => item.IsFolder && item.Name.Equals("Attachments", StringComparison.OrdinalIgnoreCase))
-                // Recognize the provider's numbered conflict names after an app restart too.
-                ?? items.Where(item => item.IsFolder && System.Text.RegularExpressions.Regex.IsMatch(item.Name,
+                // Numbered names are candidates only when the canonical name is blocked.
+                ?? items.Where(item => hasNameCollision && item.IsFolder && System.Text.RegularExpressions.Regex.IsMatch(item.Name,
                     @"^Attachments (?:[0-9]+|\([0-9]+\))$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant))
                     .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase).ThenBy(item => item.ProviderId, StringComparer.Ordinal).FirstOrDefault()
                 ?? await provider.CreateFolderAsync(account, null, "Attachments", token);

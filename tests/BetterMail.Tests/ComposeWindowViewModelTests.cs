@@ -5,6 +5,24 @@ namespace BetterMail.Tests;
 
 public sealed class ComposeWindowViewModelTests
 {
+    [Theory]
+    [InlineData(20971521, 0, true)]
+    [InlineData(2, 20971520, true)]
+    [InlineData(2, 0, false)]
+    public async Task DownloadedDriveFilesUseActualBytesAndCurrentTotalBudget(int downloadedBytes, int existingBytes, bool shouldShare)
+    {
+        var vm = new ComposeWindowViewModel([], [], new ComposeRequest(), (_, _, _) => Task.CompletedTask);
+        if (existingBytes > 0) vm.AddAttachment(new("existing", "application/octet-stream", new byte[existingBytes]));
+        var before = vm.Attachments.Count;
+        using var content = new MemoryStream();
+        content.SetLength(downloadedBytes);
+        var shared = false;
+        await vm.AttachDownloadedFileAsync("grew-after-listing.txt", "text/plain", content, () => { shared = true; return Task.CompletedTask; });
+        Assert.Equal(shouldShare, shared);
+        Assert.Equal(before + (shouldShare ? 0 : 1), vm.Attachments.Count);
+        if (!shouldShare) Assert.Equal(downloadedBytes, vm.Attachments[^1].Size);
+    }
+
     [Fact]
     public void SuccessfulFilesPreserveAllEarlierBatchErrorsUntilDismissed()
     {

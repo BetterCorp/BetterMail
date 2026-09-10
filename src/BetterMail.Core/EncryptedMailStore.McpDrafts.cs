@@ -81,6 +81,7 @@ public sealed partial class EncryptedMailStore
             if (size < 0 || size > DraftAttachment.MaximumSizeBytes || sha256.Length != 64 || !sha256.All(Uri.IsHexDigit) ||
                 string.IsNullOrWhiteSpace(name) || name.Length > 255 || string.IsNullOrWhiteSpace(contentType) || contentType.Length > 255)
                 throw new InvalidOperationException("Invalid attachment metadata, size, or SHA-256.");
+            ValidateAttachmentContentType(contentType);
             await EnsureMcpUploadsAsync(connection, cancellationToken).ConfigureAwait(false);
             await using var quota = connection.CreateCommand();
             quota.CommandText = "SELECT COUNT(*) FROM mcp_attachment_uploads WHERE completed_at IS NULL;";
@@ -98,6 +99,12 @@ public sealed partial class EncryptedMailStore
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             return upload;
         }, cancellationToken);
+
+    private static void ValidateAttachmentContentType(string contentType)
+    {
+        if (contentType.IndexOfAny(['\r', '\n']) >= 0 || !System.Net.Http.Headers.MediaTypeHeaderValue.TryParse(contentType, out _))
+            throw new InvalidOperationException("Use a valid MIME content type, such as application/octet-stream.");
+    }
 
     private static async Task<(McpAttachmentUpload Upload, string? Completed)> McpUploadAsync(SqliteConnection connection, string mailboxId, string uploadId, CancellationToken token)
     {
@@ -142,6 +149,7 @@ public sealed partial class EncryptedMailStore
         {
             var (upload, completed) = await McpUploadAsync(connection, mailboxId, uploadId, cancellationToken).ConfigureAwait(false);
             if (completed is not null) return DateTimeOffset.Parse(completed, CultureInfo.InvariantCulture);
+            ValidateAttachmentContentType(upload.ContentType);
             await using var transaction = connection.BeginTransaction();
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;

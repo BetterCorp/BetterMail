@@ -25,6 +25,21 @@ public sealed class AttachmentFolderTests
         Assert.Equal(0, restarted.Created);
     }
 
+    [Fact]
+    public async Task NumberedUserFolderIsNotAdoptedWithoutACanonicalNameCollision()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var account = new MailAccount("microsoft365", "account", "tenant", "me@example.com", "Me", ProviderCapabilities.Files);
+        List<CloudDriveItem> root = [new("user-folder", "Attachments 1", 0, true, null, null, account.AccountId, account.ProviderId)];
+        var provider = new FolderProvider(root, "Attachments");
+        var folder = await LargeAttachmentPolicy.AttachmentsFolderAsync(provider, account, token);
+        Assert.Equal("created", folder.ProviderId);
+        Assert.Equal("Attachments", folder.Name);
+        Assert.Equal(1, provider.Created);
+        Assert.Equal("user-folder", root[0].ProviderId);
+        Assert.Equal(2, root.Count);
+    }
+
     private sealed class FolderProvider(List<CloudDriveItem> root, string conflictName) : IFilesProvider
     {
         public int Created;

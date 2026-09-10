@@ -286,21 +286,22 @@ public sealed partial class ComposeWindow : Window
         }
 
         if (!viewModel.TryBeginFileAttachmentUpload([selection.Item.Name])) return;
+        async Task ShareAsync()
+        {
+            var link = await provider.CreateReadOnlyLinkAsync(selection.Account, selection.Item, DateTimeOffset.UtcNow.AddYears(1), "anonymous", []);
+            await CaptureEditorBodyAsync();
+            viewModel.Body += LargeAttachmentPolicy.LinkHtml(selection.Item.Name, link);
+        }
         try
         {
             if (LargeAttachmentPolicy.UseDrive(selection.Item.Size, viewModel.Attachments))
             {
-                var link = await provider.CreateReadOnlyLinkAsync(selection.Account, selection.Item, DateTimeOffset.UtcNow.AddYears(1), "anonymous", []);
-                await CaptureEditorBodyAsync();
-                viewModel.Body += LargeAttachmentPolicy.LinkHtml(selection.Item.Name, link);
+                await ShareAsync();
                 return;
             }
             await using var content = new LimitedMemoryStream(DraftAttachment.MaximumSizeBytes);
             await provider.DownloadFileAsync(selection.Account, selection.Item, content);
-            viewModel.AddAttachment(new DraftAttachment(
-                selection.Item.Name,
-                selection.Item.ContentType ?? "application/octet-stream",
-                content.ToArray()));
+            await viewModel.AttachDownloadedFileAsync(selection.Item.Name, selection.Item.ContentType, content, ShareAsync);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

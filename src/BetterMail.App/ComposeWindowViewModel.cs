@@ -253,6 +253,13 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         }
     }
 
+    internal async Task AttachDownloadedFileAsync(string name, string? contentType, MemoryStream content, Func<Task> share)
+    {
+        // Listed metadata may be stale: decide from the bytes actually downloaded.
+        if (LargeAttachmentPolicy.UseDrive(content.Length, Attachments)) await share();
+        else AddAttachment(new(name, contentType ?? "application/octet-stream", content.ToArray()));
+    }
+
     public void AddAttachment(DraftAttachment attachment)
     {
         if (!ValidateAttachmentSize(attachment.Name, attachment.Size))

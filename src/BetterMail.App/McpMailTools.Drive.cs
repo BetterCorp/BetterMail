@@ -164,7 +164,7 @@ internal sealed partial class McpMailTools
     {
         if (AttachmentDriveSaveViewModel.NormalizeFileName(name) != name)
             throw new McpException("Use a valid Drive filename without reserved names or characters.");
-        if (!System.Net.Http.Headers.MediaTypeHeaderValue.TryParse(contentType, out _))
+        if (contentType.IndexOfAny(['\r', '\n']) >= 0 || !System.Net.Http.Headers.MediaTypeHeaderValue.TryParse(contentType, out _))
             throw new McpException("Use a valid MIME content type, such as application/octet-stream.");
     }
 
