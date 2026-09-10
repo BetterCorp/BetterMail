@@ -223,7 +223,7 @@ public sealed partial class ComposeWindow : Window
         var provider = _filesProvider;
         if (provider is null)
         {
-            viewModel.ReportError("OneDrive is unavailable.");
+            viewModel.ReportError("Drive is unavailable.");
             return;
         }
 

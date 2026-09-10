@@ -32,6 +32,23 @@ public sealed partial class MainWindow : Window
     private bool _isClosing;
     private bool _preservingMessageSelection;
 
+    private void EditPersonClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm && sender is Control { DataContext: PersonEntry person })
+            vm.EditContactCommand.Execute(person);
+    }
+    private void DeletePersonClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm && sender is Control { DataContext: PersonEntry person })
+            vm.RequestDeleteContactCommand.Execute(person);
+    }
+
+    private void SyncStatusClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm && !vm.IsSyncing && vm.SyncCommand.CanExecute(null))
+            vm.SyncCommand.Execute(null);
+    }
+
     public MainWindow()
     {
         InitializeComponent();

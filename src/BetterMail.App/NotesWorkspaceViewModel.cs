@@ -151,11 +151,15 @@ public sealed class NotesWorkspaceViewModel : ViewModelBase
         return Task.CompletedTask;
     }
 
+    private bool _accountsLoaded;
+
     public Task UpdateAccountsAsync(
         IReadOnlyList<MailAccount> accounts,
         CancellationToken cancellationToken = default)
     {
-        _accounts = accounts;
+        if (_accountsLoaded && _accounts.SequenceEqual(accounts)) return Task.CompletedTask;
+        _accountsLoaded = true;
+        _accounts = accounts.ToArray();
         return InitializeAsync(cancellationToken);
     }
 

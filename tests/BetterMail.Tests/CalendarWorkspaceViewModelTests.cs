@@ -8,6 +8,20 @@ public sealed class CalendarWorkspaceViewModelTests
     private static readonly DateTimeOffset Now = new(2026, 7, 14, 9, 0, 0, TimeSpan.FromHours(2));
 
     [Fact]
+    public async Task UnchangedAccountsPreserveCalendarChoices()
+    {
+        var accounts = Accounts()[..1];
+        var vm = new CalendarWorkspaceViewModel(new FakeCalendarProvider(), accounts, () => Now);
+        await vm.UpdateAccountsAsync(accounts, TestContext.Current.CancellationToken);
+        var group = Assert.Single(vm.CalendarGroups);
+        var calendar = group.Calendars.First();
+        calendar.IsVisible = false;
+        await vm.UpdateAccountsAsync(accounts.ToArray(), TestContext.Current.CancellationToken);
+        Assert.Same(group, Assert.Single(vm.CalendarGroups));
+        Assert.False(calendar.IsVisible);
+    }
+
+    [Fact]
     public async Task AggregatesAccountsIsolatesFailuresAndLaysOutOverlaps()
     {
         var provider = new FakeCalendarProvider();

@@ -211,12 +211,13 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        CalendarGroups.Clear();
-        EditableCalendars.Clear();
+
         LoadIssues.Clear();
         _calendarIssues.Clear();
         var results = await Task.WhenAll(_accounts.Select((account, index) =>
             LoadAccountAsync(account, index, cancellationToken)));
+        CalendarGroups.Clear();
+        EditableCalendars.Clear();
         foreach (var result in results)
         {
             CalendarGroups.Add(result.Group);
@@ -238,8 +239,10 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
         IReadOnlyList<MailAccount> accounts,
         CancellationToken cancellationToken = default)
     {
+        if (_initialized && _accounts.SequenceEqual(accounts)) return;
         _accounts = accounts.ToArray();
         await InitializeAsync(cancellationToken);
+        _initialized = true;
     }
 
     public void SetViewportWidth(double width)

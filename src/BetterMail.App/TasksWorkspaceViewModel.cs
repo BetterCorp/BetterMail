@@ -170,11 +170,12 @@ public sealed class TasksWorkspaceViewModel : ViewModelBase
     {
         IsLoading = true;
         OperationError = null;
-        AccountGroups.Clear();
+
         try
         {
             var groups = await Task.WhenAll(_accounts.Select(
                 account => LoadAccountAsync(account, cancellationToken)));
+            AccountGroups.Clear();
             foreach (var group in groups)
             {
                 AccountGroups.Add(group);
@@ -191,12 +192,16 @@ public sealed class TasksWorkspaceViewModel : ViewModelBase
         }
     }
 
-    public Task UpdateAccountsAsync(
+    private bool _accountsLoaded;
+
+    public async Task UpdateAccountsAsync(
         IReadOnlyList<MailAccount> accounts,
         CancellationToken cancellationToken = default)
     {
-        _accounts = accounts;
-        return InitializeAsync(cancellationToken);
+        if (_accountsLoaded && _accounts.SequenceEqual(accounts)) return;
+        _accounts = accounts.ToArray();
+        await InitializeAsync(cancellationToken);
+        _accountsLoaded = true;
     }
 
     private async Task<TaskAccountGroup> LoadAccountAsync(

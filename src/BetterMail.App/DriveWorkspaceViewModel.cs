@@ -105,6 +105,8 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         }
     }
 
+    public bool CanRenameItem => SelectedItem is not null && !IsBusy;
+
     public DriveItemEntry? SelectedItem
     {
         get => _selectedItem;
@@ -113,6 +115,7 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
             if (SetProperty(ref _selectedItem, value))
             {
                 RenameName = value?.Item.Name ?? "";
+                RaisePropertyChanged(nameof(CanRenameItem));
                 RefreshCommands();
             }
         }
@@ -693,6 +696,7 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
 
     private void RefreshCommands()
     {
+        RaisePropertyChanged(nameof(CanRenameItem));
         ((AsyncCommand)GoUpCommand).Refresh();
         ((AsyncCommand)RefreshCommand).Refresh();
         ((AsyncCommand)SearchCommand).Refresh();

@@ -6,6 +6,22 @@ namespace BetterMail.App;
 
 public sealed partial class MainWindowViewModel
 {
+    public ObservableCollection<SyncStep> SyncSteps { get; } = [];
+    public SyncStep WorkspaceSyncStep { get; } = new("Workspace cache") { Detail = "Not started" };
+
+    public SyncStep StorageSyncStep { get; } = new("Storage maintenance") { Detail = "Not started" };
+
+    private async Task RunSyncStepAsync(SyncStep step, Func<Task> action)
+    {
+        step.Running = true;
+        step.Progress = 0;
+        step.Indeterminate = true;
+        step.Detail = "In progress";
+        try { await action(); step.Detail = "Complete"; step.Progress = 100; step.Indeterminate = false; }
+        catch { step.Detail = "Failed"; throw; }
+        finally { step.Running = false; }
+    }
+
     public ObservableCollection<MailboxSyncHealth> SyncHealth { get; } = [];
 
     private async Task RefreshSyncHealthAsync()
@@ -20,8 +36,12 @@ public sealed partial class MainWindowViewModel
         MailAccount account, Mailbox mailbox, ConcurrentQueue<string> failures)
     {
         var ownFailures = new ConcurrentQueue<string>();
-        try { await SyncMailboxCoreAsync(provider, store, engine, account, mailbox, ownFailures); }
+        var step = new SyncStep(mailbox.Address) { Running = true, Detail = "Discovering folders" };
+        SyncSteps.Add(step);
+        try { await SyncMailboxCoreAsync(provider, store, engine, account, mailbox, ownFailures, step); }
         catch (Exception error) { ownFailures.Enqueue($"{mailbox.Address}: {error.Message}"); }
+        step.Running = false;
+        step.Detail = ownFailures.IsEmpty ? "Complete" : "Completed with issues";
         foreach (var failure in ownFailures) failures.Enqueue(failure);
         var previous = (await store.GetSyncHealthAsync()).FirstOrDefault(item => item.MailboxId == mailbox.Id);
         await store.SaveSyncHealthAsync(new(account.AccountId, mailbox.Id, mailbox.Address,
@@ -48,6 +68,14 @@ public sealed partial class MainWindowViewModel
         Error = null;
         var animation = AnimateSyncIconAsync();
         var mailFailures = new ConcurrentQueue<string>();
+        SyncSteps.Clear();
+        var sends = new SyncStep("Send queued mail");
+        var actions = new SyncStep("Process Busy actions");
+        var mail = new SyncStep("Sync mailboxes");
+        var view = new SyncStep("Refresh mail view");
+        var health = new SyncStep("Update sync health");
+        var drafts = new SyncStep("Reconcile drafts");
+        foreach (var step in new[] { sends, actions, mail, view, health, drafts }) SyncSteps.Add(step);
         try
         {
             do
@@ -55,23 +83,41 @@ public sealed partial class MainWindowViewModel
                 Interlocked.Exchange(ref _syncPending, 0);
                 // User-requested work takes priority over background mailbox refreshes.
                 // Repeat this for pending passes so sends queued during sync go first next time.
-                await ProcessOutboxAsync();
-                await ProcessMailActionsAsync();
+                await RunSyncStepAsync(sends, ProcessOutboxAsync);
+                if (BusyActions.Any(action => action.Kind == MailActionKind.Send && (action.NeedsSendReview || action.Error is not null)))
+                    sends.Detail = "Needs attention — review Busy";
+                await RunSyncStepAsync(actions, ProcessMailActionsAsync);
+                if (BusyActions.Any(action => action.Kind != MailActionKind.Send && action.Error is not null))
+                    actions.Detail = "Needs attention — review Busy";
                 var engine = new SyncEngine(provider, store);
                 var mailboxes = Mailboxes.ToArray();
-                await Task.WhenAll(
-                    from account in Accounts.ToArray()
-                    join mailbox in mailboxes on account.AccountId equals mailbox.AccountId
-                    select SyncMailboxAsync(provider, store, engine, account, mailbox, mailFailures));
+                await RunSyncStepAsync(mail, async () =>
+                {
+                    var work = (from account in Accounts.ToArray()
+                                join mailbox in mailboxes on account.AccountId equals mailbox.AccountId
+                                select (account, mailbox)).ToArray();
+                    var completed = 0;
+                    mail.Indeterminate = false;
+                    mail.Progress = 0;
+                    await Task.WhenAll(work.Select(async item =>
+                    {
+                        await SyncMailboxAsync(provider, store, engine, item.account, item.mailbox, mailFailures);
+                        mail.Progress = 100d * ++completed / work.Length;
+                        mail.Detail = $"{completed} of {work.Length} mailboxes complete";
+                    }));
+                });
 
+                if (!mailFailures.IsEmpty) mail.Detail = "Completed with issues";
                 try
                 {
+                    view.Running = true;
+                    view.Detail = "Updating cached rows";
                     await LoadFoldersAsync();
-                    if (!IsGlobalSearchOpen && !IsSearchResultsView)
+                    if (IsMailModule && !IsGlobalSearchOpen && !IsSearchResultsView)
                     {
                         await LoadMessagesAsync();
                     }
-                    if (SelectedMessage is { } selected)
+                    if (IsMailModule && SelectedMessage is { } selected)
                     {
                         await LoadConversationAsync(selected, _selectionVersion, CancellationToken.None);
                     }
@@ -83,12 +129,20 @@ public sealed partial class MainWindowViewModel
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
                     mailFailures.Enqueue(exception.Message);
+                    view.Detail = "Failed: " + exception.Message;
                 }
+                finally { view.Running = false; }
             }
             while (Volatile.Read(ref _syncPending) != 0);
+            view.Running = false;
+            if (!view.Detail.StartsWith("Failed:", StringComparison.Ordinal)) view.Detail = "Complete";
+            view.Progress = 100;
+            view.Indeterminate = false;
 
-            await RefreshSyncHealthAsync();
-            await ReconcileAllDraftsAsync();
+            await RunSyncStepAsync(health, RefreshSyncHealthAsync);
+            IReadOnlyList<string> draftIssues = [];
+            await RunSyncStepAsync(drafts, async () => { draftIssues = await ReconcileAllDraftsAsync(); });
+            if (draftIssues.Count > 0) drafts.Detail = $"{draftIssues.Count} issue(s) — review draft sync issues";
             _ = RefreshWorkspaceCacheAsync();
             if (!mailFailures.IsEmpty)
             {
@@ -103,6 +157,7 @@ public sealed partial class MainWindowViewModel
         }
         finally
         {
+            foreach (var step in SyncSteps.Where(step => step.Running)) { step.Running = false; step.Detail = "Stopped"; }
             Interlocked.Exchange(ref _syncRunning, 0);
             IsSyncing = false;
             await animation;
@@ -121,10 +176,14 @@ public sealed partial class MainWindowViewModel
         {
             return;
         }
+        StorageSyncStep.Running = true;
+        StorageSyncStep.Detail = "Cleaning cached data";
         try
         {
+            var batches = 0;
             while (await _store.RunMaintenanceBatchAsync())
             {
+                StorageSyncStep.Detail = $"{++batches} cleanup batches complete";
                 await Task.Delay(50);
             }
             _recipientDirectoryTask = null;
@@ -134,6 +193,7 @@ public sealed partial class MainWindowViewModel
                 var unlockWatcher = CancelVacuumWhenUnlockedAsync(vacuumCancellation);
                 try
                 {
+                    StorageSyncStep.Detail = "Optimizing database while session is locked";
                     await _store.VacuumIfUsefulAsync(vacuumCancellation.Token);
                 }
                 catch (OperationCanceledException) when (!WindowsSessionLock.IsLocked())
@@ -146,13 +206,16 @@ public sealed partial class MainWindowViewModel
                     await unlockWatcher;
                 }
             }
+            StorageSyncStep.Detail = "Complete";
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            StorageSyncStep.Detail = $"Paused: {exception.Message}";
             Error = $"Storage optimization paused: {exception.Message}";
         }
         finally
         {
+            StorageSyncStep.Running = false;
             Interlocked.Exchange(ref _storageMaintenanceRunning, 0);
         }
     }
@@ -220,20 +283,35 @@ public sealed partial class MainWindowViewModel
         }
 
         _lastWorkspaceSyncAt = DateTimeOffset.UtcNow;
+        var accounts = Accounts.ToArray();
+        WorkspaceSyncStep.Running = true;
+        var issues = new ConcurrentQueue<string>();
+        IProgress<string> progress = new Progress<string>(detail => { if (WorkspaceSyncStep.Running) WorkspaceSyncStep.Detail = detail; });
         try
         {
-            foreach (var account in Accounts.ToArray())
+            await Task.Run(async () =>
             {
-                await RefreshContactsAsync(account);
-                await RefreshCalendarsAsync(account);
-                await RefreshTasksAsync(account);
-                await RefreshNotesAsync(account);
-                await _store.GarbageCollectWorkspaceAsync(account.AccountId);
-            }
+                foreach (var account in accounts)
+                {
+                    progress.Report($"{account.EmailAddress} · People");
+                    await RefreshContactsAsync(account);
+                    progress.Report($"{account.EmailAddress} · Calendar");
+                    await RefreshCalendarsAsync(account);
+                    progress.Report($"{account.EmailAddress} · To Do");
+                    await RefreshTasksAsync(account);
+                    progress.Report($"{account.EmailAddress} · Notes");
+                    await RefreshNotesAsync(account);
+                    progress.Report($"{account.EmailAddress} · Cache cleanup");
+                    await _store.GarbageCollectWorkspaceAsync(account.AccountId);
+                }
+            });
             await RefreshNextCalendarEventAsync();
+            WorkspaceSyncStep.Detail = issues.IsEmpty ? "Complete" : "Completed with issues: " + string.Join("; ", issues);
         }
+        catch (Exception error) { WorkspaceSyncStep.Detail = "Failed: " + error.Message; }
         finally
         {
+            WorkspaceSyncStep.Running = false;
             Interlocked.Exchange(ref _workspaceSyncRunning, 0);
         }
 
@@ -253,6 +331,7 @@ public sealed partial class MainWindowViewModel
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
+                issues.Enqueue($"{account.EmailAddress}: {exception.Message}");
             }
         }
 
@@ -281,6 +360,7 @@ public sealed partial class MainWindowViewModel
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
+                issues.Enqueue($"{account.EmailAddress}: {exception.Message}");
             }
         }
 
@@ -308,6 +388,7 @@ public sealed partial class MainWindowViewModel
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
+                issues.Enqueue($"{account.EmailAddress}: {exception.Message}");
             }
         }
 
@@ -351,6 +432,7 @@ public sealed partial class MainWindowViewModel
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
+                issues.Enqueue($"{account.EmailAddress}: {exception.Message}");
             }
         }
     }
@@ -361,12 +443,12 @@ public sealed partial class MainWindowViewModel
         SyncEngine engine,
         MailAccount account,
         Mailbox mailbox,
-        ConcurrentQueue<string> failures)
+        ConcurrentQueue<string> failures, SyncStep step)
     {
         IReadOnlyList<MailFolder> folders;
         try
         {
-            folders = await provider.GetFoldersAsync(account, mailbox);
+            folders = await Task.Run(() => provider.GetFoldersAsync(account, mailbox));
             await store.SaveFoldersAsync(mailbox.Id, folders);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -390,6 +472,7 @@ public sealed partial class MainWindowViewModel
         {
             try
             {
+                step.Detail = folder.DisplayName;
                 InboxNotificationContext? notificationContext = null;
                 var notifyThisCycle = false;
                 if (folder.WellKnownName?.Equals("inbox", StringComparison.OrdinalIgnoreCase) == true)
@@ -403,7 +486,8 @@ public sealed partial class MainWindowViewModel
                             await GetInboxSnapshotAsync(mailbox.Id, folder.ProviderId));
                     }
                 }
-                await engine.SyncFolderAsync(account, mailbox, folder, MailSyncHistoryDays);
+                var historyDays = MailSyncHistoryDays;
+                await Task.Run(() => engine.SyncFolderAsync(account, mailbox, folder, historyDays));
                 if (notificationContext is not null)
                 {
                     var synced = await GetInboxSnapshotAsync(mailbox.Id, folder.ProviderId);

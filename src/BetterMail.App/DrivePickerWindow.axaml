@@ -2,14 +2,14 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:app="using:BetterMail.App"
         x:Class="BetterMail.App.DrivePickerWindow"
-        Title="Attach from OneDrive"
+        Title="Attach from Drive"
         Icon="/Assets/BetterMail.ico"
         Width="920" Height="650" MinWidth="620" MinHeight="440"
         WindowStartupLocation="CenterOwner">
   <Grid RowDefinitions="Auto,Auto,*,Auto">
     <Grid Margin="14,12,14,10" ColumnDefinitions="*,Auto,Auto,220" ColumnSpacing="6">
       <TextBox x:Name="SearchBox" Text="{Binding SearchQuery}" PlaceholderText="Search all linked drives"
-               KeyDown="SearchKeyDown" AutomationProperties.Name="Search OneDrive files" />
+               KeyDown="SearchKeyDown" AutomationProperties.Name="Search Drive files" />
       <Button Grid.Column="1" Content="Search" Command="{Binding SearchCommand}" />
       <Button Grid.Column="2" Content="Clear" Command="{Binding ClearSearchCommand}" />
       <ComboBox Grid.Column="3" ItemsSource="{Binding AccountFilters}" SelectedItem="{Binding SelectedAccountFilter}">
@@ -31,7 +31,7 @@
       <Border BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,1,0"
               Background="{DynamicResource SystemControlBackgroundAltHighBrush}" Padding="8">
         <Grid RowDefinitions="Auto,*">
-          <TextBlock Text="OneDrive folders" FontSize="15" FontWeight="SemiBold" Margin="5,4,5,9" />
+          <TextBlock Text="Drive folders" FontSize="15" FontWeight="SemiBold" Margin="5,4,5,9" />
           <TreeView Grid.Row="1" ItemsSource="{Binding Roots}" Classes="workspaceTree">
             <TreeView.Styles>
               <Style Selector="TreeViewItem"><Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" /></Style>

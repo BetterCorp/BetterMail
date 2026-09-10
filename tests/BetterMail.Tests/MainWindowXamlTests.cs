@@ -300,7 +300,7 @@ public sealed class MainWindowXamlTests
         Assert.Contains("AddSharedMailboxForAccountCommand", accounts);
         Assert.Contains("IsVisible=" + (char)34 + "{Binding CanAddSharedMailbox}" + (char)34, accounts);
         Assert.Contains("RequestRemoveAccountCommand", accounts);
-        Assert.Equal(3, Count(accounts, BindingAttribute("CommandParameter", "Account")));
+        Assert.Equal(5, Count(accounts, BindingAttribute("CommandParameter", "Account")));
 
         foreach (var command in new[]
                  {

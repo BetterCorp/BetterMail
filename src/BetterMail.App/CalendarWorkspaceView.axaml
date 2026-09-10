@@ -33,7 +33,7 @@
           <ItemsControl ItemsSource="{Binding CalendarGroups}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="app:CalendarAccountGroup">
-                <Expander IsExpanded="True" AutomationProperties.Name="{Binding DisplayName}">
+                <Expander Classes="accountSection" IsExpanded="True" AutomationProperties.Name="{Binding DisplayName}">
                   <Expander.Header>
                     <StackPanel>
                       <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />

@@ -195,5 +195,40 @@
     <Style Selector="Border.phoneRail TextBlock.moduleLabel">
       <Setter Property="IsVisible" Value="False" />
     </Style>
+    <Style Selector="Expander.accountSection /template/ ToggleButton:checked">
+      <Setter Property="Foreground" Value="{DynamicResource BetterMailTextBrush}" />
+    </Style>
+    <Style Selector="Expander.accountSection /template/ ToggleButton:checked /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource BetterMailTextBrush}" />
+    </Style>
+    <Style Selector="Expander.accountSection /template/ ToggleButton:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource BetterMailSelectionBrush}" />
+    </Style>
+    <Style Selector="Expander.accountSection">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BetterMailDividerBrush}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="Padding" Value="4" />
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <StackPanel>
+            <ToggleButton IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                          Background="Transparent" BorderThickness="0" Padding="8,10"
+                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <ContentPresenter Content="{TemplateBinding Header}" ContentTemplate="{TemplateBinding HeaderTemplate}" />
+                <TextBlock Grid.Column="1" Text="⌄" VerticalAlignment="Center" Foreground="{DynamicResource BetterMailMutedBrush}" />
+              </Grid>
+            </ToggleButton>
+            <ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"
+                              IsVisible="{TemplateBinding IsExpanded}" Margin="4,0,4,8" />
+          </StackPanel>
+        </ControlTemplate>
+      </Setter>
+    </Style>
   </Application.Styles>
 </Application>
