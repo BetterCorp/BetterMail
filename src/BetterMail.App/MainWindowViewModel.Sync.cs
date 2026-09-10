@@ -53,6 +53,10 @@ public sealed partial class MainWindowViewModel
             do
             {
                 Interlocked.Exchange(ref _syncPending, 0);
+                // User-requested work takes priority over background mailbox refreshes.
+                // Repeat this for pending passes so sends queued during sync go first next time.
+                await ProcessOutboxAsync();
+                await ProcessMailActionsAsync();
                 var engine = new SyncEngine(provider, store);
                 var mailboxes = Mailboxes.ToArray();
                 await Task.WhenAll(
@@ -86,8 +90,6 @@ public sealed partial class MainWindowViewModel
             await RefreshSyncHealthAsync();
             await ReconcileAllDraftsAsync();
             _ = RefreshWorkspaceCacheAsync();
-            await ProcessMailActionsAsync();
-            await ProcessOutboxAsync();
             if (!mailFailures.IsEmpty)
             {
                 Error = string.Join(Environment.NewLine, mailFailures.Distinct(StringComparer.Ordinal));
