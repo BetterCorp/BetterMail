@@ -8,6 +8,29 @@ namespace BetterMail.Tests;
 
 public sealed class BackgroundImageTests
 {
+    [Theory]
+    [InlineData("https://example.com/image.png", true)]
+    [InlineData("https://example.com:443/image.png", true)]
+    [InlineData("https://example.com:80/image.png", false)]
+    [InlineData("https://example.com:8443/image.png", false)]
+    [InlineData("http://example.com/image.png", false)]
+    [InlineData("http://example.com:443/image.png", false)]
+    [InlineData("file:///image.png", false)]
+    [InlineData("/image.png", false)]
+    public void ArtworkRequiresHttpsOnPort443(string url, bool allowed) =>
+        Assert.Equal(allowed, PublicImageHttp.IsAllowedUri(new Uri(url, UriKind.RelativeOrAbsolute)));
+
+    [Theory]
+    [InlineData("http://example.com/image.png")]
+    [InlineData("https://example.com:8443/image.png")]
+    [InlineData("//example.com:80/image.png")]
+    public async Task UnsafeRedirectTargetsAreRejectedBeforeRequest(string location)
+    {
+        var target = new Uri(new Uri("https://example.com/original.png"), location);
+        Assert.False(PublicImageHttp.IsAllowedUri(target));
+        Assert.Null(await PublicImageHttp.GetAsync(target, 1024, TestContext.Current.CancellationToken));
+    }
+
     [Fact]
     public void ExternalContactImagesDefaultOffForNewAndExistingPreferences()
     {

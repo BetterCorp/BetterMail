@@ -63,11 +63,15 @@ public static class PublicImageHttp
         };
     }
 
+    public static bool IsAllowedUri(Uri uri) => uri.IsAbsoluteUri &&
+        uri.Scheme == Uri.UriSchemeHttps && uri.Port == 443 && uri.UserInfo.Length == 0;
+
     public static async Task<byte[]?> GetAsync(Uri uri, int maximumBytes, CancellationToken token, string? accept = null)
     {
         for (var redirect = 0; redirect < 4; redirect++)
         {
-            if (uri.Scheme != Uri.UriSchemeHttps || !uri.IsDefaultPort || uri.UserInfo.Length != 0)
+            // Validate the initial URL and every redirect before sending anything.
+            if (!IsAllowedUri(uri))
                 return null;
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
             if (accept is not null) request.Headers.Accept.ParseAdd(accept);
