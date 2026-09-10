@@ -79,6 +79,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private bool _isMailActionRunning;
     private string _mailActionStatus = "";
     private bool _allowRemoteContent;
+    private bool _contactImagesEnabled;
+    public bool ContactImagesEnabled
+    {
+        get => _contactImagesEnabled;
+        set => SetProperty(ref _contactImagesEnabled, value);
+    }
     private bool _autoSyncStarted;
     private int _syncFrame;
     private int _selectionVersion;

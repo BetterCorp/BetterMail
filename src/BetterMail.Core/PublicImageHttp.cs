@@ -32,17 +32,35 @@ public static class PublicImageHttp
         }
     }) { Timeout = TimeSpan.FromSeconds(8) };
 
+    // Conservative policy based on the IANA special-purpose registries (2026-09-10):
+    // https://www.iana.org/assignments/iana-ipv4-special-registry/
+    // https://www.iana.org/assignments/iana-ipv6-special-registry/
+    // Block entire special-purpose parent ranges, including any globally reachable
+    // exceptions within them. Artwork does not need protocol/transition endpoints.
+    private static readonly IPNetwork[] BlockedV4 = new[]
+    {
+        "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
+        "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24",
+        "192.31.196.0/24", "192.52.193.0/24", "192.88.99.0/24", "192.168.0.0/16",
+        "192.175.48.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24",
+        "224.0.0.0/4", "240.0.0.0/4"
+    }.Select(IPNetwork.Parse).ToArray();
+    private static readonly IPNetwork GlobalV6 = IPNetwork.Parse("2000::/3");
+    private static readonly IPNetwork[] BlockedV6 = new[]
+    {
+        "2001::/23", "2001:db8::/32", "2002::/16", "2620:4f:8000::/48", "3fff::/20"
+    }.Select(IPNetwork.Parse).ToArray();
+
     public static bool IsPublicAddress(IPAddress address)
     {
         if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
-        if (IPAddress.IsLoopback(address)) return false;
-        var b = address.GetAddressBytes();
-        if (address.AddressFamily == AddressFamily.InterNetworkV6)
-            return (b[0] & 0xe0) == 0x20 && !(b[0] == 0x20 && b[1] == 0x01 && b[2] == 0x0d && b[3] == 0xb8);
-        return b[0] is not (0 or 10 or 127) && b[0] < 224 &&
-            !(b[0] == 169 && b[1] == 254) && !(b[0] == 172 && b[1] is >= 16 and <= 31) &&
-            !(b[0] == 192 && b[1] == 168) && !(b[0] == 100 && b[1] is >= 64 and <= 127) &&
-            !(b[0] == 198 && b[1] is 18 or 19);
+        return address.AddressFamily switch
+        {
+            AddressFamily.InterNetwork => !BlockedV4.Any(network => network.Contains(address)),
+            AddressFamily.InterNetworkV6 => address.ScopeId == 0 && GlobalV6.Contains(address) &&
+                !BlockedV6.Any(network => network.Contains(address)),
+            _ => false
+        };
     }
 
     public static async Task<byte[]?> GetAsync(Uri uri, int maximumBytes, CancellationToken token, string? accept = null)

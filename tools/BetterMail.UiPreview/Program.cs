@@ -55,6 +55,8 @@ internal static class Program
         vm.SelectedMessage = null;
         var window = new MainWindow { DataContext = vm, Width = 1440, Height = 960, WindowDecorations = WindowDecorations.None, WindowStartupLocation = WindowStartupLocation.Manual, Position = new PixelPoint(0, 0) };
         window.Show();
+        await CheckImageConsentAsync();
+        window.Activate();
         await Shot("mail-light");
         var list = window.FindControl<ListBox>("MessageList")!;
         async Task ClickRow(int index, string modifier)
@@ -177,6 +179,43 @@ internal static class Program
             Console.WriteLine(name);
         }
     }
+    private static async Task CheckImageConsentAsync()
+    {
+        var calls = 0;
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var canceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var image = new AsyncImage { Width = 64, Height = 64, Request = new("consent-test-" + Guid.NewGuid(), async token =>
+        {
+            Interlocked.Increment(ref calls);
+            entered.TrySetResult();
+            try { await Task.Delay(Timeout.Infinite, token); }
+            catch (OperationCanceledException) { canceled.TrySetResult(); throw; }
+            return null;
+        }) };
+        var host = new Window { Width = 100, Height = 100, Content = image };
+        host.Show();
+        await Task.Delay(200);
+        if (calls != 0) throw new InvalidOperationException("Image requested before consent.");
+        image.AllowLoading = true;
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        image.AllowLoading = false;
+        await canceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        image.Request = new("consent-cached-test-" + Guid.NewGuid(), _ =>
+        {
+            Interlocked.Increment(ref calls);
+            return Task.FromResult<byte[]?>(PreviewProvider.SampleThumbnail());
+        });
+        await Task.Delay(100);
+        if (calls != 1) throw new InvalidOperationException("Image requested after consent revoked.");
+        image.AllowLoading = true;
+        for (var i = 0; i < 50 && image.GetVisualDescendants().OfType<Image>().Single().Source is null; i++) await Task.Delay(100);
+        if (image.GetVisualDescendants().OfType<Image>().Single().Source is null) throw new InvalidOperationException("Consented image did not load.");
+        image.AllowLoading = false;
+        if (image.GetVisualDescendants().OfType<Image>().Single().Source is not null) throw new InvalidOperationException("Revoked artwork remained visible.");
+        host.Close();
+        Console.WriteLine("Image consent default, cancellation and removal checks passed.");
+    }
+
     private static IEnumerable<NoteTreeNode> Descendants(IEnumerable<NoteTreeNode> nodes) => nodes.SelectMany(n => new[] { n }.Concat(Descendants(n.Children)));
 }
 
@@ -207,7 +246,7 @@ public class PreviewProvider : DispatchProxy
         };
         return typeof(Task).GetMethod(nameof(Task.FromResult))!.MakeGenericMethod(m.ReturnType.GenericTypeArguments[0]).Invoke(null, [value]);
     }
-    private static byte[] SampleThumbnail()
+    public static byte[] SampleThumbnail()
     {
         using var surface = SkiaSharp.SKSurface.Create(new SkiaSharp.SKImageInfo(128, 128));
         var canvas = surface.Canvas;

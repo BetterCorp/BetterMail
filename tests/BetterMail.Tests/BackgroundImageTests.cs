@@ -8,6 +8,47 @@ namespace BetterMail.Tests;
 
 public sealed class BackgroundImageTests
 {
+    [Fact]
+    public void ExternalContactImagesDefaultOffForNewAndExistingPreferences()
+    {
+        Assert.False(new AppPreferences().ContactImagesEnabled);
+        Assert.False(JsonSerializer.Deserialize<AppPreferences>("{}")!.ContactImagesEnabled);
+        Assert.True(JsonSerializer.Deserialize<AppPreferences>(JsonSerializer.Serialize(new AppPreferences(ContactImagesEnabled: true)))!.ContactImagesEnabled);
+        Assert.False(new MainWindowViewModel(null, "data", _ => { }, _ => { }, null).ContactImagesEnabled);
+    }
+
+    [Theory]
+    [InlineData("192.0.0.0/24")]
+    [InlineData("192.0.2.0/24")]
+    [InlineData("192.88.99.0/24")]
+    [InlineData("198.51.100.0/24")]
+    [InlineData("203.0.113.0/24")]
+    [InlineData("198.18.0.0/15")]
+    [InlineData("224.0.0.0/4")]
+    [InlineData("240.0.0.0/4")]
+    [InlineData("2001::/23")]
+    [InlineData("2001:db8::/32")]
+    [InlineData("2002::/16")]
+    [InlineData("3fff::/20")]
+    [InlineData("64:ff9b::/96")]
+    [InlineData("5f00::/16")]
+    public void ReservedRangesRejectFirstAndLastAddressesIncludingMappedV4(string cidr)
+    {
+        var network = IPNetwork.Parse(cidr);
+        var first = network.BaseAddress;
+        var bytes = first.GetAddressBytes();
+        for (var bit = network.PrefixLength; bit < bytes.Length * 8; bit++)
+            bytes[bit / 8] |= (byte)(1 << (7 - bit % 8));
+        var last = new IPAddress(bytes);
+        Assert.False(PublicImageHttp.IsPublicAddress(first));
+        Assert.False(PublicImageHttp.IsPublicAddress(last));
+        if (bytes.Length == 4)
+        {
+            Assert.False(PublicImageHttp.IsPublicAddress(first.MapToIPv6()));
+            Assert.False(PublicImageHttp.IsPublicAddress(last.MapToIPv6()));
+        }
+    }
+
     [Theory]
     [InlineData("127.0.0.1", false)]
     [InlineData("10.2.3.4", false)]

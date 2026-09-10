@@ -10,6 +10,8 @@ namespace BetterMail.App;
 /// <summary>Loads only while in the viewport; recycled rows cannot receive stale images.</summary>
 public sealed class AsyncImage : Grid
 {
+    public static readonly StyledProperty<bool> AllowLoadingProperty = AvaloniaProperty.Register<AsyncImage, bool>(nameof(AllowLoading), false);
+    public bool AllowLoading { get => GetValue(AllowLoadingProperty); set => SetValue(AllowLoadingProperty, value); }
     public static readonly StyledProperty<ImageRequest?> RequestProperty = AvaloniaProperty.Register<AsyncImage, ImageRequest?>(nameof(Request));
     public static readonly StyledProperty<string> FallbackPathProperty = AvaloniaProperty.Register<AsyncImage, string>(nameof(FallbackPath), "M8,8 A4,4 0 1 0 16,8 A4,4 0 1 0 8,8 M4,22 V19 C4,12 20,12 20,19 V22");
     public ImageRequest? Request { get => GetValue(RequestProperty); set => SetValue(RequestProperty, value); }
@@ -38,7 +40,7 @@ public sealed class AsyncImage : Grid
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
-        if (change.Property == RequestProperty) { Stop(); if (_inViewport) Start(); }
+        if (change.Property == RequestProperty || change.Property == AllowLoadingProperty) { Stop(); if (_inViewport) Start(); }
         if (change.Property == FallbackPathProperty) _fallback.Data = Geometry.Parse(FallbackPath);
     }
 
@@ -55,7 +57,7 @@ public sealed class AsyncImage : Grid
 
     private async void Start()
     {
-        if (_cancellation is not null || Request is not { } request || !this.IsAttachedToVisualTree()) return;
+        if (!AllowLoading || _cancellation is not null || Request is not { } request || !this.IsAttachedToVisualTree()) return;
         var source = _cancellation = new CancellationTokenSource();
         var token = source.Token;
         Bitmap? bitmap = null;
