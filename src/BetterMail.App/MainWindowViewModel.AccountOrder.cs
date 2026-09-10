@@ -31,6 +31,7 @@ public sealed partial class MainWindowViewModel
         AccountOrderVersion++;
         RaisePropertyChanged(nameof(AccountOrderVersion));
         RaisePropertyChanged(nameof(SettingsAccounts));
+        await RefreshOwnedWorkspaceAccountsIfCreatedAsync();
         await LoadFoldersAsync();
         ((AsyncCommand<MailAccount>)MoveAccountUpCommand).Refresh();
         ((AsyncCommand<MailAccount>)MoveAccountDownCommand).Refresh();

@@ -240,6 +240,14 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
         CancellationToken cancellationToken = default)
     {
         if (_initialized && _accounts.SequenceEqual(accounts)) return;
+        if (_initialized && WorkspaceAccountOrder.TryApply(CalendarGroups, accounts, static item => item.Account))
+        {
+            _accounts = accounts.ToArray();
+            CollectionUpdates.Reconcile(EditableCalendars,
+                accounts.SelectMany(account => EditableCalendars.Where(option => option.Account == account)).ToArray(),
+                static option => (option.Account, option.Calendar.Info.ProviderId));
+            return;
+        }
         _accounts = accounts.ToArray();
         await InitializeAsync(cancellationToken);
         _initialized = true;

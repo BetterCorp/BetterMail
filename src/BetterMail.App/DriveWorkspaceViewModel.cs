@@ -274,6 +274,8 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
             }
         }
 
+        WorkspaceAccountOrder.TryApply(Roots, _accounts, static root => root.Account);
+
         if (SelectedDirectory is not null &&
             !accountKeys.Contains(AccountKey(SelectedDirectory.Account)))
         {

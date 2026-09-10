@@ -120,14 +120,31 @@ public sealed class MainWindowViewModelTests
         {
             await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), new string('B', 64));
             await store.InitializeAsync(TestContext.Current.CancellationToken);
-            var vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null);
-            var first = new MailAccount("microsoft365", "first", "tenant", "first@example.test", "First", ProviderCapabilities.Mail);
+            var provider = new FakeWorkspaceProvider();
+            var vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, workspaceProvider: provider);
+            var first = new MailAccount("microsoft365", "first", "tenant", "first@example.test", "First", ProviderCapabilities.Mail | ProviderCapabilities.Calendar | ProviderCapabilities.Notes | ProviderCapabilities.Tasks | ProviderCapabilities.Files);
             var second = first with { AccountId = "second", EmailAddress = "second@example.test", DisplayName = "Second" };
             vm.Accounts.Add(first); vm.Accounts.Add(second);
             vm.Mailboxes.Add(new(first.AccountId, first.EmailAddress, "First"));
             vm.Mailboxes.Add(new(second.AccountId, second.EmailAddress, "Second"));
             vm.Mailboxes.Add(new(second.AccountId, "shared@example.test", "Shared", IsShared: true));
+            foreach (var command in new[] { vm.ShowCalendarCommand, vm.ShowNotesCommand, vm.ShowTasksCommand, vm.ShowFilesCommand })
+                await ((AsyncCommand)command).ExecuteAsync();
+            var calendarGroups = vm.CalendarWorkspace!.CalendarGroups.ToArray();
+            var notesRoots = vm.NotesWorkspace!.AccountRoots.ToArray();
+            var taskGroups = vm.TasksWorkspace!.AccountGroups.ToArray();
+            var driveRoots = vm.DriveWorkspace!.Roots.ToArray();
+            var selectedDrive = vm.DriveWorkspace.SelectedDirectory;
+            var calendarRequests = provider.CalendarRequests;
             await ((AsyncCommand<MailAccount>)vm.MoveAccountUpCommand).ExecuteAsync(second);
+            Assert.Equal(calendarGroups.Reverse(), vm.CalendarWorkspace.CalendarGroups);
+            Assert.Same(calendarGroups[0], vm.CalendarWorkspace.CalendarGroups[1]);
+            Assert.Equal(notesRoots.Reverse(), vm.NotesWorkspace.AccountRoots);
+            Assert.Equal(taskGroups.Reverse(), vm.TasksWorkspace.AccountGroups);
+            Assert.Equal(driveRoots.Reverse(), vm.DriveWorkspace.Roots);
+            Assert.Same(selectedDrive, vm.DriveWorkspace.SelectedDirectory);
+            Assert.Equal(calendarRequests, provider.CalendarRequests);
+            Assert.Equal(new[] { "second", "first" }, vm.CalendarWorkspace.EditableCalendars.Select(option => option.Account.AccountId));
             Assert.Equal(["second", "second", "first"], vm.FolderGroups.Select(group => group.Mailbox.AccountId));
             AppPreferencesStore.Save(directory, new AppPreferences(AccountOrder: vm.GetAccountOrderPreferences()));
             var restored = new MainWindowViewModel(null, directory, _ => { }, _ => { }, null);

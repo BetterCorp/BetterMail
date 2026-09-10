@@ -199,6 +199,11 @@ public sealed class TasksWorkspaceViewModel : ViewModelBase
         CancellationToken cancellationToken = default)
     {
         if (_accountsLoaded && _accounts.SequenceEqual(accounts)) return;
+        if (_accountsLoaded && WorkspaceAccountOrder.TryApply(AccountGroups, accounts, static item => item.Account))
+        {
+            _accounts = accounts.ToArray();
+            return;
+        }
         _accounts = accounts.ToArray();
         await InitializeAsync(cancellationToken);
         _accountsLoaded = true;
