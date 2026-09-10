@@ -29,6 +29,8 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
     private bool _isBusy;
     private bool _isSearchMode;
     private bool _initialized;
+    private bool _isNavigating;
+    private int _navigationVersion;
     private DriveViewMode _viewMode;
 
     public DriveWorkspaceViewModel(
@@ -104,6 +106,8 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
             }
         }
     }
+
+    public bool IsNavigating { get => _isNavigating; private set => SetProperty(ref _isNavigating, value); }
 
     public bool CanRenameItem => SelectedItem is not null && !IsBusy;
 
@@ -293,12 +297,22 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         {
             return;
         }
-        await LoadNodeAsync(node, force: false, cancellationToken);
-        SelectedDirectory = node;
-        CollectionUpdates.Reconcile(CurrentItems, Entries(node), static entry => entry.Identity);
-        SelectedItem = null;
-        SelectedSearchResult = null;
-        IsSearchMode = false;
+        var version = ++_navigationVersion;
+        IsNavigating = true;
+        try
+        {
+            await LoadNodeAsync(node, force: false, cancellationToken);
+            if (version != _navigationVersion) return;
+            SelectedDirectory = node;
+            CollectionUpdates.Reconcile(CurrentItems, Entries(node), static entry => entry.Identity);
+            SelectedItem = null;
+            SelectedSearchResult = null;
+            IsSearchMode = false;
+        }
+        finally
+        {
+            if (version == _navigationVersion) IsNavigating = false;
+        }
     }
 
     public async Task UploadAsync(DriveUploadSource source, CancellationToken cancellationToken = default)

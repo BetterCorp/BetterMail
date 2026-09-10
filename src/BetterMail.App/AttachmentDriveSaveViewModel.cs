@@ -31,7 +31,20 @@ public sealed class AttachmentDriveSaveViewModel : ViewModelBase
         var clean = string.Concat(name.Select(character =>
             char.IsControl(character) || "<>:\"/\\|?*".Contains(character) ? '_' : character))
             .Trim().TrimEnd('.', ' ');
-        return string.IsNullOrWhiteSpace(clean) ? "attachment" : clean;
+        if (string.IsNullOrWhiteSpace(clean)) return "attachment";
+        // OneDrive also reserves device names and temporary/system filenames.
+        // https://support.microsoft.com/en-us/onedrive/restrictions-and-limitations-in-onedrive-and-sharepoint
+        clean = clean.Replace("_vti_", "_vti-", StringComparison.OrdinalIgnoreCase);
+        var stem = clean.Split('.')[0].TrimEnd().ToUpperInvariant();
+        var deviceName = stem is "CON" or "PRN" or "AUX" or "NUL" ||
+            (stem.Length == 4 && (stem.StartsWith("COM", StringComparison.Ordinal) ||
+                                  stem.StartsWith("LPT", StringComparison.Ordinal)) &&
+             stem[3] is >= '0' and <= '9');
+        if (deviceName || clean.Equals(".lock", StringComparison.OrdinalIgnoreCase) ||
+            clean.Equals("desktop.ini", StringComparison.OrdinalIgnoreCase) ||
+            clean.StartsWith("~$", StringComparison.Ordinal))
+            clean = "_" + clean;
+        return clean;
     }
 
     public DriveWorkspaceViewModel Workspace { get; }
@@ -41,7 +54,7 @@ public sealed class AttachmentDriveSaveViewModel : ViewModelBase
     public string? Status { get => _status; private set => SetProperty(ref _status, value); }
     public string CloseLabel => IsSaving ? "Cancel upload" : IsSaved ? "Done" : "Cancel";
     public bool CanBrowse => !IsSaving && !IsSaved;
-    public bool CanSave => CanBrowse && Workspace.SelectedDirectory is { IsLoaded: true, HasError: false, IsLoading: false };
+    public bool CanSave => CanBrowse && !Workspace.IsNavigating && Workspace.SelectedDirectory is { IsLoaded: true, HasError: false, IsLoading: false };
 
     public async Task SaveAsync(CancellationToken cancellationToken = default)
     {
