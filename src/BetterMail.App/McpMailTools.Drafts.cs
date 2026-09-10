@@ -151,7 +151,11 @@ internal sealed partial class McpMailTools
             // Validate all bytes before creating a folder or uploading to a remote account.
             _ = await store.ReadMcpUploadBytesAsync(mailboxId, status.Upload.Id);
             var folder = await LargeAttachmentPolicy.AttachmentsFolderAsync(Files, account);
-            _ = await UploadStagedToDriveAsync(mailboxId, key, account, status, new(folder.ProviderId, null, null));
+            var driveUpload = status with
+            {
+                Upload = status.Upload with { Name = AttachmentDriveSaveViewModel.NormalizeFileName(status.Upload.Name) }
+            };
+            _ = await UploadStagedToDriveAsync(mailboxId, key, account, driveUpload, new(folder.ProviderId, null, null));
             status = await store.GetMcpUploadStatusAsync(mailboxId, status.Upload.Id);
         }
         if (status.State == "uploaded" && status.File is not null)
@@ -166,7 +170,7 @@ internal sealed partial class McpMailTools
             status = await store.GetMcpUploadStatusAsync(mailboxId, status.Upload.Id);
         }
         if (status.State != "shared" || status.Link is null) throw new McpException("Remote outcome is uncertain. Inspect get_attachment_upload and Drive before starting over.");
-        var updated = draft with { Body = new MailContentRenderer().PrepareComposeHtml(draft.Body, draft.IsHtml) + LargeAttachmentPolicy.LinkHtml(status.File!.Name, status.Link),
+        var updated = draft with { Body = new MailContentRenderer().PrepareComposeHtml(draft.Body, draft.IsHtml) + LargeAttachmentPolicy.LinkHtml(status.Upload.Name, status.Link),
             IsHtml = true, UpdatedAt = NextDraftVersion(draft) };
         Authorize(mailboxId, write: true);
         AuthorizeDrive(key, true);

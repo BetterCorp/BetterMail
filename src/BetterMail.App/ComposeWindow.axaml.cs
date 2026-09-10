@@ -20,22 +20,12 @@ public sealed partial class ComposeWindow : Window
         AddHandler(DragDrop.DropEvent, FilesDropped);
         Composer.AttachmentDropped += async attachment =>
         {
-            if (DataContext is ComposeWindowViewModel { IsSending: false } viewModel)
-            {
-                if (viewModel.IsUploadingAttachment) return;
-                viewModel.IsUploadingAttachment = true;
-                try
+            if (DataContext is ComposeWindowViewModel viewModel)
+                await viewModel.AttachDroppedAsync(attachment, async file =>
                 {
-                    if (LargeAttachmentPolicy.UseDrive(attachment.Size, viewModel.Attachments))
-                    {
-                        using var content = new MemoryStream(attachment.ContentBytes, writable: false);
-                        await AttachLargeFileAsync(viewModel, attachment.Name, content, content.Length);
-                    }
-                    else viewModel.AddAttachment(attachment);
-                }
-                catch (Exception exception) { viewModel.ReportError(exception.Message); }
-                finally { viewModel.IsUploadingAttachment = false; }
-            }
+                    using var content = new MemoryStream(file.ContentBytes, writable: false);
+                    await AttachLargeFileAsync(viewModel, file.Name, content, content.Length);
+                });
         };
         Closing += SaveBeforeClosing;
         Opened += (_, _) => FocusToRecipient();

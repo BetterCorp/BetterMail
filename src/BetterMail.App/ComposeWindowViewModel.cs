@@ -208,6 +208,40 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         set { if (SetProperty(ref _isUploadingAttachment, value)) { ((AsyncCommand)SendCommand).Refresh(); ((AsyncCommand)DeleteCommand).Refresh(); RaisePropertyChanged(nameof(CanChangeAttachments)); } }
     }
 
+    private readonly Queue<DraftAttachment> _droppedAttachments = new();
+    private bool _processingDroppedAttachments;
+
+    // Called on the UI thread; keep the busy state set while the entire drop queue drains.
+    internal async Task AttachDroppedAsync(DraftAttachment attachment, Func<DraftAttachment, Task> uploadLarge)
+    {
+        if (IsSending || IsUploadingAttachment && !_processingDroppedAttachments)
+        {
+            ReportError($"'{attachment.Name}' was not attached. Wait for the current operation to finish and drop it again.");
+            return;
+        }
+        _droppedAttachments.Enqueue(attachment);
+        if (_processingDroppedAttachments) return;
+        _processingDroppedAttachments = true;
+        IsUploadingAttachment = true;
+        try
+        {
+            while (_droppedAttachments.TryDequeue(out var file))
+            {
+                try
+                {
+                    if (LargeAttachmentPolicy.UseDrive(file.Size, Attachments)) await uploadLarge(file);
+                    else AddAttachment(file);
+                }
+                catch (Exception exception) { ReportError($"'{file.Name}' could not be attached: {exception.Message}"); }
+            }
+        }
+        finally
+        {
+            _processingDroppedAttachments = false;
+            IsUploadingAttachment = false;
+        }
+    }
+
     public void AddAttachment(DraftAttachment attachment)
     {
         if (!ValidateAttachmentSize(attachment.Name, attachment.Size))

@@ -68,6 +68,7 @@ public sealed class McpUploadTests
             Assert.Equal(version, await tools.CompleteAttachmentUpload(draft.MailboxId, upload.Id, TestContext.Current.CancellationToken));
             Assert.Equal(1, files.Uploads);
             Assert.Equal(1, files.Shares);
+            Assert.Equal(AttachmentDriveSaveViewModel.NormalizeFileName("<report>.txt"), files.UploadedName);
             Assert.Equal("anonymous", files.Scope);
             Assert.InRange(files.Expiry, DateTimeOffset.UtcNow.AddYears(1).AddMinutes(-1), DateTimeOffset.UtcNow.AddYears(1).AddMinutes(1));
             var saved = (await store.GetLocalDraftAsync(draft.Id))!;
@@ -200,6 +201,7 @@ public sealed class McpUploadTests
     private sealed class Files : IFilesProvider
     {
         public int Uploads, Shares;
+        public string? UploadedName;
         public bool FailShare;
         public string? Scope;
         public DateTimeOffset Expiry;
@@ -208,6 +210,8 @@ public sealed class McpUploadTests
         public Task<CloudDriveItem> GetDriveItemAsync(MailAccount account, string itemId, CancellationToken cancellationToken = default) => Task.FromResult(new CloudDriveItem(itemId, "Attachments", 0, true, null, null, account.AccountId, account.ProviderId));
         public async Task<CloudDriveItem> UploadFileAsync(MailAccount account, CloudDriveItem? parent, string name, Stream content, long contentLength, string? contentType = null, CancellationToken cancellationToken = default)
         {
+            Assert.Equal(AttachmentDriveSaveViewModel.NormalizeFileName(name), name);
+            UploadedName = name;
             Uploads++;
             using var bytes = new MemoryStream();
             await content.CopyToAsync(bytes, cancellationToken);

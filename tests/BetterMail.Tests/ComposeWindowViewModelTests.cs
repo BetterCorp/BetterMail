@@ -6,6 +6,46 @@ namespace BetterMail.Tests;
 public sealed class ComposeWindowViewModelTests
 {
     [Fact]
+    public async Task EditorDropQueuesLaterFilesAndKeepsSendingDisabledUntilAllFinish()
+    {
+        var account = new MailAccount("microsoft365", "account", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+        var vm = new ComposeWindowViewModel([account], [new(account.AccountId, account.EmailAddress, "Me")],
+            new ComposeRequest(), (_, _, _) => Task.CompletedTask);
+        vm.AddAttachment(new("existing", "application/octet-stream", new byte[LargeAttachmentPolicy.DirectAttachmentBudgetBytes]));
+        var release = new TaskCompletionSource();
+        var processed = new List<string>();
+        async Task Upload(DraftAttachment file)
+        {
+            Assert.True(vm.IsUploadingAttachment);
+            Assert.False(vm.SendCommand.CanExecute(null));
+            processed.Add(file.Name);
+            if (file.Name == "first") await release.Task;
+            if (file.Name == "second") throw new InvalidOperationException("Test failure");
+        }
+        var first = vm.AttachDroppedAsync(new("first", "text/plain", [1]), Upload);
+        await vm.AttachDroppedAsync(new("second", "text/plain", [2]), Upload);
+        await vm.AttachDroppedAsync(new("third", "text/plain", [3]), Upload);
+        Assert.Equal(["first"], processed);
+        release.SetResult();
+        await first;
+        Assert.Equal(["first", "second", "third"], processed);
+        Assert.Contains("second", vm.Error);
+        Assert.False(vm.IsUploadingAttachment);
+        Assert.True(vm.SendCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task EditorDropDuringAnotherUploadReportsTheRejectedFilename()
+    {
+        var vm = new ComposeWindowViewModel([], [], new ComposeRequest(), (_, _, _) => Task.CompletedTask);
+        vm.IsUploadingAttachment = true;
+        await vm.AttachDroppedAsync(new("retry.txt", "text/plain", [1]), _ => throw new Exception("Must not upload"));
+        Assert.Contains("retry.txt", vm.Error);
+        Assert.Empty(vm.Attachments);
+        Assert.True(vm.IsUploadingAttachment);
+    }
+
+    [Fact]
     public async Task ReceiptOptionsAreIndependentAndFollowSenderSupport()
     {
         var microsoft = new MailAccount("microsoft365", "microsoft", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
