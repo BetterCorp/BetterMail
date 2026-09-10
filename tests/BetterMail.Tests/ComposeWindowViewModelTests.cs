@@ -6,6 +6,19 @@ namespace BetterMail.Tests;
 public sealed class ComposeWindowViewModelTests
 {
     [Fact]
+    public void OsFileUploadsReportAllRejectedNamesAndKeepTheActiveUploadBusy()
+    {
+        var vm = new ComposeWindowViewModel([], [], new ComposeRequest(), (_, _, _) => Task.CompletedTask);
+        Assert.True(vm.TryBeginFileAttachmentUpload(["first.txt"]));
+        Assert.False(vm.CanChangeAttachments);
+        Assert.False(vm.TryBeginFileAttachmentUpload(["second.txt", "third.txt"]));
+        Assert.Contains("second.txt", vm.Error);
+        Assert.Contains("third.txt", vm.Error);
+        Assert.True(vm.IsUploadingAttachment);
+        Assert.Empty(vm.Attachments);
+    }
+
+    [Fact]
     public async Task EditorDropQueuesLaterFilesAndKeepsSendingDisabledUntilAllFinish()
     {
         var account = new MailAccount("microsoft365", "account", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);

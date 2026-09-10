@@ -179,14 +179,14 @@ public sealed partial class ComposeWindow : Window
         {
             return;
         }
-        e.DragEffects = DataContext is ComposeWindowViewModel { IsSending: false }
+        e.DragEffects = DataContext is ComposeWindowViewModel { CanChangeAttachments: true }
             ? DragDropEffects.Copy : DragDropEffects.None;
         e.Handled = true;
     }
 
     private async void FilesDropped(object? sender, DragEventArgs e)
     {
-        if (DataContext is not ComposeWindowViewModel { IsSending: false } viewModel ||
+        if (DataContext is not ComposeWindowViewModel viewModel ||
             e.DataTransfer.TryGetFiles() is not { } files)
         {
             return;
@@ -197,8 +197,7 @@ public sealed partial class ComposeWindow : Window
 
     private async Task AttachFilesAsync(ComposeWindowViewModel viewModel, IEnumerable<IStorageFile> files)
     {
-        if (viewModel.IsSending || viewModel.IsUploadingAttachment) return;
-        viewModel.IsUploadingAttachment = true;
+        if (!viewModel.TryBeginFileAttachmentUpload(files.Select(file => file.Name))) return;
         try
         {
             foreach (var file in files)
@@ -281,12 +280,12 @@ public sealed partial class ComposeWindow : Window
         IFilesProvider provider,
         DriveProviderSelection? selection)
     {
-        if (!IsVisible || selection is null || viewModel.IsSending || viewModel.IsUploadingAttachment)
+        if (!IsVisible || selection is null)
         {
             return;
         }
 
-        viewModel.IsUploadingAttachment = true;
+        if (!viewModel.TryBeginFileAttachmentUpload([selection.Item.Name])) return;
         try
         {
             if (LargeAttachmentPolicy.UseDrive(selection.Item.Size, viewModel.Attachments))

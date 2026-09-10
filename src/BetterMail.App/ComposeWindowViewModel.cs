@@ -208,6 +208,17 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         set { if (SetProperty(ref _isUploadingAttachment, value)) { ((AsyncCommand)SendCommand).Refresh(); ((AsyncCommand)DeleteCommand).Refresh(); RaisePropertyChanged(nameof(CanChangeAttachments)); } }
     }
 
+    internal bool TryBeginFileAttachmentUpload(IEnumerable<string> names)
+    {
+        if (!CanChangeAttachments)
+        {
+            ReportError($"Files were not attached: {string.Join(", ", names)}. Wait for the current operation to finish and try again.");
+            return false;
+        }
+        IsUploadingAttachment = true;
+        return true;
+    }
+
     private readonly Queue<DraftAttachment> _droppedAttachments = new();
     private bool _processingDroppedAttachments;
 

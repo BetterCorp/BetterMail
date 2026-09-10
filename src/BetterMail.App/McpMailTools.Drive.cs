@@ -178,6 +178,8 @@ internal sealed partial class McpMailTools
         var bytes = await store.ReadMcpUploadBytesAsync(owner, status.Upload.Id);
         var parent = target.ParentId is null ? null : await Files.GetDriveItemAsync(account, target.ParentId);
         var replacing = target.ReplaceItemId is null ? null : await Files.GetDriveItemAsync(account, target.ReplaceItemId);
+        if (parent is { IsFolder: false }) throw new McpException("Choose a folder as the upload destination.");
+        if (replacing is { IsFolder: true }) throw new McpException("Choose a file for content replacement.");
         AuthorizeDrive(accountKey, true);
         if (!await store.SetMcpUploadStateAsync(owner, status.Upload.Id, "ready", "uploading")) throw new McpException("Upload is already being processed.");
         using var stream = new MemoryStream(bytes, writable: false);

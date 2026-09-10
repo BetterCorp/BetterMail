@@ -224,6 +224,24 @@ public sealed class McpUploadTests
         });
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InvalidTargetTypesLeaveDriveUploadReady(bool replacingFolder)
+    {
+        await WithStore(async (store, tools, _, files) =>
+        {
+            var upload = await tools.BeginDriveUpload("microsoft365:account", "report", "text/plain", 1, Hash([1]),
+                parentId: replacingFolder ? null : "file-target", replaceItemId: replacingFolder ? "folder" : null,
+                expectedETag: replacingFolder ? "etag" : null);
+            await tools.UploadDriveChunk("microsoft365:account", upload.Id, 0, "AQ==");
+            await Assert.ThrowsAsync<McpException>(() => tools.CompleteDriveUpload("microsoft365:account", upload.Id));
+            Assert.Equal("ready", (await tools.GetDriveUpload("microsoft365:account", upload.Id)).State);
+            Assert.Equal(new byte[] { 1 }, await store.ReadMcpUploadBytesAsync("drive:microsoft365:account", upload.Id));
+            Assert.Equal(0, files.Uploads);
+        });
+    }
+
     private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
     private static async Task WithStore(Func<EncryptedMailStore, McpMailTools, LocalDraft, Files, Task> test)
     {
@@ -254,7 +272,7 @@ public sealed class McpUploadTests
         public DateTimeOffset Expiry;
         public Task<IReadOnlyList<CloudFile>> SearchFilesAsync(MailAccount account, string query, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CloudFile>>([]);
         public Task<IReadOnlyList<CloudDriveItem>> GetDriveItemsAsync(MailAccount account, CloudDriveItem? parent = null, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CloudDriveItem>>([new("folder", "Attachments", 0, true, null, null, account.AccountId, account.ProviderId)]);
-        public Task<CloudDriveItem> GetDriveItemAsync(MailAccount account, string itemId, CancellationToken cancellationToken = default) => Task.FromResult(new CloudDriveItem(itemId, "Attachments", 0, true, null, null, account.AccountId, account.ProviderId));
+        public Task<CloudDriveItem> GetDriveItemAsync(MailAccount account, string itemId, CancellationToken cancellationToken = default) => Task.FromResult(new CloudDriveItem(itemId, "Attachments", 0, itemId != "file-target", null, null, account.AccountId, account.ProviderId));
         public async Task<CloudDriveItem> UploadFileAsync(MailAccount account, CloudDriveItem? parent, string name, Stream content, long contentLength, string? contentType = null, CancellationToken cancellationToken = default)
         {
             Assert.Equal(AttachmentDriveSaveViewModel.NormalizeFileName(name), name);
