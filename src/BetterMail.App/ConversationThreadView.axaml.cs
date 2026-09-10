@@ -9,6 +9,8 @@ namespace BetterMail.App;
 
 public sealed partial class ConversationThreadView : UserControl
 {
+    public static readonly StyledProperty<bool> ShowSenderImagesProperty = AvaloniaProperty.Register<ConversationThreadView, bool>(nameof(ShowSenderImages));
+    public bool ShowSenderImages { get => GetValue(ShowSenderImagesProperty); set => SetValue(ShowSenderImagesProperty, value); }
     private const int NavigateToStringLimitBytes = 2 * 1024 * 1024;
     private ConversationThreadViewModel? _viewModel;
     private ConversationMessageItem? _message;

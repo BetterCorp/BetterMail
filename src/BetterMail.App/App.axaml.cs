@@ -132,6 +132,7 @@ public sealed partial class App : Application
         viewModel.ConfigureMailQuickActions(preferences.MailQuickActions);
         viewModel.ConfigureAccountOrder(preferences.AccountOrder);
         viewModel.ContactImagesEnabled = preferences.ContactImagesEnabled;
+        viewModel.MailSenderImagesEnabled = preferences.MailSenderImagesEnabled;
         viewModel.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName is nameof(MainWindowViewModel.SelectedThemeMode) or
@@ -143,7 +144,8 @@ public sealed partial class App : Application
                 nameof(MainWindowViewModel.MailQuickActionsVersion) or
                 nameof(MainWindowViewModel.SenderPreferencesVersion) or
                 nameof(MainWindowViewModel.AccountOrderVersion) or
-                nameof(MainWindowViewModel.ContactImagesEnabled))
+                nameof(MainWindowViewModel.ContactImagesEnabled) or
+                nameof(MainWindowViewModel.MailSenderImagesEnabled))
             {
                 AppPreferencesStore.Save(dataDirectory, new AppPreferences(
                     ThemeMode: viewModel.SelectedThemeMode,
@@ -157,7 +159,8 @@ public sealed partial class App : Application
                     MailQuickActions: viewModel.GetMailQuickActionPreferences(),
                     DefaultMailPromptShown: viewModel.DefaultMailPromptShown,
                     AccountOrder: viewModel.GetAccountOrderPreferences(),
-                    ContactImagesEnabled: viewModel.ContactImagesEnabled));
+                    ContactImagesEnabled: viewModel.ContactImagesEnabled,
+                    MailSenderImagesEnabled: viewModel.MailSenderImagesEnabled));
             }
         };
         viewModel.ConfigureSenderPreferences(

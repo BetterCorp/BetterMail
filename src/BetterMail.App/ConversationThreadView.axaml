@@ -147,6 +147,9 @@
                         RowDefinitions="Auto,Auto,Auto"
                         ColumnSpacing="10">
                     <StackPanel Orientation="Horizontal" Spacing="7">
+                      <app:AsyncImage Width="24" Height="24" EmailAddress="{Binding SenderAddress}" IsHitTestVisible="False"
+                                      IsVisible="{Binding $parent[UserControl].ShowSenderImages}"
+                                      AllowLoading="{Binding $parent[UserControl].ShowSenderImages}" />
                       <TextBlock Text="{Binding Sender}"
                                  FontWeight="SemiBold"
                                  TextTrimming="CharacterEllipsis" />

@@ -605,8 +605,12 @@
                   </Border.ContextMenu>
                   <Grid ClipToBounds="True">
                     <Border Width="4" Background="{DynamicResource BetterMailAccentBrush}" IsVisible="{Binding IsUnread}" HorizontalAlignment="Left" />
-                    <Grid Margin="{ReflectionBinding $parent[Window].DataContext.MessageRowMargin}" ColumnDefinitions="5,*,Auto" RowDefinitions="18,18,18" RowSpacing="1">
+                    <Grid Margin="{ReflectionBinding $parent[Window].DataContext.MessageRowMargin}" ColumnDefinitions="Auto,*,Auto" RowDefinitions="18,18,18" RowSpacing="1">
 
+                    <app:AsyncImage Grid.RowSpan="3" Width="28" Height="28" Margin="0,0,8,0"
+                                    EmailAddress="{Binding From.Address}" IsHitTestVisible="False"
+                                    IsVisible="{ReflectionBinding $parent[Window].DataContext.MailSenderImagesEnabled}"
+                                    AllowLoading="{ReflectionBinding $parent[Window].DataContext.MailSenderImagesEnabled}" />
                     <Grid Grid.Column="1" Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto">
                       <Border Width="6" Height="6" CornerRadius="3" Margin="0,0,6,0"
                               Background="{Binding MailboxColor}"
@@ -873,6 +877,7 @@
 
       <app:ConversationThreadView Grid.Row="1"
                                   DataContext="{Binding ConversationThread}"
+                                  ShowSenderImages="{Binding $parent[Window].DataContext.MailSenderImagesEnabled}"
                                   IsVisible="{Binding $parent[Window].DataContext.ShowMessageBody}" />
       <StackPanel Grid.Row="1"
                   IsVisible="{Binding HasNoSelectedMessage}"

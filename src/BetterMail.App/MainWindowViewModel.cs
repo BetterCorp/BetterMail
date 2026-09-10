@@ -85,6 +85,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         get => _contactImagesEnabled;
         set => SetProperty(ref _contactImagesEnabled, value);
     }
+    private bool _mailSenderImagesEnabled;
+    public bool MailSenderImagesEnabled
+    {
+        get => _mailSenderImagesEnabled;
+        set => SetProperty(ref _mailSenderImagesEnabled, value);
+    }
     private bool _autoSyncStarted;
     private int _syncFrame;
     private int _selectionVersion;
