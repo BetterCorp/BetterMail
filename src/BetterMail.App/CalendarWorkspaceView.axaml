@@ -10,10 +10,10 @@
       <Setter Property="Background" Value="{DynamicResource BetterMailSelectionBrush}" />
     </Style>
   </UserControl.Styles>
-  <Grid x:Name="RootGrid" RowDefinitions="Auto,*" ColumnDefinitions="238,*">
+  <Grid x:Name="RootGrid" RowDefinitions="Auto,*" ColumnDefinitions="280,*">
     <Border x:Name="CalendarSidebar" Grid.RowSpan="2"
             BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,1,0"
-            Background="{DynamicResource SystemControlBackgroundAltHighBrush}" Padding="10">
+            Background="{DynamicResource BetterMailSidebarBrush}" Padding="10">
       <ScrollViewer>
         <StackPanel Spacing="12">
           <Button x:Name="CalendarSidebarBackButton"
@@ -23,10 +23,12 @@
                   IsVisible="False"
                   AutomationProperties.Name="Back to calendar"
                   TabIndex="99" />
-          <Calendar x:Name="MiniCalendar"
+          <Viewbox Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Stretch">
+          <Calendar x:Name="MiniCalendar" Width="320" FontSize="12"
                     SelectedDate="{Binding CalendarSelectedDate}"
                     AutomationProperties.Name="Choose calendar date"
                     TabIndex="100" />
+          </Viewbox>
           <TextBlock Text="My calendars" FontWeight="SemiBold" FontSize="15" />
           <ItemsControl ItemsSource="{Binding CalendarGroups}">
             <ItemsControl.ItemTemplate>
@@ -67,7 +69,7 @@
       </ScrollViewer>
     </Border>
 
-    <Border x:Name="CalendarToolbar" Grid.Column="1" Padding="12,8"
+    <Border x:Name="CalendarToolbar" Grid.Column="1" Padding="16,12"
             BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1">
       <WrapPanel Orientation="Horizontal">
         <Button x:Name="CalendarPaneButton" Classes="command" Content="Calendars"
@@ -210,7 +212,7 @@
               AutomationProperties.Name="Close event editor backdrop" />
       <Border x:Name="EventEditor" Width="560" MaxWidth="560" MaxHeight="820" Margin="12"
               HorizontalAlignment="Right" VerticalAlignment="Stretch"
-              Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+              Background="{DynamicResource BetterMailSurfaceBrush}"
               BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1">
         <ScrollViewer>
           <StackPanel Margin="20" Spacing="9">

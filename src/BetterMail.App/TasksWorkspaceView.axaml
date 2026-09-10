@@ -5,7 +5,7 @@
   <Grid x:Name="RootGrid" RowDefinitions="Auto,*" ColumnDefinitions="270,*">
     <Border x:Name="TasksToolbar"
             Grid.ColumnSpan="2"
-            Padding="12,8"
+            Padding="16,12"
             BorderBrush="{DynamicResource BetterMailDividerBrush}"
             BorderThickness="0,0,0,1">
       <Grid x:Name="ToolbarLayout"
@@ -13,7 +13,7 @@
             RowDefinitions="Auto"
             ColumnSpacing="6"
             RowSpacing="6">
-        <TextBox x:Name="SearchBox"
+        <TextBox Classes="moduleSearch" x:Name="SearchBox"
                  Text="{Binding SearchText}"
                  PlaceholderText="Search tasks, lists, and accounts"
                  AutomationProperties.Name="Search tasks across linked accounts"
@@ -44,7 +44,7 @@
 
     <Border x:Name="ListsPane"
             Grid.Row="1"
-            Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+            Background="{DynamicResource BetterMailSidebarBrush}"
             BorderBrush="{DynamicResource BetterMailDividerBrush}"
             BorderThickness="0,0,1,0">
       <Grid RowDefinitions="Auto,Auto,*">
@@ -52,7 +52,7 @@
                 Classes="listRow"
                 Classes.selected="{Binding IsAllTasksSelected}"
                 Margin="6"
-                Padding="10,8"
+                Padding="16,12"
                 HorizontalContentAlignment="Left"
                 Command="{Binding ShowAllTasksCommand}"
                 Click="ShowTasksPane_Click"
@@ -238,7 +238,7 @@
               Margin="16"
               Padding="12"
               VerticalAlignment="Top"
-              Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+              Background="{DynamicResource BetterMailSurfaceBrush}"
               BorderBrush="{DynamicResource BetterMailDividerBrush}"
               BorderThickness="1"
               IsVisible="{Binding IsDeleteConfirmationOpen}">
@@ -272,7 +272,7 @@
               Padding="20"
               HorizontalAlignment="Center"
               VerticalAlignment="Center"
-              Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+              Background="{DynamicResource BetterMailSurfaceBrush}"
               BorderBrush="{DynamicResource BetterMailDividerBrush}"
               BorderThickness="1">
         <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="10">

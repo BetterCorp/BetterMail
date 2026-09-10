@@ -36,7 +36,7 @@ public sealed partial class CalendarWorkspaceView : UserControl
         {
             if (DataContext is CalendarWorkspaceViewModel existingViewModel)
             {
-                existingViewModel.SetViewportWidth(width - (compact ? 0 : 238));
+                existingViewModel.SetViewportWidth(width - (compact ? 0 : 280));
             }
             return;
         }
@@ -95,7 +95,7 @@ public sealed partial class CalendarWorkspaceView : UserControl
         }
         else
         {
-            RootGrid.ColumnDefinitions.Add(new(new GridLength(238)));
+            RootGrid.ColumnDefinitions.Add(new(new GridLength(280)));
             RootGrid.ColumnDefinitions.Add(new(GridLength.Star));
             RootGrid.RowDefinitions.Add(new(GridLength.Auto));
             RootGrid.RowDefinitions.Add(new(GridLength.Star));
@@ -128,7 +128,7 @@ public sealed partial class CalendarWorkspaceView : UserControl
             {
                 viewModel.DayCommand.Execute(null);
             }
-            viewModel.SetViewportWidth(width - (compact ? 0 : 238));
+            viewModel.SetViewportWidth(width - (compact ? 0 : 280));
         }
     }
 

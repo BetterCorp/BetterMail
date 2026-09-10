@@ -12,18 +12,18 @@
     <Style Selector="Border.threadMessage.selected">
       <Setter Property="Background" Value="{DynamicResource BetterMailSelectionBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BetterMailAccentBrush}" />
-      <Setter Property="BorderThickness" Value="4,1,1,3" />
+      <Setter Property="BorderThickness" Value="3,0,0,1" />
     </Style>
   </UserControl.Styles>
 
   <Grid RowDefinitions="Auto,Auto,Auto,Auto,*">
-    <Border Padding="16,11"
+    <Border Padding="22,18"
             BorderBrush="{DynamicResource BetterMailDividerBrush}"
             BorderThickness="0,0,0,1">
       <Grid x:Name="ThreadHeaderLayout">
         <StackPanel x:Name="ThreadHeading">
           <SelectableTextBlock Text="{Binding SelectedThread.Subject, FallbackValue=Select a conversation}"
-                               FontSize="20"
+                               FontSize="23"
                                FontWeight="SemiBold"
                                TextWrapping="Wrap"
                                MaxLines="2" />

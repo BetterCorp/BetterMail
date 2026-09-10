@@ -725,7 +725,9 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         $"{account.ProviderId}\n{account.AccountId}";
 
     private static string ProviderName(string providerId) =>
-        providerId.Equals("microsoft365", StringComparison.OrdinalIgnoreCase) ? "OneDrive" : providerId;
+        providerId.Equals("microsoft365", StringComparison.OrdinalIgnoreCase) ? "OneDrive"
+            : providerId.Equals("google-workspace", StringComparison.OrdinalIgnoreCase) ? "Google Drive"
+            : providerId;
 
     private static void Replace<T>(ObservableCollection<T> target, IEnumerable<T> values)
     {
@@ -829,13 +831,16 @@ public sealed class DriveTreeNode : ViewModelBase
     }
 
     private static string ProviderName(string providerId) =>
-        providerId.Equals("microsoft365", StringComparison.OrdinalIgnoreCase) ? "OneDrive" : providerId;
+        providerId.Equals("microsoft365", StringComparison.OrdinalIgnoreCase) ? "OneDrive"
+            : providerId.Equals("google-workspace", StringComparison.OrdinalIgnoreCase) ? "Google Drive"
+            : providerId;
 }
 
 public sealed record DriveItemEntry(MailAccount Account, CloudDriveItem Item)
 {
     public string Identity => $"{Account.ProviderId}\n{Account.AccountId}\n{Item.ProviderId}";
     public string TypeText => Item.IsFolder ? "Folder" : Item.ContentType ?? "File";
+    public string IconPath => Item.IsFolder ? "M2,6 H10 L12,9 H22 V21 H2 Z" : "M5,2 H14 L20,8 V22 H5 Z M14,2 V8 H20 M8,13 H17 M8,17 H15";
     public string Glyph => Item.IsFolder ? "\uE8B7" : "\uE8A5";
 }
 
@@ -844,7 +849,9 @@ public sealed record DriveSearchResult(MailAccount Account, CloudFile File)
     public string Identity => $"{Account.ProviderId}\n{Account.AccountId}\n{File.ProviderId}";
     public string SourceText => $"{ProviderName(Account.ProviderId)} · {Account.EmailAddress} · {File.Path}";
     private static string ProviderName(string providerId) =>
-        providerId.Equals("microsoft365", StringComparison.OrdinalIgnoreCase) ? "OneDrive" : providerId;
+        providerId.Equals("microsoft365", StringComparison.OrdinalIgnoreCase) ? "OneDrive"
+            : providerId.Equals("google-workspace", StringComparison.OrdinalIgnoreCase) ? "Google Drive"
+            : providerId;
 
     public DriveProviderSelection Selection => new(Account, new CloudDriveItem(
         File.ProviderId,
