@@ -8,7 +8,11 @@ are removed in a `finally` block. PR checks never receive signing or OAuth crede
 
 Set GitHub Actions secrets `BETTERMAIL_WINDOWS_CERTIFICATE` (base64 of a PFX with private key) and
 `BETTERMAIL_WINDOWS_CERTIFICATE_PASSWORD`. The packaging script imports it into the current user's
-certificate store, passes its thumbprint to Velopack, and timestamps signatures with SHA-256.
+certificate store, selects exactly one non-CA certificate with a private key and code-signing EKU,
+passes that single thumbprint to Velopack, and timestamps signatures with SHA-256. A PFX may
+include its chain; bundles with no eligible signer or multiple eligible signers fail explicitly.
+Cleanup removes each newly imported certificate separately, including chain entries and partial
+imports, while preserving certificates already present in the store.
 This path requires an exportable certificate; hardware/cloud-managed signing requires adapting the
 signing integration to your provider's supported signing tool.
 

@@ -36,6 +36,10 @@ jobs:
           cache-dependency-path: Directory.Packages.props
       - run: dotnet restore BetterMail.slnx
       - run: dotnet build BetterMail.slnx --configuration Release --no-restore -m:1
+      - name: Test signing certificate selection and cleanup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/test-signing.ps1
       - name: Run tests
         timeout-minutes: 3
         run: dotnet run --project tests/BetterMail.Tests --configuration Release --no-build -- -reporter verbose -longRunning 30

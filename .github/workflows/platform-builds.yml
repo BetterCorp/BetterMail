@@ -49,6 +49,9 @@ jobs:
           cache: true
           cache-dependency-path: Directory.Packages.props
       - run: dotnet tool restore
+      - name: Test signing certificate selection and cleanup
+        shell: pwsh
+        run: ./scripts/test-signing.ps1
       - name: Test
         timeout-minutes: 5
         run: dotnet run --project tests/BetterMail.Tests --configuration Release -- -reporter verbose -longRunning 30
