@@ -164,15 +164,8 @@ public sealed partial class EncryptedMailStore
             var json = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as string
                 ?? throw new InvalidOperationException("Draft changed or is unavailable. Read the draft and start a new upload.");
             var attachments = JsonSerializer.Deserialize<List<DraftAttachment>>(json) ?? [];
-            command.CommandText = "SELECT content FROM mcp_attachment_chunks WHERE upload_id=$id ORDER BY offset;";
             command.Parameters.AddWithValue("$id", uploadId);
-            using var content = new MemoryStream();
-            await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
-                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-                    await content.WriteAsync((byte[])reader[0], cancellationToken).ConfigureAwait(false);
-            var bytes = content.ToArray();
-            if (bytes.LongLength != upload.Size || Convert.ToHexString(SHA256.HashData(bytes)) != upload.Sha256)
-                throw new InvalidOperationException("Upload is incomplete or its SHA-256 does not match.");
+            var bytes = await ReadMcpUploadBytesCoreAsync(connection, upload, cancellationToken, transaction).ConfigureAwait(false);
             attachments.Add(new(upload.Name, upload.ContentType, bytes));
             var updated = DateTimeOffset.UtcNow;
             if (updated <= upload.ExpectedUpdatedAt) updated = upload.ExpectedUpdatedAt.AddTicks(1);
@@ -255,16 +248,32 @@ public sealed partial class EncryptedMailStore
         WithLockAsync(async connection =>
         {
             var (upload, _) = await McpUploadAsync(connection, owner, id, cancellationToken).ConfigureAwait(false);
-            await using var command = connection.CreateCommand();
-            command.CommandText = "SELECT content FROM mcp_attachment_chunks WHERE upload_id=$id ORDER BY offset;";
-            command.Parameters.AddWithValue("$id", id);
-            using var content = new MemoryStream();
-            await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
-                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-                    await content.WriteAsync((byte[])reader[0], cancellationToken).ConfigureAwait(false);
-            var bytes = content.ToArray();
-            if (bytes.LongLength != upload.Size || Convert.ToHexString(SHA256.HashData(bytes)) != upload.Sha256)
-                throw new InvalidOperationException("Upload is incomplete or its SHA-256 does not match.");
-            return bytes;
+            return await ReadMcpUploadBytesCoreAsync(connection, upload, cancellationToken).ConfigureAwait(false);
         }, cancellationToken);
+
+    private static async Task<byte[]> ReadMcpUploadBytesCoreAsync(SqliteConnection connection, McpAttachmentUpload upload,
+        CancellationToken token, SqliteTransaction? transaction = null)
+    {
+        if (upload.Size < 0 || upload.Size > DraftAttachment.MaximumSizeBytes)
+            throw new InvalidOperationException("Invalid upload size.");
+        // Allocate exactly once: a growing MemoryStream plus ToArray doubles peak file memory.
+        var bytes = new byte[checked((int)upload.Size)];
+        var received = 0;
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT offset,content FROM mcp_attachment_chunks WHERE upload_id=$id ORDER BY offset;";
+        command.Parameters.AddWithValue("$id", upload.Id);
+        await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+        while (await reader.ReadAsync(token).ConfigureAwait(false))
+        {
+            var chunk = (byte[])reader[1];
+            if (reader.GetInt64(0) != received || chunk.Length > bytes.Length - received)
+                throw new InvalidOperationException("Upload chunks do not match the declared size or sequence.");
+            chunk.CopyTo(bytes, received);
+            received += chunk.Length;
+        }
+        if (received != bytes.Length || Convert.ToHexString(SHA256.HashData(bytes)) != upload.Sha256)
+            throw new InvalidOperationException("Upload is incomplete or its SHA-256 does not match.");
+        return bytes;
+    }
 }

@@ -301,6 +301,25 @@ public sealed class McpUploadTests
         });
     }
 
+    [Fact]
+    public async Task StagedDriveBytesReassembleFullChunksAndShortTailWithoutAcceptingTruncation()
+    {
+        await WithStore(async (store, tools, _, files) =>
+        {
+            var bytes = new byte[EncryptedMailStore.McpUploadChunkBytes * 2 + 17];
+            RandomNumberGenerator.Fill(bytes);
+            var upload = await tools.BeginDriveUpload("microsoft365:account", "report.bin", "application/octet-stream", bytes.Length, Hash(bytes));
+            for (var offset = 0; offset < bytes.Length - 17; offset += EncryptedMailStore.McpUploadChunkBytes)
+                await tools.UploadDriveChunk("microsoft365:account", upload.Id, offset,
+                    Convert.ToBase64String(bytes, offset, EncryptedMailStore.McpUploadChunkBytes));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => store.ReadMcpUploadBytesAsync("drive:microsoft365:account", upload.Id, TestContext.Current.CancellationToken));
+            await tools.UploadDriveChunk("microsoft365:account", upload.Id, bytes.Length - 17, Convert.ToBase64String(bytes, bytes.Length - 17, 17));
+            Assert.Equal(bytes, await store.ReadMcpUploadBytesAsync("drive:microsoft365:account", upload.Id));
+            await tools.CompleteDriveUpload("microsoft365:account", upload.Id);
+            Assert.Equal(1, files.Uploads);
+        });
+    }
+
     private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
     private static async Task WithStore(Func<EncryptedMailStore, McpMailTools, LocalDraft, Files, Task> test)
     {

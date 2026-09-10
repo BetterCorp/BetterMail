@@ -149,13 +149,13 @@ internal sealed partial class McpMailTools
         if (status.State == "ready")
         {
             // Validate all bytes before creating a folder or uploading to a remote account.
-            _ = await store.ReadMcpUploadBytesAsync(mailboxId, status.Upload.Id);
+            var bytes = await store.ReadMcpUploadBytesAsync(mailboxId, status.Upload.Id);
             var folder = await LargeAttachmentPolicy.AttachmentsFolderAsync(Files, account);
             var driveUpload = status with
             {
                 Upload = status.Upload with { Name = AttachmentDriveSaveViewModel.NormalizeFileName(status.Upload.Name) }
             };
-            _ = await UploadStagedToDriveAsync(mailboxId, key, account, driveUpload, new(folder.ProviderId, null, null));
+            _ = await UploadStagedToDriveAsync(mailboxId, key, account, driveUpload, new(folder.ProviderId, null, null), bytes);
             status = await store.GetMcpUploadStatusAsync(mailboxId, status.Upload.Id);
         }
         if (status.State == "uploaded" && status.File is not null)

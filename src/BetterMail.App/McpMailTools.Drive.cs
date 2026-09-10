@@ -170,12 +170,12 @@ internal sealed partial class McpMailTools
 
     private sealed record DriveUploadDestination(string? ParentId, string? ReplaceItemId, string? ExpectedETag);
     private async Task<CloudDriveItem> UploadStagedToDriveAsync(string owner, string accountKey, MailAccount account,
-        McpUploadStatus status, DriveUploadDestination target)
+        McpUploadStatus status, DriveUploadDestination target, byte[]? verifiedBytes = null)
     {
         if (status.File is not null && status.State is "uploaded" or "shared" or "complete") return status.File;
         if (status.State != "ready") throw new McpException("Upload outcome is uncertain or still running. Inspect Drive before starting another upload.");
         ValidateDriveUploadMetadata(status.Upload.Name, status.Upload.ContentType);
-        var bytes = await store.ReadMcpUploadBytesAsync(owner, status.Upload.Id);
+        var bytes = verifiedBytes ?? await store.ReadMcpUploadBytesAsync(owner, status.Upload.Id);
         var parent = target.ParentId is null ? null : await Files.GetDriveItemAsync(account, target.ParentId);
         var replacing = target.ReplaceItemId is null ? null : await Files.GetDriveItemAsync(account, target.ReplaceItemId);
         if (parent is { IsFolder: false }) throw new McpException("Choose a folder as the upload destination.");
