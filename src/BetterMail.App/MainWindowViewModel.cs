@@ -601,10 +601,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         Attachments,
         _allowRemoteContent);
 
+    public string MailSelectionText => SelectedMessages.Count > 1 ? $"{SelectedMessages.Count} selected · drag to move or Delete" : "";
+
     public void SetSelectedMessages(IEnumerable<MailMessage> messages, MailMessage? primary = null)
     {
         var selected = messages.DistinctBy(MessageKey).ToArray();
         Replace(SelectedMessages, selected);
+        RaisePropertyChanged(nameof(MailSelectionText));
         var selectedPrimary = primary is null
             ? null
             : selected.FirstOrDefault(message => SameMessage(message, primary));
@@ -5677,6 +5680,7 @@ public sealed record PersonEntry(
         ?? SavedContact?.AccountId
         ?? DiscoveredPerson?.MailboxIds.FirstOrDefault()
         ?? ProvenanceText);
+    public ImageRequest Avatar => BackgroundImages.Contact(PrimaryEmail);
     public string AvatarText => string.IsNullOrWhiteSpace(DisplayName)
         ? "?"
         : char.ToUpperInvariant(DisplayName.Trim()[0]).ToString();

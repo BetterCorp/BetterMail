@@ -9,6 +9,25 @@ namespace BetterMail.Microsoft365;
 
 public sealed partial class Microsoft365WorkspaceProvider
 {
+    public async Task<byte[]?> GetThumbnailAsync(MailAccount account, CloudDriveItem item, CancellationToken cancellationToken = default)
+    {
+        if (item.IsFolder) return null;
+        using var request = await CreateRequestAsync(account, HttpMethod.Get,
+            DriveItemEndpoint(account, item) + "/thumbnails?$select=medium", FileScopes, cancellationToken);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        await EnsureSuccessAsync(response, cancellationToken);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+        if (!document.RootElement.TryGetProperty("value", out var values)) return null;
+        foreach (var thumbnail in values.EnumerateArray())
+        {
+            if (thumbnail.TryGetProperty("medium", out var medium) && medium.TryGetProperty("url", out var url) &&
+                Uri.TryCreate(url.GetString(), UriKind.Absolute, out var uri))
+                return await PublicImageHttp.GetAsync(uri, 1024 * 1024, cancellationToken);
+        }
+        return null;
+    }
+
     public async Task<CloudDriveItem> GetDriveItemAsync(MailAccount account, string itemId, CancellationToken cancellationToken = default)
     {
         var endpoint = itemId == "root" ? "me/drive/root" : "me/drive/items/" + Uri.EscapeDataString(itemId);

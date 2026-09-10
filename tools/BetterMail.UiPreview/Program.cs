@@ -53,9 +53,30 @@ internal static class Program
         var previewMessages = vm.Messages.ToArray();
         // Inbox overview: no native message web view is opened in this Linux capture.
         vm.SelectedMessage = null;
-        var window = new MainWindow { DataContext = vm, Width = 1440, Height = 960, WindowDecorations = WindowDecorations.None, Position = new PixelPoint(0, 0) };
+        var window = new MainWindow { DataContext = vm, Width = 1440, Height = 960, WindowDecorations = WindowDecorations.None, WindowStartupLocation = WindowStartupLocation.Manual, Position = new PixelPoint(0, 0) };
         window.Show();
         await Shot("mail-light");
+        var list = window.FindControl<ListBox>("MessageList")!;
+        async Task ClickRow(int index, string modifier)
+        {
+            var row = (Control)list.ContainerFromIndex(index)!;
+            var point = row.PointToScreen(new Point(50, row.Bounds.Height / 2));
+            await Input(modifier, "click", ((int)point.X).ToString(), ((int)point.Y).ToString());
+        }
+        await ClickRow(0, "none");
+        await ClickRow(2, "Control_L");
+        if (vm.SelectedMessages.Count != 2) throw new InvalidOperationException($"Ctrl-click selected {vm.SelectedMessages.Count}, expected 2.");
+        await ClickRow(4, "Shift_L");
+        if (vm.SelectedMessages.Count < 3) throw new InvalidOperationException("Shift-click did not select a range.");
+        await Input("Control_L", "a");
+        if (vm.SelectedMessages.Count != previewMessages.Length) throw new InvalidOperationException($"Ctrl+A selected {vm.SelectedMessages.Count}, expected {previewMessages.Length}.");
+        vm.Messages[1] = vm.Messages[1] with { IsRead = true, IsFlagged = true };
+        if (vm.SelectedMessages.Count != previewMessages.Length || list.SelectedItems!.Count != previewMessages.Length)
+            throw new InvalidOperationException("A message metadata refresh collapsed multi-selection.");
+        await Shot("mail-multiselect-light");
+        list.SelectedItems!.Clear();
+        vm.SelectedMessage = null;
+        Console.WriteLine("Native Ctrl-click, Shift-click and Ctrl+A checks passed.");
         Application.Current!.RequestedThemeVariant = ThemeVariant.Dark;
         vm.ConversationThread.RefreshTheme();
         await Shot("mail-dark");
@@ -91,6 +112,7 @@ internal static class Program
                 // Keep the navigation overview visible without requiring an embedded Linux web engine.
                 _ = page;
             }
+            if (name == "files") await ((AsyncCommand)vm.DriveWorkspace!.GridViewCommand).ExecuteAsync();
             await Shot(name + "-light");
             if (name == "files")
             {
@@ -134,6 +156,17 @@ internal static class Program
         save.Close();
         Directory.Delete(directory, true);
 
+        async Task Input(params string[] input)
+        {
+            var info = new ProcessStartInfo("python3");
+            info.ArgumentList.Add("tools/BetterMail.UiPreview/input.py");
+            foreach (var part in input) info.ArgumentList.Add(part);
+            using var process = Process.Start(info)!;
+            await process.WaitForExitAsync();
+            if (process.ExitCode != 0) throw new InvalidOperationException("Input injection failed.");
+            await Task.Delay(300);
+        }
+
         async Task Shot(string name, Window? target = null)
         {
             target ??= window;
@@ -164,7 +197,8 @@ public class PreviewProvider : DispatchProxy
             "GetTaskListsAsync" => new TaskListInfo[] { new("launch", "Autumn launch", account.AccountId), new("personal", "My day", account.AccountId) },
             "GetTasksAsync" when args!.OfType<TaskListInfo>().FirstOrDefault()?.ProviderId == "personal" => Array.Empty<TaskInfo>(),
             "GetTasksAsync" => new TaskInfo[] { new("brief", "launch", "Review the creative brief", Today, false, account.AccountId), new("research", "launch", "Share customer research", Today.AddDays(1), false, account.AccountId), new("plan", "launch", "Finalize the launch checklist", Today.AddDays(2), false, account.AccountId), new("done", "launch", "Set up the project workspace", Today, true, account.AccountId) },
-            "GetDriveItemsAsync" => new CloudDriveItem[] { new("folder", "Autumn launch", 0, true, null, null, account.AccountId, account.ProviderId), new("brief", "Creative brief.pdf", 284000, false, null, null, account.AccountId, account.ProviderId), new("research", "Customer research.docx", 128000, false, null, null, account.AccountId, account.ProviderId), new("budget", "Launch budget.xlsx", 64000, false, null, null, account.AccountId, account.ProviderId) },
+            "GetThumbnailAsync" => SampleThumbnail(),
+            "GetDriveItemsAsync" => new CloudDriveItem[] { new("landscape", "Mountain lake.jpg", 284000, false, null, null, account.AccountId, account.ProviderId, "image/jpeg"), new("poster", "Launch artwork.png", 128000, false, null, null, account.AccountId, account.ProviderId, "image/png"), new("folder", "Autumn launch", 0, true, null, null, account.AccountId, account.ProviderId), new("brief", "Creative brief.pdf", 284000, false, null, null, account.AccountId, account.ProviderId), new("research", "Customer research.docx", 128000, false, null, null, account.AccountId, account.ProviderId), new("budget", "Launch budget.xlsx", 64000, false, null, null, account.AccountId, account.ProviderId) },
             "GetNotebooksAsync" => new NoteNotebook[] { new("notebook", "Studio notebook", account.AccountId, account.ProviderId) },
             "GetSectionsAsync" => new NoteSection[] { new("ideas", "notebook", "Ideas & planning", account.AccountId, account.ProviderId) },
             "GetPagesAsync" => new NotePage[] { new("page", "ideas", "A thoughtful workspace", Today.AddHours(9), 0, 0, account.AccountId, account.ProviderId), new("meeting", "ideas", "Design review notes", Today, 1, 0, account.AccountId, account.ProviderId) },
@@ -172,6 +206,20 @@ public class PreviewProvider : DispatchProxy
             _ => Empty(m.ReturnType.GenericTypeArguments[0])
         };
         return typeof(Task).GetMethod(nameof(Task.FromResult))!.MakeGenericMethod(m.ReturnType.GenericTypeArguments[0]).Invoke(null, [value]);
+    }
+    private static byte[] SampleThumbnail()
+    {
+        using var surface = SkiaSharp.SKSurface.Create(new SkiaSharp.SKImageInfo(128, 128));
+        var canvas = surface.Canvas;
+        canvas.Clear(SkiaSharp.SKColor.Parse("#C8DEE8"));
+        using var paint = new SkiaSharp.SKPaint { Color = SkiaSharp.SKColor.Parse("#6D8F88"), IsAntialias = true };
+        using var mountain = new SkiaSharp.SKPath();
+        mountain.MoveTo(0, 90); mountain.LineTo(45, 32); mountain.LineTo(92, 90); mountain.Close();
+        canvas.DrawPath(mountain, paint);
+        paint.Color = SkiaSharp.SKColor.Parse("#548399"); canvas.DrawRect(0, 90, 128, 38, paint);
+        using var image = surface.Snapshot();
+        using var png = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 90);
+        return png.ToArray();
     }
     private static object Empty(Type type) => type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IReadOnlyList<>) ? Array.CreateInstance(type.GenericTypeArguments[0], 0) : throw new NotSupportedException(type.Name);
 }

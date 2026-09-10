@@ -524,11 +524,19 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         item.AccountProviderId,
         item.ParentPath);
 
-    private static IEnumerable<DriveItemEntry> Entries(DriveTreeNode node) =>
+    private ImageRequest? ThumbnailFor(MailAccount account, CloudDriveItem item)
+    {
+        if (item.IsFolder || !(item.ContentType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) == true ||
+            new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".heic", ".svg" }.Contains(Path.GetExtension(item.Name).ToLowerInvariant()))) return null;
+        return new ImageRequest($"drive:{account.ProviderId}:{account.AccountId}:{item.ProviderId}:{item.ETag}:{item.Size}",
+            async token => BackgroundImages.Normalize(await _provider.GetThumbnailAsync(account, item, token)));
+    }
+
+    private IEnumerable<DriveItemEntry> Entries(DriveTreeNode node) =>
         node.Items
             .OrderByDescending(static item => item.IsFolder)
             .ThenBy(static item => item.Name, StringComparer.OrdinalIgnoreCase)
-            .Select(item => new DriveItemEntry(node.Account, item));
+            .Select(item => new DriveItemEntry(node.Account, item) { Thumbnail = ThumbnailFor(node.Account, item) });
 
     private Task ClearSearchAsync()
     {
@@ -858,6 +866,10 @@ public sealed class DriveTreeNode : ViewModelBase
 
 public sealed record DriveItemEntry(MailAccount Account, CloudDriveItem Item)
 {
+    public ImageRequest? Thumbnail { get; init; }
+    // Request delegates are recreated during refresh; they are not item identity.
+    public bool Equals(DriveItemEntry? other) => other is not null && Account == other.Account && Item == other.Item;
+    public override int GetHashCode() => HashCode.Combine(Account, Item);
     public string Identity => $"{Account.ProviderId}\n{Account.AccountId}\n{Item.ProviderId}";
     public string TypeText => Item.IsFolder ? "Folder" : Item.ContentType ?? "File";
     public string IconPath => Item.IsFolder ? "M2,6 H10 L12,9 H22 V21 H2 Z" : "M5,2 H14 L20,8 V22 H5 Z M14,2 V8 H20 M8,13 H17 M8,17 H15";

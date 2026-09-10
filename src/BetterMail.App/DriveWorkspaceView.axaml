@@ -167,7 +167,7 @@
                         CommandParameter="{Binding}"
                         AutomationProperties.Name="{Binding Item.Name}">
                   <Grid ColumnDefinitions="Auto,3*,*,Auto" ColumnSpacing="8">
-                    <Path Data="{Binding IconPath}" Width="17" Height="17" Stretch="Uniform" Stroke="{DynamicResource BetterMailAccentBrush}" StrokeThickness="1.5" VerticalAlignment="Center" />
+                    <app:AsyncImage Request="{Binding Thumbnail}" FallbackPath="{Binding IconPath}" Width="28" Height="28" VerticalAlignment="Center" />
                     <TextBlock Grid.Column="1" Text="{Binding Item.Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                     <TextBlock Grid.Column="2" Text="{Binding TypeText}" Opacity="0.68" TextTrimming="CharacterEllipsis" />
                     <TextBlock Grid.Column="3" Text="{Binding Item.SizeText}" HorizontalAlignment="Right" Opacity="0.68" />
@@ -187,13 +187,13 @@
             </ListBox.ItemsPanel>
             <ListBox.ItemTemplate>
               <DataTemplate x:DataType="app:DriveItemEntry" x:CompileBindings="True">
-                <Button Classes="workspaceItem" Width="160" Height="108" Margin="5" Padding="10"
+                <Button Classes="workspaceItem" Width="160" Height="140" Margin="5" Padding="10"
                         HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
                         Command="{ReflectionBinding $parent[UserControl].DataContext.OpenItemCommand}"
                         CommandParameter="{Binding}"
                         AutomationProperties.Name="{Binding Item.Name}">
                   <StackPanel Spacing="7">
-                    <Path Data="{Binding IconPath}" Width="28" Height="28" Stretch="Uniform" Stroke="{DynamicResource BetterMailAccentBrush}" StrokeThickness="1.5" VerticalAlignment="Center" />
+                    <app:AsyncImage Request="{Binding Thumbnail}" FallbackPath="{Binding IconPath}" Height="76" />
                     <TextBlock Text="{Binding Item.Name}" FontWeight="SemiBold"
                                TextTrimming="CharacterEllipsis" MaxLines="2" />
                     <TextBlock Text="{Binding TypeText}" FontSize="11" Opacity="0.64"

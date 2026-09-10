@@ -188,7 +188,7 @@ public sealed class MainWindowXamlTests
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding GlobalSearchResults}" + (char)34, xaml);
         Assert.Contains("KeyDown=" + (char)34 + "GlobalSearchKeyDown" + (char)34, xaml);
         Assert.Contains("IsVisible=" + (char)34 + "{Binding StartsCategory}" + (char)34, xaml);
-        Assert.Contains("SelectedItem=" + (char)34 + "{Binding SelectedMessage, Mode=OneWay}" + (char)34, xaml);
+        Assert.DoesNotContain("SelectedItem=" + (char)34 + "{Binding SelectedMessage, Mode=OneWay}" + (char)34, xaml);
         Assert.Contains("ShowDraftsCommand", folderPane);
         Assert.DoesNotContain("<Expander Header=" + (char)34 + "{Binding DraftCountText}", folderPane);
         Assert.Contains("QuickActionClicked", xaml);
