@@ -47,7 +47,11 @@ internal static class BackgroundImages
             token.ThrowIfCancellationRequested();
             lock (Gate)
             {
-                if (Cache.Count >= 256) Cache.Remove(Cache.Keys.First());
+                if (!Cache.ContainsKey(request.Key) && Cache.Count >= 256)
+                {
+                    if (background) return bytes;
+                    Cache.Remove(Cache.Keys.First());
+                }
                 Cache[request.Key] = new(bytes, request.Key.StartsWith("contact:", StringComparison.Ordinal)
                     ? bytes is null ? DateTimeOffset.UtcNow.AddDays(1) : DateTimeOffset.MaxValue
                     : DateTimeOffset.UtcNow.AddMinutes(bytes is null ? 15 : 60));
@@ -125,7 +129,9 @@ internal static class BackgroundImages
         token.ThrowIfCancellationRequested();
         lock (Gate)
         {
-            if (Cache.Count >= 256) Cache.Remove(Cache.Keys.First());
+            // Domain hints are auxiliary cache entries; never evict a contact image
+            // to store one, including when loaded as part of a background request.
+            if (!Cache.ContainsKey(key) && Cache.Count >= 256) return bytes;
             Cache[key] = new(bytes, DateTimeOffset.UtcNow.AddMinutes(bytes is null ? 15 : 60));
         }
         return bytes;

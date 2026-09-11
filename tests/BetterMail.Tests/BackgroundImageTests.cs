@@ -170,6 +170,57 @@ public sealed class BackgroundImageTests
         Assert.Equal(new byte[] { 137, 80, 78, 71 }, result.Take(4));
     }
 
+    [Fact]
+    public async Task PrefetchDoesNotEvictWhenForegroundFillsCacheDuringDownload()
+    {
+        // Isolate the shared cache so the test can reproduce the exact 255 -> 256 race.
+        var flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+        var cache = (System.Collections.IDictionary)typeof(BackgroundImages).GetField("Cache", flags)!.GetValue(null)!;
+        var gate = typeof(BackgroundImages).GetField("Gate", flags)!.GetValue(null)!;
+        System.Collections.DictionaryEntry[] saved;
+        lock (gate)
+        {
+            saved = cache.Keys.Cast<object>().Select(key => new System.Collections.DictionaryEntry(key, cache[key])).ToArray();
+            cache.Clear();
+        }
+        var token = TestContext.Current.CancellationToken;
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<byte[]?>? background = null;
+        try
+        {
+            for (var i = 0; i < 255; i++)
+                await BackgroundImages.GetAsync(new("race-" + i, _ => Task.FromResult<byte[]?>([1])), token);
+            background = BackgroundImages.GetAsync(new("race-background", async ct =>
+            {
+                entered.SetResult();
+                await release.Task.WaitAsync(ct);
+                return [2];
+            }), token, background: true);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), token);
+            await BackgroundImages.GetAsync(new("race-final", _ => Task.FromResult<byte[]?>([3])), token);
+            release.SetResult();
+            await background;
+            lock (gate)
+            {
+                Assert.Equal(256, cache.Count);
+                Assert.True(cache.Contains("race-0"));
+                Assert.True(cache.Contains("race-final"));
+                Assert.False(cache.Contains("race-background"));
+            }
+        }
+        finally
+        {
+            release.TrySetResult();
+            if (background is not null) try { await background; } catch (OperationCanceledException) { }
+            lock (gate)
+            {
+                cache.Clear();
+                foreach (var entry in saved) cache.Add(entry.Key, entry.Value);
+            }
+        }
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
