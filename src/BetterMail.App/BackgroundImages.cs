@@ -18,27 +18,30 @@ internal static class BackgroundImages
     private static readonly SemaphoreSlim Slots = new(4);
     private static readonly object Gate = new();
 
-    public static async Task<byte[]?> GetAsync(ImageRequest request, CancellationToken token, bool background = false)
+    public static async Task<byte[]?> GetAsync(ImageRequest request, CancellationToken token, bool background = false) =>
+        (await GetCoreAsync(request, token, background)).Bytes;
+
+    private static async Task<(bool Deferred, byte[]? Bytes)> GetCoreAsync(ImageRequest request, CancellationToken token, bool background)
     {
         lock (Gate)
-            if (Cache.TryGetValue(request.Key, out var hit) && hit.Expires > DateTimeOffset.UtcNow) return hit.Bytes;
+            if (Cache.TryGetValue(request.Key, out var hit) && hit.Expires > DateTimeOffset.UtcNow) return (false, hit.Bytes);
         // Prefetch never queues ahead of interactive artwork requests.
         if (background)
         {
-            if (!await Slots.WaitAsync(0, token)) return null;
+            if (!await Slots.WaitAsync(0, token)) return (true, null);
         }
         else await Slots.WaitAsync(token);
         try
         {
             lock (Gate)
             {
-                if (Cache.TryGetValue(request.Key, out var hit) && hit.Expires > DateTimeOffset.UtcNow) return hit.Bytes;
+                if (Cache.TryGetValue(request.Key, out var hit) && hit.Expires > DateTimeOffset.UtcNow) return (false, hit.Bytes);
                 if (background)
                 {
                     foreach (var key in Cache.Where(pair => pair.Value.Expires <= DateTimeOffset.UtcNow).Select(pair => pair.Key).ToArray())
                         Cache.Remove(key);
                     // Do not churn the bounded foreground cache by sweeping a large address book.
-                    if (Cache.Count >= 256) return null;
+                    if (Cache.Count >= 256) return (false, null);
                 }
             }
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -49,14 +52,14 @@ internal static class BackgroundImages
             {
                 if (!Cache.ContainsKey(request.Key) && Cache.Count >= 256)
                 {
-                    if (background) return bytes;
+                    if (background) return (false, bytes);
                     Cache.Remove(Cache.Keys.First());
                 }
                 Cache[request.Key] = new(bytes, request.Key.StartsWith("contact:", StringComparison.Ordinal)
                     ? bytes is null ? DateTimeOffset.UtcNow.AddDays(1) : DateTimeOffset.MaxValue
                     : DateTimeOffset.UtcNow.AddMinutes(bytes is null ? 15 : 60));
             }
-            return bytes;
+            return (false, bytes);
         }
         finally { Slots.Release(); }
     }
@@ -71,7 +74,12 @@ internal static class BackgroundImages
                 if (Cache.TryGetValue(request.Key, out var hit) && hit.Expires > DateTimeOffset.UtcNow) continue;
                 if (Cache.Count >= 256 && Cache.Values.All(value => value.Expires > DateTimeOffset.UtcNow)) return;
             }
-            try { await GetAsync(request, token, background: true); }
+            try
+            {
+                // A busy worker is not a negative lookup: keep this contact pending.
+                while ((await GetCoreAsync(request, token, background: true)).Deferred)
+                    await Task.Delay(100, token);
+            }
             catch (Exception) when (!token.IsCancellationRequested) { /* Optional artwork must not fail sync. */ }
             await Task.Delay(100, token);
         }

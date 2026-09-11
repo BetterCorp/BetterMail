@@ -260,8 +260,10 @@ public sealed class BackgroundImageTests
         Assert.Equal(0, nextCalls);
     }
 
-    [Fact]
-    public async Task PhotoPassYieldsWhenInteractiveSlotsAreBusy()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PhotoPassRetriesBusyContactOrCancelsWhileWaiting(bool cancelPass)
     {
         using var cancellation = new CancellationTokenSource();
         var started = 0;
@@ -276,13 +278,29 @@ public sealed class BackgroundImageTests
         try
         {
             await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
-            var calls = 0;
-            await BackgroundImages.PrefetchAsync([new("contact:" + Guid.NewGuid(), _ =>
+            using var passCancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            var calls = new List<int>();
+            var pass = BackgroundImages.PrefetchAsync(Enumerable.Range(0, 2).Select(index =>
+                new ImageRequest("contact:" + Guid.NewGuid(), _ =>
+                {
+                    calls.Add(index);
+                    return Task.FromResult<byte[]?>(null);
+                })), passCancellation.Token);
+            await Task.Delay(250, TestContext.Current.CancellationToken);
+            Assert.False(pass.IsCompleted);
+            Assert.Empty(calls);
+            if (cancelPass)
             {
-                calls++;
-                return Task.FromResult<byte[]?>(null);
-            })], TestContext.Current.CancellationToken);
-            Assert.Equal(0, calls);
+                passCancellation.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pass);
+                Assert.Empty(calls);
+            }
+            else
+            {
+                cancellation.Cancel();
+                await pass.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+                Assert.Equal(new[] { 0, 1 }, calls);
+            }
         }
         finally
         {
