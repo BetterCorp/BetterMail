@@ -50,6 +50,10 @@ internal static class BackgroundImages
             token.ThrowIfCancellationRequested();
             lock (Gate)
             {
+                // Another lookup may have finished while this one was downloading.
+                // Keep its photo; a success may still upgrade a concurrent negative result.
+                if (Cache.TryGetValue(request.Key, out var current) && current.Expires > DateTimeOffset.UtcNow &&
+                    (current.Bytes is not null || bytes is null)) return (false, current.Bytes);
                 if (!Cache.ContainsKey(request.Key) && Cache.Count >= 256)
                 {
                     if (background) return (false, bytes);
@@ -137,6 +141,8 @@ internal static class BackgroundImages
         token.ThrowIfCancellationRequested();
         lock (Gate)
         {
+            if (Cache.TryGetValue(key, out var current) && current.Expires > DateTimeOffset.UtcNow &&
+                (current.Bytes is not null || bytes is null)) return current.Bytes;
             // Domain hints are auxiliary cache entries; never evict a contact image
             // to store one, including when loaded as part of a background request.
             if (!Cache.ContainsKey(key) && Cache.Count >= 256) return bytes;

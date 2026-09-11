@@ -170,6 +170,48 @@ public sealed class BackgroundImageTests
         Assert.Equal(new byte[] { 137, 80, 78, 71 }, result.Take(4));
     }
 
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ConcurrentImageCompletionPreservesPhotosAndCanUpgradeMisses(bool firstFound, bool laterFound)
+    {
+        var key = "contact:" + Guid.NewGuid();
+        var firstEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var laterEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseLater = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var first = BackgroundImages.GetAsync(new(key, async token =>
+        {
+            firstEntered.SetResult();
+            await releaseFirst.Task.WaitAsync(token);
+            return firstFound ? [1] : null;
+        }), cancellation.Token);
+        var later = BackgroundImages.GetAsync(new(key, async token =>
+        {
+            laterEntered.SetResult();
+            await releaseLater.Task.WaitAsync(token);
+            return laterFound ? [2] : null;
+        }), cancellation.Token, background: true);
+        try
+        {
+            await Task.WhenAll(firstEntered.Task, laterEntered.Task).WaitAsync(TimeSpan.FromSeconds(5), cancellation.Token);
+            releaseFirst.SetResult();
+            await first;
+            releaseLater.SetResult();
+            var expected = firstFound ? new byte[] { 1 } : new byte[] { 2 };
+            Assert.Equal(expected, await later);
+            Assert.Equal(expected, await BackgroundImages.GetAsync(new(key, _ =>
+                throw new InvalidOperationException("A cached photo must not be fetched again.")), cancellation.Token));
+        }
+        finally
+        {
+            cancellation.Cancel();
+            try { await Task.WhenAll(first, later); } catch (OperationCanceledException) { }
+        }
+    }
+
     [Fact]
     public async Task PrefetchDoesNotEvictWhenForegroundFillsCacheDuringDownload()
     {
