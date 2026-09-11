@@ -18,15 +18,29 @@ internal static class BackgroundImages
     private static readonly SemaphoreSlim Slots = new(4);
     private static readonly object Gate = new();
 
-    public static async Task<byte[]?> GetAsync(ImageRequest request, CancellationToken token)
+    public static async Task<byte[]?> GetAsync(ImageRequest request, CancellationToken token, bool background = false)
     {
         lock (Gate)
             if (Cache.TryGetValue(request.Key, out var hit) && hit.Expires > DateTimeOffset.UtcNow) return hit.Bytes;
-        await Slots.WaitAsync(token);
+        // Prefetch never queues ahead of interactive artwork requests.
+        if (background)
+        {
+            if (!await Slots.WaitAsync(0, token)) return null;
+        }
+        else await Slots.WaitAsync(token);
         try
         {
             lock (Gate)
+            {
                 if (Cache.TryGetValue(request.Key, out var hit) && hit.Expires > DateTimeOffset.UtcNow) return hit.Bytes;
+                if (background)
+                {
+                    foreach (var key in Cache.Where(pair => pair.Value.Expires <= DateTimeOffset.UtcNow).Select(pair => pair.Key).ToArray())
+                        Cache.Remove(key);
+                    // Do not churn the bounded foreground cache by sweeping a large address book.
+                    if (Cache.Count >= 256) return null;
+                }
+            }
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             timeout.CancelAfter(TimeSpan.FromSeconds(25));
             var bytes = await request.Load(timeout.Token);
@@ -34,11 +48,29 @@ internal static class BackgroundImages
             lock (Gate)
             {
                 if (Cache.Count >= 256) Cache.Remove(Cache.Keys.First());
-                Cache[request.Key] = new(bytes, DateTimeOffset.UtcNow.AddMinutes(bytes is null ? 15 : 60));
+                Cache[request.Key] = new(bytes, request.Key.StartsWith("contact:", StringComparison.Ordinal)
+                    ? bytes is null ? DateTimeOffset.UtcNow.AddDays(1) : DateTimeOffset.MaxValue
+                    : DateTimeOffset.UtcNow.AddMinutes(bytes is null ? 15 : 60));
             }
             return bytes;
         }
         finally { Slots.Release(); }
+    }
+
+    internal static async Task PrefetchAsync(IEnumerable<ImageRequest> requests, CancellationToken token)
+    {
+        foreach (var request in requests.DistinctBy(request => request.Key))
+        {
+            token.ThrowIfCancellationRequested();
+            lock (Gate)
+            {
+                if (Cache.TryGetValue(request.Key, out var hit) && hit.Expires > DateTimeOffset.UtcNow) continue;
+                if (Cache.Count >= 256 && Cache.Values.All(value => value.Expires > DateTimeOffset.UtcNow)) return;
+            }
+            try { await GetAsync(request, token, background: true); }
+            catch (Exception) when (!token.IsCancellationRequested) { /* Optional artwork must not fail sync. */ }
+            await Task.Delay(100, token);
+        }
     }
 
     // Exact mailbox domains only: custom domains hosted by these providers still
