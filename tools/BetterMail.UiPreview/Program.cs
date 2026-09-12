@@ -134,6 +134,7 @@ internal static class Program
         move.Position = new PixelPoint(0, 0);
         await Task.Delay(200);
         var tree = move.FindControl<TreeView>("FoldersTree")!;
+        if (tree.Items.Count != 1) throw new InvalidOperationException("Move browser must hide other mailboxes.");
         var accountRoot = (TreeViewItem)tree.Items[0]!;
         var inboxNode = accountRoot.Items.Cast<TreeViewItem>().Single(item => (string)item.Header! == "Inbox");
         inboxNode.IsExpanded = true;

@@ -10,6 +10,23 @@ public sealed class MailMoveFolderTests
         new(new MailFolder(mailbox, id, name, 0, 0, ParentProviderId: parent), "Work");
 
     [Fact]
+    public void MoveDestinationsHideOtherMailboxesButKeepCurrentFolderAndItsChildren()
+    {
+        var source = "a:alex@work.example";
+        var roots = MailMoveFolder.BuildDestinations([
+            Folder(source, "inbox", "Inbox"),
+            Folder(source, "projects", "Projects", "inbox"),
+            Folder("b:alex@studio.example", "inbox", "Inbox"),
+            Folder("a:shared@work.example", "inbox", "Inbox")], folder => folder.MailboxId == source);
+        var root = Assert.Single(roots);
+        var inbox = Assert.Single(root.Children);
+        Assert.Equal("inbox", inbox.Folder!.ProviderId);
+        Assert.Equal(source, inbox.Folder.MailboxId);
+        Assert.Equal("projects", Assert.Single(inbox.Children).Folder!.ProviderId);
+        Assert.Empty(MailMoveFolder.BuildDestinations([Folder(source, "inbox", "Inbox")], _ => false));
+    }
+
+    [Fact]
     public void AccountTreesKeepIdenticalFolderIdsSeparateAndShowFullPath()
     {
         var roots = MailMoveFolder.Build([

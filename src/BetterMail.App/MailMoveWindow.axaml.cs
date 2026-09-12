@@ -15,7 +15,11 @@ public sealed partial class MailMoveWindow : Window
     {
         _canMove = canMove;
         Heading.Text = messageCount == 1 ? "Move message" : $"Move {messageCount:N0} messages";
-        FoldersTree.ItemsSource = MailMoveFolder.Build(folders).Select(CreateItem).ToArray();
+        var roots = MailMoveFolder.BuildDestinations(folders, canMove);
+        FoldersTree.ItemsSource = roots.Select(CreateItem).ToArray();
+        SelectionHelp.Text = roots.Count == 0
+            ? "No destination is available. Select messages from one mailbox at a time."
+            : "Choose a folder in this mailbox.";
     }
 
     public Task<MailFolderItem?> ChooseAsync(Window owner) => ShowDialog<MailFolderItem?>(owner);
@@ -35,7 +39,7 @@ public sealed partial class MailMoveWindow : Window
         DestinationPath.Text = node?.Path ?? "Select a folder";
         MoveButton.IsEnabled = _destination is not null && _canMove(_destination);
         SelectionHelp.Text = node is null || node.Folder is null
-            ? "Expand an account and choose a folder."
+            ? "Choose a folder in this mailbox."
             : MoveButton.IsEnabled ? "Messages already in this folder will be skipped."
             : "Cross-account moves are not available yet. Choose a folder in the source mailbox.";
     }
@@ -50,6 +54,9 @@ public sealed partial class MailMoveWindow : Window
 internal sealed record MailMoveFolder(string Name, string Path, MailFolderItem? Folder,
     IReadOnlyList<MailMoveFolder> Children)
 {
+    internal static IReadOnlyList<MailMoveFolder> BuildDestinations(IEnumerable<MailFolderItem> source,
+        Func<MailFolderItem, bool> canMove) => Build(source.Where(canMove));
+
     internal static IReadOnlyList<MailMoveFolder> Build(IEnumerable<MailFolderItem> source) =>
         source.GroupBy(folder => folder.MailboxId).Select(group =>
         {
