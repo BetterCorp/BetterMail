@@ -257,7 +257,7 @@ public sealed partial class MainWindow : Window
 
     private void MessageListPointerReleased(object? sender, PointerReleasedEventArgs args)
     {
-        if (!PreservesMultiSelection(args.KeyModifiers) && MessageFrom(args.Source) is { } message)
+        if (!IsButtonSource(args.Source) && !PreservesMultiSelection(args.KeyModifiers) && MessageFrom(args.Source) is { } message)
         {
             SelectMessage(message);
         }
@@ -774,20 +774,16 @@ public sealed partial class MainWindow : Window
     private void MessageHeadersClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
         Execute(_viewModel?.ViewHeadersCommand);
 
-    private void MoveMenuOpened(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    private async void MoveMessagesClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
     {
-        if (sender is MenuItem menu && _viewModel is not null)
-        {
-            menu.ItemsSource = _viewModel.Folders
-                .Where(_viewModel.CanMoveSelectionToFolder)
-                .Select(folder => new MenuItem
-                {
-                    Header = folder.DisplayName,
-                    Command = _viewModel.MoveToFolderCommand,
-                    CommandParameter = folder
-                })
-                .ToArray();
-        }
+        if (_viewModel is null) return;
+        if (sender is Button { CommandParameter: MailMessage message }) SelectMessage(message, preserveExisting: true);
+        var messages = _viewModel.MoveSelectionSnapshot();
+        if (messages.Count == 0) return;
+        var dialog = new MailMoveWindow(_viewModel.Folders, messages.Count,
+            folder => MainWindowViewModel.CanMoveMessagesToFolder(messages, folder));
+        var destination = await dialog.ChooseAsync(this);
+        if (destination is not null) await _viewModel.MoveSnapshotToFolderAsync(messages, destination);
     }
 
     private async void QuickActionClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
@@ -820,7 +816,7 @@ public sealed partial class MainWindow : Window
     {
         if (sender is Button { CommandParameter: MailMessage message })
         {
-            SelectMessage(message);
+            SelectMessage(message, preserveExisting: true);
         }
     }
 
@@ -835,7 +831,7 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
-        if (!preserveExisting && (selectedItems.Count != 1 || !selectedItems.Contains(message)))
+        if (!selectedItems.Contains(message) || (!preserveExisting && selectedItems.Count != 1))
         {
             selectedItems.Clear();
             selectedItems.Add(message);

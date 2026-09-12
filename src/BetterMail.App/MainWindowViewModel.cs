@@ -3957,6 +3957,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             messages.All(message => message.FolderId != folder.ProviderId);
     }
 
+    internal IReadOnlyList<MailMessage> MoveSelectionSnapshot() =>
+        IsMailInteractionContext && !_isMailActionRunning ? ActionMessages().ToArray() : [];
+
+    internal static bool CanMoveMessagesToFolder(IReadOnlyList<MailMessage> messages, MailFolderItem folder) =>
+        messages.Count > 0 && messages.All(message => message.MailboxId == folder.MailboxId && message.FolderId != folder.ProviderId);
+
+    internal Task MoveSnapshotToFolderAsync(IReadOnlyList<MailMessage> messages, MailFolderItem folder) =>
+        CanMoveMessagesToFolder(messages, folder) && Folders.Any(item => item.MailboxId == folder.MailboxId && item.ProviderId == folder.ProviderId)
+            ? MoveMessagesAsync(messages, folder.ProviderId, $"Moving to {folder.DisplayName}...", $"Moved to {folder.DisplayName}")
+            : Task.CompletedTask;
+
     internal Task MoveSelectionToFolderAsync(MailFolderItem folder) =>
         MoveMessagesAsync(
             ActionMessages(),
@@ -5414,8 +5425,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         };
 
     internal IReadOnlyList<MailFolderItem> MoveFoldersFor(MailMessage message) =>
-        Folders.Where(folder => folder.MailboxId == message.MailboxId && folder.ProviderId != message.FolderId)
-            .ToArray();
+        Folders.ToArray();
 
     internal Task HandlePreviewActionAsync(ConversationActionRequest request) => request.Action switch
     {

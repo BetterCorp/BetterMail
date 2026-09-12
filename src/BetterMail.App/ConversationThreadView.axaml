@@ -46,22 +46,7 @@
             <Button Classes="command" Content="Forward" Command="{Binding ForwardCommand}" />
             <Button Classes="command" Content="Archive" Command="{Binding ArchiveCommand}" />
             <Button Classes="command" Content="Delete" Command="{Binding DeleteCommand}" />
-            <Button Classes="command" Content="Move">
-              <Button.Flyout>
-                <Flyout>
-                  <ScrollViewer MaxHeight="420" MinWidth="230">
-                    <ItemsControl ItemsSource="{Binding MoveFolders}">
-                      <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="app:MailFolderItem">
-                          <Button Classes="command" Content="{Binding DisplayName}" HorizontalContentAlignment="Left"
-                                  Command="{Binding $parent[UserControl].DataContext.MoveToFolderCommand}" CommandParameter="{Binding}" />
-                        </DataTemplate>
-                      </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                  </ScrollViewer>
-                </Flyout>
-              </Button.Flyout>
-            </Button>
+            <Button Classes="command" Content="Move" Click="MoveClicked" />
             <Button Classes="command" Content="More">
               <Button.Flyout>
                 <Flyout>
