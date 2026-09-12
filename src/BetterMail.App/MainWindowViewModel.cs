@@ -621,6 +621,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         Attachments,
         _allowRemoteContent);
 
+    public bool HasMailSelection => SelectedMessages.Count > 1;
     public string MailSelectionText => SelectedMessages.Count > 1 ? $"{SelectedMessages.Count} selected · drag to move or Delete" : "";
 
     public void SetSelectedMessages(IEnumerable<MailMessage> messages, MailMessage? primary = null)
@@ -628,6 +629,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         var selected = messages.DistinctBy(MessageKey).ToArray();
         Replace(SelectedMessages, selected);
         RaisePropertyChanged(nameof(MailSelectionText));
+        RaisePropertyChanged(nameof(HasMailSelection));
         var selectedPrimary = primary is null
             ? null
             : selected.FirstOrDefault(message => SameMessage(message, primary));
@@ -3208,6 +3210,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
+        if (module == "People")
+        {
+            await OpenPeopleAsync();
+            return;
+        }
         IsWorkspaceLoading = true;
         RefreshWorkspaceCommands();
         Error = null;
@@ -3497,19 +3504,62 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         RefreshContactCommands();
     }
 
+    public bool PeopleCardView
+    {
+        get => _peopleCardView;
+        set
+        {
+            if (SetProperty(ref _peopleCardView, value))
+            {
+                RaisePropertyChanged(nameof(PeopleTableView));
+                if (value) RebuildPeopleCardRows();
+            }
+        }
+    }
+    public ObservableCollection<PeopleCardRow> PeopleCardRows { get; } = [];
+    private int _peopleCardColumns = 3;
+    internal void SetPeopleViewportWidth(double width)
+    {
+        var columns = Math.Clamp((int)(Math.Max(0, width) / 380), 1, 4);
+        if (_peopleCardColumns == columns) return;
+        _peopleCardColumns = columns;
+        if (PeopleCardView) RebuildPeopleCardRows();
+    }
+    private void RebuildPeopleCardRows() => CollectionUpdates.Reconcile(PeopleCardRows,
+        People.Chunk(_peopleCardColumns).Select(items => new PeopleCardRow(items, _peopleCardColumns)).ToArray(),
+        row => row.People[0].Identity);
+    private bool _peopleCardView;
+    public bool PeopleTableView => !PeopleCardView;
+
+    internal Task PeopleBackgroundRefresh { get; private set; } = Task.CompletedTask;
+
+    private async Task OpenPeopleAsync()
+    {
+        if (_loadedPeopleQuery != ModuleSearchText || People.Count == 0)
+            await LoadPeopleCoreAsync(ModuleSearchText, cacheOnly: true);
+        PeopleBackgroundRefresh = RefreshPeopleInBackgroundAsync();
+    }
+
+    private async Task RefreshPeopleInBackgroundAsync()
+    {
+        try { await LoadPeopleAsync(); }
+        catch (Exception error) { PeopleErrorText = error.Message; }
+    }
+
     private Task? _peopleLoadTask;
     private string? _loadedPeopleQuery;
+    private string? _refreshedPeopleQuery;
     private async Task LoadPeopleAsync()
     {
         if (_peopleLoadTask is { IsCompleted: false })
         {
             await _peopleLoadTask;
-            if (_loadedPeopleQuery == ModuleSearchText) return;
+            if (_refreshedPeopleQuery == ModuleSearchText) return;
         }
         await (_peopleLoadTask = LoadPeopleCoreAsync(ModuleSearchText));
     }
 
-    private async Task LoadPeopleCoreAsync(string query)
+    private async Task LoadPeopleCoreAsync(string query, bool cacheOnly = false)
     {
         if (_workspaceProvider is null)
         {
@@ -3520,6 +3570,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             try
             {
+                if (cacheOnly)
+                {
+                    var cached = _store is null ? Contacts.Where(contact => contact.AccountId == owner.Account.AccountId && contact.OwnerAddress == owner.OwnerAddress).ToArray()
+                        : await _store.GetWorkspaceItemsAsync<ContactInfo>("contact", owner.CacheId, "all");
+                    return new AccountContactResult(owner, cached.Where(contact => string.IsNullOrWhiteSpace(query) || Contains(contact.DisplayName, query) ||
+                        contact.EmailAddresses.Any(email => Contains(email, query))).ToArray(), null);
+                }
                 var contacts = owner.Mailbox.IsShared
                     ? await _workspaceProvider.SearchSharedContactsAsync(
                         owner.Account, owner.Mailbox.Address, query)
@@ -3552,12 +3609,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         }));
         if (query != ModuleSearchText) return;
         _loadedPeopleQuery = query;
+        if (!cacheOnly) _refreshedPeopleQuery = query;
         var saved = results.SelectMany(static result => result.Contacts).ToArray();
         Replace(Contacts, saved);
 
         IReadOnlyList<DiscoveredPerson> discovered = _store is null
             ? Array.Empty<DiscoveredPerson>()
             : await _store.GetDiscoveredPeopleAsync(query);
+        if (query != ModuleSearchText) return;
         var ownAddresses = Accounts.Select(static account => account.EmailAddress)
             .Concat(Mailboxes.Select(static mailbox => mailbox.Address))
             .Select(NormalizeEmail)
@@ -3595,6 +3654,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             .ThenBy(static person => person.PrimaryEmail, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         CollectionUpdates.Reconcile(People, people, static person => person.Identity);
+        if (PeopleCardView) RebuildPeopleCardRows();
 
         PeopleErrorText = string.Join(Environment.NewLine, results
             .Where(static result => result.Error is not null)
@@ -5784,3 +5844,5 @@ public sealed record GlobalSearchResult(
 
 public sealed record SearchAccountFilter(string DisplayName, string? AccountId, string? MailboxId = null);
 public sealed record SearchFolderFilter(string DisplayName, string? MailboxId, string? FolderId);
+
+public sealed record PeopleCardRow(IReadOnlyList<PersonEntry> People, int Columns);

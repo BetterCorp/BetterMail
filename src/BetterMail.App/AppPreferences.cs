@@ -17,7 +17,8 @@ public sealed record AppPreferences(
     bool DefaultMailPromptShown = false,
     List<string>? AccountOrder = null,
     bool ContactImagesEnabled = false,
-    bool MailSenderImagesEnabled = false);
+    bool MailSenderImagesEnabled = false,
+    bool PeopleCardView = false);
 
 public static class AppPreferencesStore
 {

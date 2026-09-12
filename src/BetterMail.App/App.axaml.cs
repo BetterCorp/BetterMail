@@ -133,6 +133,7 @@ public sealed partial class App : Application
         viewModel.ConfigureAccountOrder(preferences.AccountOrder);
         viewModel.ContactImagesEnabled = preferences.ContactImagesEnabled;
         viewModel.MailSenderImagesEnabled = preferences.MailSenderImagesEnabled;
+        viewModel.PeopleCardView = preferences.PeopleCardView;
         viewModel.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName is nameof(MainWindowViewModel.SelectedThemeMode) or
@@ -145,7 +146,8 @@ public sealed partial class App : Application
                 nameof(MainWindowViewModel.SenderPreferencesVersion) or
                 nameof(MainWindowViewModel.AccountOrderVersion) or
                 nameof(MainWindowViewModel.ContactImagesEnabled) or
-                nameof(MainWindowViewModel.MailSenderImagesEnabled))
+                nameof(MainWindowViewModel.MailSenderImagesEnabled) or
+                nameof(MainWindowViewModel.PeopleCardView))
             {
                 AppPreferencesStore.Save(dataDirectory, new AppPreferences(
                     ThemeMode: viewModel.SelectedThemeMode,
@@ -160,7 +162,8 @@ public sealed partial class App : Application
                     DefaultMailPromptShown: viewModel.DefaultMailPromptShown,
                     AccountOrder: viewModel.GetAccountOrderPreferences(),
                     ContactImagesEnabled: viewModel.ContactImagesEnabled,
-                    MailSenderImagesEnabled: viewModel.MailSenderImagesEnabled));
+                    MailSenderImagesEnabled: viewModel.MailSenderImagesEnabled,
+                    PeopleCardView: viewModel.PeopleCardView));
             }
         };
         viewModel.ConfigureSenderPreferences(

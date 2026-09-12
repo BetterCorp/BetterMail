@@ -7,6 +7,84 @@ namespace BetterMail.Tests;
 public sealed class MainWindowViewModelTests
 {
     [Fact]
+    public async Task UncachedCalendarShowsProgressWhileProviderIsBlocked()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-empty-calendar-" + Guid.NewGuid());
+        var provider = new FakeWorkspaceProvider
+        {
+            CalendarGate = new(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "cached", "tenant", "me@example.test", "Me", ProviderCapabilities.Calendar);
+            var vm = new CalendarWorkspaceViewModel(provider, [account], store: store);
+            await vm.InitializeAsync(token).WaitAsync(TimeSpan.FromSeconds(5), token);
+            Assert.Empty(vm.CalendarGroups.SelectMany(group => group.Calendars));
+            Assert.True(vm.IsLoading);
+            Assert.False(vm.BackgroundRefresh.IsCompleted);
+            provider.CalendarGate.SetResult();
+            await vm.BackgroundRefresh.WaitAsync(TimeSpan.FromSeconds(5), token);
+            Assert.False(vm.IsLoading);
+            Assert.NotEmpty(vm.CalendarGroups.SelectMany(group => group.Calendars));
+        }
+        finally
+        {
+            provider.CalendarGate.TrySetResult();
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public async Task CachedPeopleAndCalendarOpenBeforeBlockedProviderCompletes()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-cached-views-" + Guid.NewGuid());
+        var provider = new FakeWorkspaceProvider
+        {
+            ContactGate = new(TaskCreationOptions.RunContinuationsAsynchronously),
+            CalendarGate = new(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "cached", "tenant", "me@example.test", "Me", ProviderCapabilities.Contacts | ProviderCapabilities.Calendar);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, "Me");
+            var contact = new ContactInfo("cached-contact", "Cached person", ["cached@example.test"], account.AccountId);
+            var calendar = new CalendarInfo("calendar", "Calendar", "#0F6CBD", true, account.AccountId);
+            await store.ReplaceWorkspaceItemsAsync("contact", account.AccountId, "all", new[] { contact }, c => c.ProviderId, c => c.DisplayName, token);
+            await store.ReplaceWorkspaceItemsAsync("calendar", account.AccountId, "all", new[] { calendar }, c => c.ProviderId, c => c.Name, token);
+            var vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, workspaceProvider: provider);
+            vm.Accounts.Add(account);
+            vm.Mailboxes.Add(mailbox);
+            vm.ContactOwners.Add(new(account, mailbox));
+            await ((AsyncCommand)vm.ShowContactsCommand).ExecuteAsync().WaitAsync(TimeSpan.FromSeconds(5), token);
+            Assert.False(provider.ContactGate.Task.IsCompleted);
+            Assert.Contains(vm.People, person => person.DisplayName == "Cached person");
+            Assert.False(vm.IsWorkspaceLoading);
+            vm.ModuleSearchText = "Planning";
+            await ((AsyncCommand)vm.ShowContactsCommand).ExecuteAsync().WaitAsync(TimeSpan.FromSeconds(5), token);
+            await ((AsyncCommand)vm.ShowCalendarCommand).ExecuteAsync().WaitAsync(TimeSpan.FromSeconds(5), token);
+            Assert.False(provider.CalendarGate.Task.IsCompleted);
+            Assert.Single(vm.CalendarWorkspace!.CalendarGroups.Single().Calendars);
+            provider.CalendarGate.SetResult();
+            provider.ContactGate.SetResult();
+            await vm.CalendarWorkspace.BackgroundRefresh.WaitAsync(TimeSpan.FromSeconds(5), token);
+            await vm.PeopleBackgroundRefresh.WaitAsync(TimeSpan.FromSeconds(5), token);
+            Assert.Contains(vm.People, person => person.DisplayName == "Planning Person");
+        }
+        finally
+        {
+            provider.ContactGate.TrySetResult();
+            provider.CalendarGate.TrySetResult();
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
     public async Task BusyCancellationRestoresDraftAndDisablesMailActionsWithStaleSelection()
     {
         var token = TestContext.Current.CancellationToken;
@@ -86,6 +164,7 @@ public sealed class MainWindowViewModelTests
             vm.Mailboxes.Add(mailbox);
             vm.ContactOwners.Add(new(account, mailbox));
             await ((AsyncCommand)vm.ShowCalendarCommand).ExecuteAsync();
+            await vm.CalendarWorkspace!.BackgroundRefresh;
             var group = Assert.Single(vm.CalendarWorkspace!.CalendarGroups);
             var sync = ((AsyncCommand)vm.SyncCommand).ExecuteAsync();
             await provider.SyncEntered.Task.WaitAsync(TimeSpan.FromSeconds(10), token);
@@ -94,6 +173,7 @@ public sealed class MainWindowViewModelTests
             Assert.True(vm.ShowContactsCommand.CanExecute(null));
             vm.ModuleSearchText = "Planning";
             await ((AsyncCommand)vm.ShowContactsCommand).ExecuteAsync();
+            await vm.PeopleBackgroundRefresh;
             Assert.Single(vm.People);
             Assert.True(vm.ShowCalendarCommand.CanExecute(null));
             await ((AsyncCommand)vm.ShowCalendarCommand).ExecuteAsync();
@@ -1985,6 +2065,7 @@ public sealed class MainWindowViewModelTests
             await viewModel.InitializeAsync();
 
             await ((AsyncCommand)viewModel.ShowContactsCommand).ExecuteAsync();
+            await viewModel.PeopleBackgroundRefresh;
             Assert.Equal(2, viewModel.People.Count);
             Assert.True(viewModel.HasPeopleErrors);
 
@@ -2580,12 +2661,14 @@ public sealed class MainWindowViewModelTests
             Task.FromResult<IReadOnlyList<CalendarEvent>>(
                 [new("event", "calendar", "Planning", from.AddHours(1), from.AddHours(2), "Room 1")]);
 
-        public Task<IReadOnlyList<ContactInfo>> SearchContactsAsync(
-            MailAccount account, string query, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<ContactInfo>>(
-                query.Contains("Planning", StringComparison.OrdinalIgnoreCase)
-                    ? [new("contact", "Planning Person", ["planning@example.com"], account.AccountId)]
-                    : []);
+        public TaskCompletionSource? ContactGate { get; init; }
+        public async Task<IReadOnlyList<ContactInfo>> SearchContactsAsync(
+            MailAccount account, string query, CancellationToken cancellationToken = default)
+        {
+            if (ContactGate is not null) await ContactGate.Task.WaitAsync(cancellationToken);
+            return query.Contains("Planning", StringComparison.OrdinalIgnoreCase)
+                ? [new("contact", "Planning Person", ["planning@example.com"], account.AccountId)] : [];
+        }
 
         public Task<IReadOnlyList<TaskInfo>> GetTasksAsync(
             MailAccount account, CancellationToken cancellationToken = default) =>

@@ -147,8 +147,22 @@ internal static class Program
                 await Shot("drive-new-folder-light");
                 button.Flyout.Hide();
             }
+            if (name == "people")
+            {
+                vm.PeopleCardView = true;
+                await Shot("people-cards-light");
+                if (!window.FindControl<ListBox>("PeopleBoxes")!.IsVisible || window.FindControl<ListBox>("PeopleCards")!.IsVisible)
+                    throw new InvalidOperationException("People card view did not switch.");
+                vm.PeopleCardView = false;
+            }
             Application.Current.RequestedThemeVariant = ThemeVariant.Dark;
             await Shot(name + "-dark");
+            if (name == "people")
+            {
+                vm.PeopleCardView = true;
+                await Shot("people-cards-dark");
+                vm.PeopleCardView = false;
+            }
             Application.Current.RequestedThemeVariant = ThemeVariant.Light;
         }
         window.Width = 1024;

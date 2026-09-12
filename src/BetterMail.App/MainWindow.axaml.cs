@@ -54,7 +54,7 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         DataContextChanged += (_, _) => BindViewModel(DataContext as MainWindowViewModel);
-        SizeChanged += (_, args) => ApplyResponsiveLayout(args.NewSize.Width);
+        SizeChanged += (_, args) => { ApplyResponsiveLayout(args.NewSize.Width); _viewModel?.SetPeopleViewportWidth(args.NewSize.Width - 110); };
         KeyDown += MainWindowKeyDown;
         MessageList.AddHandler(ScrollViewer.ScrollChangedEvent, MessageListScrollChanged);
         Closing += (_, _) =>
@@ -530,6 +530,11 @@ public sealed partial class MainWindow : Window
             await Task.Delay(1200);
             button.Content = content;
         }
+    }
+
+    private void PeopleTableClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (_viewModel is not null) _viewModel.PeopleCardView = false;
     }
 
     private void ComposeContactClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
