@@ -3,6 +3,7 @@
              xmlns:app="using:BetterMail.App"
              xmlns:core="using:BetterMail.Core"
              x:Class="BetterMail.App.ConversationThreadView">
+  <UserControl.Resources><app:MailActionFeedbackConverter x:Key="MailActionFeedback" /></UserControl.Resources>
   <UserControl.Styles>
     <Style Selector="Border.threadMessage">
       <Setter Property="Background" Value="Transparent" />
@@ -38,8 +39,7 @@
     <Border Grid.Row="1" Padding="8,5" BorderBrush="{DynamicResource BetterMailDividerBrush}"
             BorderThickness="0,0,0,1" IsVisible="{Binding ShowActions}">
       <Grid>
-        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
-                      IsVisible="{Binding !IsActionRunning}">
+        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
           <StackPanel Orientation="Horizontal" Spacing="4">
             <Button Classes="command" Content="Reply all" Command="{Binding ReplyAllCommand}" />
             <Button Classes="command" Content="Reply" Command="{Binding ReplyCommand}" />
@@ -63,8 +63,7 @@
             </Button>
           </StackPanel>
         </ScrollViewer>
-        <ProgressBar Width="110" Height="3" IsIndeterminate="True" HorizontalAlignment="Center"
-                     VerticalAlignment="Center" IsVisible="{Binding IsActionRunning}" />
+
       </Grid>
     </Border>
 
@@ -103,7 +102,7 @@
       </StackPanel>
     </Border>
 
-    <ScrollViewer Grid.Row="2"
+    <ScrollViewer x:Name="ThreadHeaderScroll" Grid.Row="2"
                   MaxHeight="184"
                   IsVisible="{Binding ShowThreadList}"
                   VerticalScrollBarVisibility="Auto"
@@ -116,52 +115,52 @@
           <DataTemplate x:DataType="app:ConversationMessageItem">
             <Border Classes="threadMessage"
                     Classes.selected="{Binding IsSelected}">
-              <Grid ColumnDefinitions="3,*">
-                <Border Background="{DynamicResource BetterMailAccentBrush}"
-                        IsVisible="{Binding IsSelected}" />
-                <Button Grid.Column="1"
-                        Classes="command"
-                        Padding="12,8"
-                        HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Stretch"
-                        Command="{Binding $parent[UserControl].DataContext.ToggleMessageCommand}"
-                        CommandParameter="{Binding}"
-                        AutomationProperties.Name="{Binding Sender, StringFormat='Select message from {0}'}"
-                        AutomationProperties.HelpText="Selects this message without changing the mail-list selection">
+              <Grid ColumnDefinitions="Auto,*">
+                <Button Classes="command" Content="⌄" VerticalAlignment="Top" Margin="2,6,0,0" Padding="5"
+                        Command="{Binding $parent[UserControl].DataContext.ToggleMessageCommand}" CommandParameter="{Binding}"
+                        AutomationProperties.Name="{Binding Sender, StringFormat='Expand or collapse message from {0}'}" />
+                <Border Grid.Column="1" Padding="12,8">
                   <Grid ColumnDefinitions="*,Auto"
                         RowDefinitions="Auto,Auto,Auto"
                         ColumnSpacing="10">
-                    <StackPanel Orientation="Horizontal" Spacing="7">
-                      <app:AsyncImage Width="24" Height="24" EmailAddress="{Binding SenderAddress}" IsHitTestVisible="False"
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="7">
+                      <app:AsyncImage Grid.Column="0" VerticalAlignment="Top" Width="24" Height="24" EmailAddress="{Binding SenderAddress}" IsHitTestVisible="False"
                                       IsVisible="{Binding $parent[UserControl].ShowSenderImages}"
                                       AllowLoading="{Binding $parent[UserControl].ShowSenderImages}" />
-                      <TextBlock Text="{Binding Sender}"
+                      <StackPanel Grid.Column="1" Spacing="3">
+                      <SelectableTextBlock Text="{Binding Sender}"
                                  FontWeight="SemiBold"
-                                 TextTrimming="CharacterEllipsis" />
-                      <TextBlock Text="{Binding SenderAddress}"
+                                 TextWrapping="Wrap" />
+                      <SelectableTextBlock Text="{Binding SenderAddress}"
                                  FontSize="11"
                                  Opacity="0.58"
-                                 TextTrimming="CharacterEllipsis" />
-                    </StackPanel>
-                    <TextBlock Grid.Column="1"
+                                 TextWrapping="Wrap" />
+                      </StackPanel>
+                    </Grid>
+                    <SelectableTextBlock Grid.Column="1"
                                Text="{Binding ReceivedText}"
                                FontSize="11"
                                Opacity="0.62"
-                               TextTrimming="CharacterEllipsis" />
-                    <TextBlock Grid.Row="1"
+                               TextWrapping="Wrap" />
+                    <SelectableTextBlock Grid.Row="1"
                                Grid.ColumnSpan="2"
                                Text="{Binding Recipients}"
                                FontSize="11"
                                Opacity="0.62"
-                               TextTrimming="CharacterEllipsis" />
-                    <TextBlock Grid.Row="2"
+                               TextWrapping="Wrap" />
+                    <SelectableTextBlock Grid.Row="2"
                                Grid.ColumnSpan="2"
                                Text="{Binding Location}"
                                FontSize="11"
                                Foreground="{DynamicResource BetterMailAccentBrush}"
-                               TextTrimming="CharacterEllipsis" />
-                  </Grid>
-                </Button>
+                               TextWrapping="Wrap" />
+                    <ProgressBar Grid.ColumnSpan="2" Height="2" IsIndeterminate="True" VerticalAlignment="Bottom" IsHitTestVisible="False">
+                  <ProgressBar.IsVisible><MultiBinding Converter="{StaticResource MailActionFeedback}">
+                    <Binding /><ReflectionBinding Path="FeedbackOwner" RelativeSource="{RelativeSource AncestorType={x:Type app:ConversationThreadView}}" /><ReflectionBinding Path="FeedbackOwner.MailActionVersion" RelativeSource="{RelativeSource AncestorType={x:Type app:ConversationThreadView}}" />
+                  </MultiBinding></ProgressBar.IsVisible>
+                </ProgressBar>
+              </Grid>
+                </Border>
               </Grid>
             </Border>
           </DataTemplate>

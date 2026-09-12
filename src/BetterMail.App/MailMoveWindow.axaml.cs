@@ -36,8 +36,8 @@ public sealed partial class MailMoveWindow : Window
         MoveButton.IsEnabled = _destination is not null && _canMove(_destination);
         SelectionHelp.Text = node is null || node.Folder is null
             ? "Expand an account and choose a folder."
-            : MoveButton.IsEnabled ? ""
-            : "Choose a different folder in the source mailbox. Cross-account moves are not available yet.";
+            : MoveButton.IsEnabled ? "Messages already in this folder will be skipped."
+            : "Cross-account moves are not available yet. Choose a folder in the source mailbox.";
     }
 
     private void MoveClicked(object? sender, RoutedEventArgs args)
