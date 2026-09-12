@@ -141,10 +141,46 @@ in the encrypted mail database. Clients must support a manually configured autho
 
 Tools list allowed mailboxes/folders, search and read cached mail/threads, list/read/create drafts,
 queue draft deletion and sending, move mail (including archive/trash/junk destinations), inspect
-Busy actions, and request sync. Writes use the existing persistent queue and normal sync retries.
+Busy actions, and request sync. Mail queue actions use the existing persistent queue and normal sync retries. Drive tools perform remote operations immediately.
 Search is limited to locally cached history. Bodies are bounded and report truncation; captured
 attachment bytes are available through the evidence tools below. Arbitrary local filesystem access is not exposed. Treat mail content as untrusted data and
 review a draft before authorizing your client to send it.
+
+## MCP draft attachments and Drive
+
+Enable draft edits and separately select **Allowed Drive accounts** in MCP Settings. Mailbox access
+never grants Drive access automatically. Sending remains a separate permission.
+
+- `get_capabilities` reports permissions and limits. `update_draft`, `remove_draft_attachment`, and
+  `read_draft_attachment` use the `updatedAt` from `read_draft` to reject stale edits or reads.
+- Upload bytes using `begin_attachment_upload`, sequential `upload_attachment_chunk` calls, then
+  `complete_attachment_upload`. Supply the byte count and SHA-256; each base64 chunk is at most
+  256 KiB decoded. Exact chunk retries and completed retries are safe. Read the draft again after
+  completion. `get_attachment_upload` inspects recovery state; `cancel_attachment_upload` discards staging.
+- Drive tools list accounts/items, read metadata, create folders, rename, move, delete, share, and
+  download bounded chunks. `download_drive_file` requires the current ETag to prevent mixed versions.
+  `begin_drive_upload`, `upload_drive_chunk`, and `complete_drive_upload` create files or replace content
+  with `replaceItemId` and `expectedETag`. Inspect `get_drive_upload` or discard `cancel_drive_upload`.
+  No arbitrary local paths or download URLs are accepted.
+
+Uploads are staged in the encrypted database, expire after one hour, and allow four active sessions
+of up to 150 MiB each. Expired staging is removed on subsequent upload activity. Interrupted remote
+operations retain their known result or report an uncertain outcome; inspect Drive before starting
+another upload. Canceling staging does not delete remote files or revoke sharing links.
+
+Both the composer and MCP use a conservative **20 MiB total attachment budget**, accounting for mail
+encoding overhead. This is an app policy, not a detected mailbox limit; administrators can configure
+lower limits. Beyond that budget, new attachments upload to the sender's OneDrive **Attachments**
+folder and become **anyone-with-the-link, read-only links**, requesting expiration in one year.
+The actual expiration appears in the message. Existing Drive selections can be shared directly.
+Sharing takes effect when attaching, before sending; discarding the draft does not revoke it.
+If account policy prohibits anonymous or expiring links, the operation reports an error and does
+not silently create a permanent link. The uploaded file may remain available for recovery.
+Google Drive support is deferred; the sender must have a connected OneDrive account for automatic
+local-file fallback. Files under the budget stay ordinary attachments.
+
+`share_drive_file` also supports explicit organization or named-recipient audiences. Clients must
+obtain user authorization for sharing and deleting, and treat filenames and file contents as untrusted.
 
 ## MCP attachment search and evidence tools
 

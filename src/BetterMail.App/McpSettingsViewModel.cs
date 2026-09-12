@@ -11,12 +11,21 @@ public sealed class McpMailboxChoice(Mailbox mailbox, bool selected) : ViewModel
     public bool IsSelected { get => _selected; set => SetProperty(ref _selected, value); }
 }
 
+public sealed class McpDriveChoice(MailAccount account, bool selected) : ViewModelBase
+{
+    private bool _selected = selected;
+    public string Id => account.ProviderId + ":" + account.AccountId;
+    public string Label => account.EmailAddress + " · " + account.ProviderId;
+    public bool IsSelected { get => _selected; set => SetProperty(ref _selected, value); }
+}
+
 public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposable
 {
     private readonly EncryptedMailStore? _store;
     private readonly Func<Task> _refreshAndSync;
     private readonly Func<ComposeSender, string, DraftMessage, Task> _queueSend;
     private readonly EvidenceService? _evidence;
+    private readonly Func<IFilesProvider?>? _filesProvider;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private McpEndpoint? _endpoint;
     private McpConfiguration _active = new();
@@ -30,12 +39,13 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
     private bool _disposed;
     private bool _initialized;
 
-    public McpSettingsViewModel(EncryptedMailStore? store, Func<Task> refreshAndSync, Func<ComposeSender, string, DraftMessage, Task> queueSend, EvidenceService? evidence = null)
+    public McpSettingsViewModel(EncryptedMailStore? store, Func<Task> refreshAndSync, Func<ComposeSender, string, DraftMessage, Task> queueSend, EvidenceService? evidence = null, Func<IFilesProvider?>? filesProvider = null)
     {
         _store = store;
         _refreshAndSync = refreshAndSync;
         _queueSend = queueSend;
         _evidence = evidence;
+        _filesProvider = filesProvider;
         ApplyCommand = new(ApplyAsync, () => IsAvailable);
         RotateKeyCommand = new(RotateKeyAsync, () => IsAvailable);
         SignInTunnelCommand = new(SignInTunnelAsync, () => IsAvailable);
@@ -53,6 +63,7 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
     public string AccessKey => _accessKey;
     public string Status { get => _status; private set => SetProperty(ref _status, value); }
     public ObservableCollection<McpMailboxChoice> Mailboxes { get; } = [];
+    public ObservableCollection<McpDriveChoice> Drives { get; } = [];
     public AsyncCommand ApplyCommand { get; }
     public AsyncCommand RotateKeyCommand { get; }
 
@@ -71,6 +82,7 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
             AllowWrites = saved.Configuration.AllowWrites;
             AllowSending = saved.Configuration.AllowSending;
             await RefreshMailboxesAsync(saved.Configuration.MailboxIds ?? []);
+            foreach (var drive in Drives) drive.IsSelected = (saved.Configuration.DriveAccountIds ?? []).Contains(drive.Id);
             await ReconfigureAsync(saved.Configuration, persist: false);
             _initialized = true;
             RaisePropertyChanged(nameof(IsAvailable));
@@ -86,6 +98,10 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
         if (_store is null || _disposed) return;
         selected ??= Mailboxes.Where(item => item.IsSelected).Select(item => item.Id).ToArray();
         var mailboxes = await _store.GetMailboxesAsync();
+        var accounts = await _store.GetAccountsAsync();
+        CollectionUpdates.Reconcile(Drives, accounts.Where(account => account.Capabilities.HasFlag(ProviderCapabilities.Files))
+            .Select(account => Drives.FirstOrDefault(choice => choice.Id == account.ProviderId + ":" + account.AccountId) ?? new(account, false)),
+            static choice => choice.Id);
         CollectionUpdates.Reconcile(Mailboxes,
             mailboxes.Select(mailbox =>
             {
@@ -97,7 +113,8 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
     }
 
     private Task ApplyAsync() => ReconfigureAsync(new(Enabled, Port, AllowWrites, AllowWrites && AllowSending,
-        Mailboxes.Where(item => item.IsSelected).Select(item => item.Id).ToArray()), persist: true);
+        Mailboxes.Where(item => item.IsSelected).Select(item => item.Id).ToArray(),
+        Drives.Where(item => item.IsSelected).Select(item => item.Id).ToArray()), persist: true);
 
     private async Task ReconfigureAsync(McpConfiguration configuration, bool persist)
     {
@@ -122,7 +139,7 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
             RaisePropertyChanged(nameof(AccessKey));
             RaisePropertyChanged(nameof(EndpointUrl));
             Volatile.Write(ref _active, configuration);
-            var tools = new McpMailTools(_store, () => Volatile.Read(ref _active), _refreshAndSync, _queueSend, _evidence);
+            var tools = new McpMailTools(_store, () => Volatile.Read(ref _active), _refreshAndSync, _queueSend, _evidence, _filesProvider);
             _endpoint = new(tools, configuration.Port, _endpointPath, () => Volatile.Read(ref _active).Enabled, () => Volatile.Read(ref _accessKey));
             await _endpoint.StartAsync();
             Status = $"Listening at {_endpoint.Address} · {configuration.MailboxIds?.Length ?? 0} allowed mailboxes";

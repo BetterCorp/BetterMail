@@ -67,7 +67,16 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
-              <ToggleSwitch Content="Allow creating drafts, moving mail and deleting drafts" IsChecked="{Binding AllowWrites}" />
+              <TextBlock Text="Allowed Drive accounts" FontWeight="SemiBold" />
+              <TextBlock Text="Select accounts whose files MCP may access. Drive uploads, edits, deletion and sharing also require edit permission." TextWrapping="Wrap" Opacity="0.7" />
+              <ItemsControl ItemsSource="{Binding Drives}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="app:McpDriveChoice">
+                    <CheckBox IsChecked="{Binding IsSelected}"><TextBlock Text="{Binding Label}" TextWrapping="Wrap" /></CheckBox>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <ToggleSwitch Content="Allow draft/attachment edits, mail moves, and Drive changes" IsChecked="{Binding AllowWrites}" />
               <ToggleSwitch Content="Also allow sending saved drafts" IsChecked="{Binding AllowSending}" IsEnabled="{Binding AllowWrites}" />
               <TextBlock Text="Sending uses the Busy queue and retries on the next sync. With both permissions off, clients can only read cached mail." TextWrapping="Wrap" Opacity="0.7" />
               <Button Classes="primary" Content="Apply MCP settings" Command="{Binding ApplyCommand}" />
@@ -472,6 +481,24 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
+          <Border Classes="settingsCard">
+            <StackPanel Spacing="8">
+              <TextBlock Text="People images" FontWeight="SemiBold" />
+              <ToggleSwitch Content="Load external contact images" IsChecked="{Binding ContactImagesEnabled}"
+                            AutomationProperties.Name="Load external contact images" />
+              <TextBlock Text="Optional. Looks up BIMI logos, Gravatar photos and domain favicons. These services and image hosts can see your IP address and request timing; Gravatar receives a hash of the email address. Off by default. Turning it off stops image loads and removes displayed contact artwork."
+                         TextWrapping="Wrap" Opacity="0.7" />
+            </StackPanel>
+          </Border>
+          <Border Classes="settingsCard">
+            <StackPanel Spacing="8">
+              <TextBlock Text="Mail images" FontWeight="SemiBold" />
+              <ToggleSwitch Content="Show sender images in mail" IsChecked="{Binding MailSenderImagesEnabled}"
+                            AutomationProperties.Name="Show sender images in mail" />
+              <TextBlock Text="Off by default and separate from People images. Shows images in the message list and headers. Shared email services use Gravatar only; business domains also try BIMI and favicons. External services can see your IP address and request timing; Gravatar receives an email hash. Images are visual cues, not identity verification. Turning this off cancels mail image loads and hides sender images."
+                         TextWrapping="Wrap" Opacity="0.7" />
+            </StackPanel>
+          </Border>
           <ItemsControl ItemsSource="{Binding SettingsAccounts}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="app:AccountSettingsItem">

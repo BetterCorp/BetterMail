@@ -53,9 +53,138 @@ internal static class Program
         var previewMessages = vm.Messages.ToArray();
         // Inbox overview: no native message web view is opened in this Linux capture.
         vm.SelectedMessage = null;
-        var window = new MainWindow { DataContext = vm, Width = 1440, Height = 960, WindowDecorations = WindowDecorations.None, Position = new PixelPoint(0, 0) };
+        var window = new MainWindow { DataContext = vm, Width = 1440, Height = 960, WindowDecorations = WindowDecorations.None, WindowStartupLocation = WindowStartupLocation.Manual, Position = new PixelPoint(0, 0) };
         window.Show();
+        await CheckImageConsentAsync();
+        window.Activate();
         await Shot("mail-light");
+        var searchOptions = new SearchOptionsWindow("budget type:mail account:{alex@work.example} in:{Inbox/Projects} date:{>=2026-09-01}", _ => { })
+        { WindowDecorations = WindowDecorations.None, WindowStartupLocation = WindowStartupLocation.Manual, Position = new PixelPoint(0, 0) };
+        searchOptions.Show();
+        await Shot("search-options-light", searchOptions);
+        Application.Current!.RequestedThemeVariant = ThemeVariant.Dark;
+        await Shot("search-options-dark", searchOptions);
+        searchOptions.FindControl<SelectableTextBlock>("SyntaxHelp")!.BringIntoView();
+        await Shot("search-syntax-dark", searchOptions);
+        searchOptions.Close();
+        Application.Current!.RequestedThemeVariant = ThemeVariant.Light;
+        var query = SearchQuery.Parse("type:mail account:{alex@work.example} in:Inbox");
+        vm.SearchText = query.Serialize();
+        typeof(MainWindowViewModel).GetField("_latestMailQuery", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(vm, query);
+        typeof(MainWindowViewModel).GetMethod("ShowMailSearchResults", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(vm, [null, previewMessages]);
+        await Shot("mail-search-context-light");
+        typeof(MainWindowViewModel).GetProperty("IsSearchResultsView")!.SetValue(vm, false);
+        vm.SearchText = "";
+        vm.BusyActions.Add(new MailAction("preview-move", account.AccountId, mailbox.Id, previewMessages[0].ProviderId,
+            MailActionKind.Move, previewMessages[0].Subject, DateTimeOffset.Now, previewMessages[0].ProviderId, "archive", "Archive"));
+        typeof(MainWindowViewModel).GetMethod("MailActionStateChanged", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(vm, null);
+        await Shot("mail-row-action-light");
+        var actionRows = window.FindControl<ListBox>("MessageList")!;
+        var busyRow = (Control)actionRows.ContainerFromIndex(0)!;
+        var idleRow = (Control)actionRows.ContainerFromIndex(1)!;
+        if (busyRow.GetVisualDescendants().OfType<Border>().Single(border => border.Classes.Contains("quickActions")).IsEnabled ||
+            !idleRow.GetVisualDescendants().OfType<Border>().Single(border => border.Classes.Contains("quickActions")).IsEnabled ||
+            !busyRow.GetVisualDescendants().OfType<ProgressBar>().Any(progress => progress.IsVisible))
+            throw new InvalidOperationException("Pending action did not disable only its own quick actions and show row progress.");
+        vm.BusyActions.Clear();
+        typeof(MainWindowViewModel).GetMethod("MailActionStateChanged", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(vm, null);
+        vm.SelectedMessage = null;
+        var senderImages = window.FindControl<ListBox>("MessageList")!.GetVisualDescendants().OfType<AsyncImage>().ToArray();
+        if (senderImages.Length == 0 || senderImages.Any(i => i.AllowLoading || i.IsVisible))
+            throw new InvalidOperationException("Mail images must start hidden with loading disabled.");
+        vm.MailSenderImagesEnabled = true;
+        await Task.Delay(200);
+        if (senderImages.Any(i => !i.AllowLoading || !i.IsVisible || i.Request?.Key != "contact:hello@studio.example"))
+            throw new InvalidOperationException("Mail sender binding did not enable the expected image request.");
+        foreach (var senderImage in senderImages)
+            senderImage.Request = new("mail-preview-photo", _ => Task.FromResult<byte[]?>(PreviewProvider.SampleThumbnail()));
+        await Shot("mail-sender-images-light");
+        vm.MailSenderImagesEnabled = false;
+        if (senderImages.Any(i => i.AllowLoading || i.IsVisible || i.GetVisualDescendants().OfType<Image>().Single().Source is not null))
+            throw new InvalidOperationException("Mail images remained visible or enabled after disabling the setting.");
+        Console.WriteLine("Mail sender image binding and disable checks passed.");
+        var list = window.FindControl<ListBox>("MessageList")!;
+        async Task ClickRow(int index, string modifier)
+        {
+            var row = (Control)list.ContainerFromIndex(index)!;
+            var point = row.PointToScreen(new Point(50, row.Bounds.Height / 2));
+            await Input(modifier, "click", ((int)point.X).ToString(), ((int)point.Y).ToString());
+        }
+        await ClickRow(0, "none");
+        await ClickRow(2, "Control_L");
+        if (vm.SelectedMessages.Count != 2) throw new InvalidOperationException($"Ctrl-click selected {vm.SelectedMessages.Count}, expected 2.");
+        await ClickRow(4, "Shift_L");
+        if (vm.SelectedMessages.Count < 3) throw new InvalidOperationException("Shift-click did not select a range.");
+        await Input("Control_L", "a");
+        if (vm.SelectedMessages.Count != previewMessages.Length) throw new InvalidOperationException($"Ctrl+A selected {vm.SelectedMessages.Count}, expected {previewMessages.Length}.");
+        vm.Messages[1] = vm.Messages[1] with { IsRead = true, IsFlagged = true };
+        if (vm.SelectedMessages.Count != previewMessages.Length || list.SelectedItems!.Count != previewMessages.Length)
+            throw new InvalidOperationException("A message metadata refresh collapsed multi-selection.");
+        await Shot("mail-multiselect-light");
+        var moveFolders = folders.Concat(new[]
+        {
+            new MailFolderItem(new(mailbox.Id, "projects", "Projects", 0, 0, ParentProviderId: "inbox"), mailbox.DisplayName),
+            new MailFolderItem(new(mailbox.Id, "launch", "Autumn launch", 0, 0, ParentProviderId: "projects"), mailbox.DisplayName),
+            new MailFolderItem(new("studio:alex@studio.example", "inbox", "Inbox", 0, 0), "Studio"),
+            new MailFolderItem(new("studio:alex@studio.example", "archive", "Archive", 0, 0), "Studio")
+        }).ToArray();
+        var move = new MailMoveWindow(moveFolders, previewMessages.Length,
+            folder => folder.MailboxId == mailbox.Id);
+        var moveResult = move.ChooseAsync(window);
+        move.Position = new PixelPoint(0, 0);
+        await Task.Delay(200);
+        var tree = move.FindControl<TreeView>("FoldersTree")!;
+        if (tree.Items.Count != 1) throw new InvalidOperationException("Move browser must hide other mailboxes.");
+        var accountRoot = (TreeViewItem)tree.Items[0]!;
+        var inboxNode = accountRoot.Items.Cast<TreeViewItem>().Single(item => (string)item.Header! == "Inbox");
+        inboxNode.IsExpanded = true;
+        var projectsNode = (TreeViewItem)inboxNode.Items[0]!;
+        projectsNode.IsExpanded = true;
+        tree.SelectedItem = inboxNode;
+        if (!move.FindControl<Button>("MoveButton")!.IsEnabled) throw new InvalidOperationException("Move should allow the current folder and skip no-op messages.");
+        tree.SelectedItem = projectsNode.Items[0];
+        if (!move.FindControl<Button>("MoveButton")!.IsEnabled ||
+            !move.FindControl<TextBlock>("DestinationPath")!.Text!.EndsWith("Inbox / Projects / Autumn launch"))
+            throw new InvalidOperationException("Nested destination could not be selected.");
+        await Shot("mail-move-browser-light", move);
+        Application.Current!.RequestedThemeVariant = ThemeVariant.Dark;
+        await Shot("mail-move-browser-dark", move);
+        move.Close();
+        if (await moveResult is not null) throw new InvalidOperationException("Closing Move should cancel.");
+        Application.Current!.RequestedThemeVariant = ThemeVariant.Light;
+        Console.WriteLine("Move browser nesting, validation and cancellation checks passed.");
+        vm.MailSenderImagesEnabled = true;
+        await Task.Delay(200);
+        var threadView = window.GetVisualDescendants().OfType<ConversationThreadView>().Single();
+        var headerImages = threadView.GetVisualDescendants().OfType<AsyncImage>().ToArray();
+        if (!threadView.ShowSenderImages || headerImages.Length == 0 || headerImages.Any(i => !i.AllowLoading || !i.IsVisible))
+            throw new InvalidOperationException("Conversation sender images did not follow the mail setting.");
+        var headerScroll = threadView.FindControl<ScrollViewer>("ThreadHeaderScroll")!;
+        var headerItems = Enumerable.Range(0, 8).Select(index => previewMessages[0] with { ProviderId = "header-" + index, ConversationId = "headers", Subject = "Review", ReceivedAt = PreviewProvider.Today.AddMinutes(index) }).ToArray();
+        vm.ConversationThread.Reconcile(headerItems, headerItems[4]);
+        await Task.Delay(300);
+        headerScroll.Offset = new Vector(0, 80);
+        var beforeOffset = headerScroll.Offset;
+        vm.ConversationThread.Reconcile(headerItems.Select(item => item with { IsRead = true }));
+        await Task.Delay(300);
+        if (vm.ConversationThread.SelectedMessage?.Message.ProviderId != "header-4" || Math.Abs(headerScroll.Offset.Y - beforeOffset.Y) > 1)
+            throw new InvalidOperationException("Background reconciliation changed thread position.");
+        var addressText = headerScroll.GetVisualDescendants().OfType<SelectableTextBlock>().First(block => block.Text == "hello@studio.example");
+        addressText.BringIntoView();
+        await Task.Delay(300);
+        var startText = addressText.PointToScreen(new Point(2, addressText.Bounds.Height / 2));
+        await Input("none", "drag", ((int)startText.X).ToString(), ((int)startText.Y).ToString(), ((int)startText.X + 95).ToString(), ((int)startText.Y).ToString());
+        if (addressText.SelectionStart == addressText.SelectionEnd) throw new InvalidOperationException("Could not select sender address text with the pointer.");
+        await Shot("thread-selectable-addresses-light");
+        Console.WriteLine("Native address selection and thread scroll/selection preservation checks passed.");
+        headerImages = threadView.GetVisualDescendants().OfType<AsyncImage>().ToArray();
+        vm.MailSenderImagesEnabled = false;
+        if (threadView.ShowSenderImages || headerImages.Any(i => i.AllowLoading || i.IsVisible))
+            throw new InvalidOperationException("Conversation sender images remained enabled.");
+        Console.WriteLine("Conversation sender image toggle checks passed.");
+        list.SelectedItems!.Clear();
+        vm.SelectedMessage = null;
+        Console.WriteLine("Native Ctrl-click, Shift-click and Ctrl+A checks passed.");
         Application.Current!.RequestedThemeVariant = ThemeVariant.Dark;
         vm.ConversationThread.RefreshTheme();
         await Shot("mail-dark");
@@ -91,6 +220,7 @@ internal static class Program
                 // Keep the navigation overview visible without requiring an embedded Linux web engine.
                 _ = page;
             }
+            if (name == "files") await ((AsyncCommand)vm.DriveWorkspace!.GridViewCommand).ExecuteAsync();
             await Shot(name + "-light");
             if (name == "files")
             {
@@ -99,8 +229,22 @@ internal static class Program
                 await Shot("drive-new-folder-light");
                 button.Flyout.Hide();
             }
+            if (name == "people")
+            {
+                vm.PeopleCardView = true;
+                await Shot("people-cards-light");
+                if (!window.FindControl<ListBox>("PeopleBoxes")!.IsVisible || window.FindControl<ListBox>("PeopleCards")!.IsVisible)
+                    throw new InvalidOperationException("People card view did not switch.");
+                vm.PeopleCardView = false;
+            }
             Application.Current.RequestedThemeVariant = ThemeVariant.Dark;
             await Shot(name + "-dark");
+            if (name == "people")
+            {
+                vm.PeopleCardView = true;
+                await Shot("people-cards-dark");
+                vm.PeopleCardView = false;
+            }
             Application.Current.RequestedThemeVariant = ThemeVariant.Light;
         }
         window.Width = 1024;
@@ -117,17 +261,81 @@ internal static class Program
         foreach (var message in previewMessages) vm.Messages.Add(message);
         await Shot("mail-phone");
         window.Close();
+        var attachment = new FilePreviewWindow("Meeting notes.txt", "text/plain", 0,
+            System.Text.Encoding.UTF8.GetBytes("Design review\n\nThursday, 10:00\n\nDiscuss the autumn launch and agree on next steps."),
+            provider, vm.Accounts.ToArray())
+        { WindowDecorations = WindowDecorations.None, WindowStartupLocation = WindowStartupLocation.Manual, Position = new PixelPoint(0, 0) };
+        attachment.Show();
+        await Shot("attachment-preview-light", attachment);
+        attachment.Close();
+        var save = new AttachmentDriveSaveWindow(new AttachmentDriveSaveViewModel(
+            provider, vm.Accounts.ToArray(), "Meeting notes.txt", "text/plain", []))
+        { WindowDecorations = WindowDecorations.None, WindowStartupLocation = WindowStartupLocation.Manual, Position = new PixelPoint(0, 0) };
+        save.Show();
+        await Shot("attachment-save-drive-light", save);
+        Application.Current.RequestedThemeVariant = ThemeVariant.Dark;
+        await Shot("attachment-save-drive-dark", save);
+        save.Close();
         Directory.Delete(directory, true);
 
-        async Task Shot(string name)
+        async Task Input(params string[] input)
         {
+            var info = new ProcessStartInfo("python3");
+            info.ArgumentList.Add("tools/BetterMail.UiPreview/input.py");
+            foreach (var part in input) info.ArgumentList.Add(part);
+            using var process = Process.Start(info)!;
+            await process.WaitForExitAsync();
+            if (process.ExitCode != 0) throw new InvalidOperationException("Input injection failed.");
+            await Task.Delay(300);
+        }
+
+        async Task Shot(string name, Window? target = null)
+        {
+            target ??= window;
             await Task.Delay(1800);
-            var process = Process.Start(new ProcessStartInfo("python3") { ArgumentList = { "tools/BetterMail.UiPreview/capture.py", Path.Combine(output, name + ".png"), ((int)window.Width).ToString(), ((int)window.Height).ToString() } })!;
+            var process = Process.Start(new ProcessStartInfo("python3") { ArgumentList = { "tools/BetterMail.UiPreview/capture.py", Path.Combine(output, name + ".png"), ((int)target.Width).ToString(), ((int)target.Height).ToString() } })!;
             await process.WaitForExitAsync();
             if (process.ExitCode != 0) throw new InvalidOperationException("Screenshot capture failed.");
             Console.WriteLine(name);
         }
     }
+    private static async Task CheckImageConsentAsync()
+    {
+        var calls = 0;
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var canceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var image = new AsyncImage { Width = 64, Height = 64, Request = new("consent-test-" + Guid.NewGuid(), async token =>
+        {
+            Interlocked.Increment(ref calls);
+            entered.TrySetResult();
+            try { await Task.Delay(Timeout.Infinite, token); }
+            catch (OperationCanceledException) { canceled.TrySetResult(); throw; }
+            return null;
+        }) };
+        var host = new Window { Width = 100, Height = 100, Content = image };
+        host.Show();
+        await Task.Delay(200);
+        if (calls != 0) throw new InvalidOperationException("Image requested before consent.");
+        image.AllowLoading = true;
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        image.AllowLoading = false;
+        await canceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        image.Request = new("consent-cached-test-" + Guid.NewGuid(), _ =>
+        {
+            Interlocked.Increment(ref calls);
+            return Task.FromResult<byte[]?>(PreviewProvider.SampleThumbnail());
+        });
+        await Task.Delay(100);
+        if (calls != 1) throw new InvalidOperationException("Image requested after consent revoked.");
+        image.AllowLoading = true;
+        for (var i = 0; i < 50 && image.GetVisualDescendants().OfType<Image>().Single().Source is null; i++) await Task.Delay(100);
+        if (image.GetVisualDescendants().OfType<Image>().Single().Source is null) throw new InvalidOperationException("Consented image did not load.");
+        image.AllowLoading = false;
+        if (image.GetVisualDescendants().OfType<Image>().Single().Source is not null) throw new InvalidOperationException("Revoked artwork remained visible.");
+        host.Close();
+        Console.WriteLine("Image consent default, cancellation and removal checks passed.");
+    }
+
     private static IEnumerable<NoteTreeNode> Descendants(IEnumerable<NoteTreeNode> nodes) => nodes.SelectMany(n => new[] { n }.Concat(Descendants(n.Children)));
 }
 
@@ -148,7 +356,8 @@ public class PreviewProvider : DispatchProxy
             "GetTaskListsAsync" => new TaskListInfo[] { new("launch", "Autumn launch", account.AccountId), new("personal", "My day", account.AccountId) },
             "GetTasksAsync" when args!.OfType<TaskListInfo>().FirstOrDefault()?.ProviderId == "personal" => Array.Empty<TaskInfo>(),
             "GetTasksAsync" => new TaskInfo[] { new("brief", "launch", "Review the creative brief", Today, false, account.AccountId), new("research", "launch", "Share customer research", Today.AddDays(1), false, account.AccountId), new("plan", "launch", "Finalize the launch checklist", Today.AddDays(2), false, account.AccountId), new("done", "launch", "Set up the project workspace", Today, true, account.AccountId) },
-            "GetDriveItemsAsync" => new CloudDriveItem[] { new("folder", "Autumn launch", 0, true, null, null, account.AccountId, account.ProviderId), new("brief", "Creative brief.pdf", 284000, false, null, null, account.AccountId, account.ProviderId), new("research", "Customer research.docx", 128000, false, null, null, account.AccountId, account.ProviderId), new("budget", "Launch budget.xlsx", 64000, false, null, null, account.AccountId, account.ProviderId) },
+            "GetThumbnailAsync" => SampleThumbnail(),
+            "GetDriveItemsAsync" => new CloudDriveItem[] { new("landscape", "Mountain lake.jpg", 284000, false, null, null, account.AccountId, account.ProviderId, "image/jpeg"), new("poster", "Launch artwork.png", 128000, false, null, null, account.AccountId, account.ProviderId, "image/png"), new("folder", "Autumn launch", 0, true, null, null, account.AccountId, account.ProviderId), new("brief", "Creative brief.pdf", 284000, false, null, null, account.AccountId, account.ProviderId), new("research", "Customer research.docx", 128000, false, null, null, account.AccountId, account.ProviderId), new("budget", "Launch budget.xlsx", 64000, false, null, null, account.AccountId, account.ProviderId) },
             "GetNotebooksAsync" => new NoteNotebook[] { new("notebook", "Studio notebook", account.AccountId, account.ProviderId) },
             "GetSectionsAsync" => new NoteSection[] { new("ideas", "notebook", "Ideas & planning", account.AccountId, account.ProviderId) },
             "GetPagesAsync" => new NotePage[] { new("page", "ideas", "A thoughtful workspace", Today.AddHours(9), 0, 0, account.AccountId, account.ProviderId), new("meeting", "ideas", "Design review notes", Today, 1, 0, account.AccountId, account.ProviderId) },
@@ -156,6 +365,20 @@ public class PreviewProvider : DispatchProxy
             _ => Empty(m.ReturnType.GenericTypeArguments[0])
         };
         return typeof(Task).GetMethod(nameof(Task.FromResult))!.MakeGenericMethod(m.ReturnType.GenericTypeArguments[0]).Invoke(null, [value]);
+    }
+    public static byte[] SampleThumbnail()
+    {
+        using var surface = SkiaSharp.SKSurface.Create(new SkiaSharp.SKImageInfo(128, 128));
+        var canvas = surface.Canvas;
+        canvas.Clear(SkiaSharp.SKColor.Parse("#C8DEE8"));
+        using var paint = new SkiaSharp.SKPaint { Color = SkiaSharp.SKColor.Parse("#6D8F88"), IsAntialias = true };
+        using var mountain = new SkiaSharp.SKPath();
+        mountain.MoveTo(0, 90); mountain.LineTo(45, 32); mountain.LineTo(92, 90); mountain.Close();
+        canvas.DrawPath(mountain, paint);
+        paint.Color = SkiaSharp.SKColor.Parse("#548399"); canvas.DrawRect(0, 90, 128, 38, paint);
+        using var image = surface.Snapshot();
+        using var png = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 90);
+        return png.ToArray();
     }
     private static object Empty(Type type) => type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IReadOnlyList<>) ? Array.CreateInstance(type.GenericTypeArguments[0], 0) : throw new NotSupportedException(type.Name);
 }

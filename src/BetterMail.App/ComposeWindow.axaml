@@ -29,14 +29,14 @@
     </Style>
   </Window.Styles>
   <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto" Margin="18">
-    <Grid ColumnDefinitions="80,*" Margin="0,0,0,10" IsEnabled="{Binding !IsSending}">
+    <Grid ColumnDefinitions="80,*" Margin="0,0,0,10" IsEnabled="{Binding CanChangeAttachments}">
       <TextBlock Text="From" VerticalAlignment="Center" Opacity="0.7" />
       <ComboBox Grid.Column="1" Classes="composeHeader" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                 ItemsSource="{Binding Senders}" SelectedItem="{Binding SelectedSender}" AutomationProperties.Name="From">
         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding DisplayName}" TextWrapping="Wrap" /></DataTemplate></ComboBox.ItemTemplate>
       </ComboBox>
     </Grid>
-    <ItemsControl Grid.Row="1" ItemsSource="{Binding RecipientFields}" IsEnabled="{Binding !IsSending}">
+    <ItemsControl Grid.Row="1" ItemsSource="{Binding RecipientFields}" IsEnabled="{Binding CanChangeAttachments}">
       <ItemsControl.ItemTemplate>
         <DataTemplate>
           <Grid ColumnDefinitions="80,*" Margin="0,0,0,8">
@@ -91,12 +91,12 @@
         </DataTemplate>
       </ItemsControl.ItemTemplate>
     </ItemsControl>
-    <Grid Grid.Row="2" ColumnDefinitions="80,*" Margin="0,0,0,10" IsEnabled="{Binding !IsSending}">
+    <Grid Grid.Row="2" ColumnDefinitions="80,*" Margin="0,0,0,10" IsEnabled="{Binding CanChangeAttachments}">
       <TextBlock Text="Subject" VerticalAlignment="Center" Opacity="0.7" />
       <TextBox Grid.Column="1" Classes="composeHeader" Text="{Binding Subject}" VerticalContentAlignment="Center" AutomationProperties.Name="Subject" />
     </Grid>
 
-    <Grid Grid.Row="3" ColumnDefinitions="Auto,Auto,*" RowDefinitions="Auto,Auto" Margin="0,0,0,10" IsEnabled="{Binding !IsSending}">
+    <Grid Grid.Row="3" ColumnDefinitions="Auto,Auto,*" RowDefinitions="Auto,Auto" Margin="0,0,0,10" IsEnabled="{Binding CanChangeAttachments}">
       <Button Content="Attach file" Click="AttachFileClicked" Padding="12,7" />
       <Button Grid.Column="1" Content="Attach from Drive" Click="AttachDriveClicked" Margin="6,0,0,0" Padding="12,7" />
       <Button Grid.Column="2" Content="Mail options" HorizontalAlignment="Right" Padding="12,7">
@@ -141,12 +141,14 @@
 
     <Grid Grid.Row="5" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,14,0,0">
       <StackPanel VerticalAlignment="Center">
+        <TextBlock Text="Above 20 MiB total: Drive link, readable by anyone with the link; expires within one year." TextWrapping="Wrap" FontSize="11" Opacity="0.7" />
+        <TextBlock Text="Uploading attachment…" IsVisible="{Binding IsUploadingAttachment}" FontSize="11" />
         <TextBlock Text="{Binding DraftStatus}" FontSize="11" Opacity="0.6" />
       </StackPanel>
-      <Button Grid.Column="1" Classes="command" Content="Delete draft" Command="{Binding DeleteCommand}" IsEnabled="{Binding !IsSending}" />
-      <Button Grid.Column="2" Content="Cancel" Click="CancelClicked" Margin="8,0" IsEnabled="{Binding !IsSending}" />
+      <Button Grid.Column="1" Classes="command" Content="Delete draft" Command="{Binding DeleteCommand}" IsEnabled="{Binding CanChangeAttachments}" />
+      <Button Grid.Column="2" Content="Cancel" Click="CancelClicked" Margin="8,0" IsEnabled="{Binding CanChangeAttachments}" />
       <Button Grid.Column="3" Classes="primary" Click="SendClicked"
-              IsEnabled="{Binding !IsSending}" AutomationProperties.Name="Send message">
+              IsEnabled="{Binding CanChangeAttachments}" AutomationProperties.Name="Send message">
         <Grid MinWidth="52">
           <TextBlock Text="Send" HorizontalAlignment="Center" IsVisible="{Binding !IsSending}" />
           <StackPanel Orientation="Horizontal" Spacing="7" HorizontalAlignment="Center" IsVisible="{Binding IsSending}">

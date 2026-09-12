@@ -6,6 +6,121 @@ namespace BetterMail.Tests;
 
 public sealed class EncryptedMailStoreTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedMoveWithFollowUpRestoresSourceAcrossSyncAndRecovery(bool cancelFollowUp)
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-failed-move-chain-" + Guid.NewGuid());
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "account", "tenant", "alex@work.example", "Alex", ProviderCapabilities.Mail);
+            var message = Message("account:alex@work.example", "original", "Test", "Body");
+            await store.ApplySyncPageAsync("seed", new([message], null, false), token);
+            var archive = new MailFolder(message.MailboxId, "archive", "Archive", 0, 0);
+            var first = await store.QueueMoveAsync(account, message, archive, token);
+            first = (await store.StartMailActionAsync(first.Id, token))!;
+            var followUp = await store.QueueMoveAsync(account, message with { FolderId = "archive" }, archive with { ProviderId = "done" }, token);
+            await store.FailMailActionAsync(first.Id, "Offline", token);
+            Assert.Equal(message.FolderId, (await store.GetMessageAsync(message.MailboxId, message.ProviderId, token))!.FolderId);
+            Assert.Equal(2, (await store.GetMailActionsAsync(token)).Count);
+            await store.ApplySyncPageAsync("refresh", new([message], null, false), token);
+            Assert.Equal(message.FolderId, (await store.GetMessageAsync(message.MailboxId, message.ProviderId, token))!.FolderId);
+            if (cancelFollowUp)
+            {
+                Assert.True(await store.CancelMailActionAsync(followUp.Id, token));
+                Assert.Equal(message.FolderId, (await store.GetMessageAsync(message.MailboxId, message.ProviderId, token))!.FolderId);
+            }
+            else
+            {
+                first = (await store.StartMailActionAsync(first.Id, token))!;
+                await store.CompleteMoveAsync(first, message with { ProviderId = "moved", FolderId = "archive" }, token);
+                var pending = Assert.Single(await store.GetMailActionsAsync(token));
+                Assert.Equal(followUp.Id, pending.Id);
+                Assert.Equal("archive", pending.SourceFolderId);
+                Assert.Equal("moved", pending.ProviderId);
+                Assert.Equal("done", (await store.GetMessageAsync(message.MailboxId, "moved", token))!.FolderId);
+            }
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task PendingActionsCoalesceAndFollowMovedProviderIdsWithoutLosingNewerState()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-action-state-" + Guid.NewGuid());
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "account", "tenant", "alex@work.example", "Alex", ProviderCapabilities.Mail);
+            var message = Message("account:alex@work.example", "original", "Test", "Body");
+            await store.ApplySyncPageAsync("seed", new([message], null, false), token);
+            var archive = new MailFolder(message.MailboxId, "archive", "Archive", 0, 0);
+            var move = await store.QueueMoveAsync(account, message, archive, token);
+            Assert.Equal(move.Id, (await store.QueueMoveAsync(account, message, archive, token)).Id);
+            var done = archive with { ProviderId = "done", DisplayName = "Done" };
+            Assert.Equal(move.Id, (await store.QueueMoveAsync(account, message, done, token)).Id);
+            Assert.Single(await store.GetMailActionsAsync(token));
+            move = (await store.StartMailActionAsync(move.Id, token))!;
+            var state = await store.QueueMessageStateAsync(account, message, isRead: false, isFlagged: true, cancellationToken: token);
+            await store.ApplySyncPageAsync("stale-during-move", new([message with { IsRead = true }], null, false), token);
+            Assert.False((await store.GetMessageAsync(message.MailboxId, message.ProviderId, token))!.IsRead);
+            await store.CompleteMoveAsync(move, message with { ProviderId = "moved", FolderId = "done" }, token);
+            state = (await store.GetMailActionAsync(state.Id, token))!;
+            Assert.Equal("moved", state.ProviderId);
+            var running = (await store.StartMailActionAsync(state.Id, token))!;
+            var current = (await store.GetMessageAsync(message.MailboxId, "moved", token))!;
+            var newer = await store.QueueMessageStateAsync(account, current, isFlagged: false, cancellationToken: token);
+            await store.CompleteMessageStateAsync(running, token);
+            Assert.False((await store.GetMessageAsync(message.MailboxId, "moved", token))!.IsFlagged);
+            await store.ApplySyncPageAsync("stale", new([current with { IsFlagged = true }], null, false), token);
+            Assert.False((await store.GetMessageAsync(message.MailboxId, "moved", token))!.IsFlagged);
+            await store.CompleteMessageStateAsync(newer, token);
+            Assert.DoesNotContain(await store.GetMailActionsAsync(token), action => action.Kind == MailActionKind.UpdateState);
+            var failed = await store.QueueMoveAsync(account, current, archive, token);
+            await store.StartMailActionAsync(failed.Id, token);
+            await store.FailMailActionAsync(failed.Id, "Offline", token);
+            Assert.Equal("done", (await store.GetMessageAsync(message.MailboxId, "moved", token))!.FolderId);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConfirmedSentCleanupProtectsEditsAndPreventsResurrection(bool editDuringCheck)
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-sent-cleanup-" + Guid.NewGuid());
+        var key = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), key);
+            await store.InitializeAsync(token);
+            var baseline = DateTimeOffset.UtcNow;
+            var draft = new LocalDraft("local", "account", "mailbox", "to@example.com", "", "", "Draft", "Body", [], baseline,
+                ProviderDraftId: "remote", SyncedLocalUpdatedAt: baseline);
+            await store.SaveLocalDraftAsync(draft, token);
+            if (editDuringCheck) await store.SaveLocalDraftAsync(draft with { Body = "New local edit", UpdatedAt = baseline.AddSeconds(1) }, token);
+            Assert.Equal(!editDuringCheck, await store.TryRemoveConfirmedSentDraftAsync(draft, token));
+            if (editDuringCheck)
+                Assert.Equal("New local edit", (await store.GetLocalDraftAsync(draft.Id, token))!.Body);
+            else
+            {
+                await store.SaveLocalDraftAsync(draft, token);
+                await store.SaveLocalDraftAsync(draft with { Id = "late-import" }, token);
+                Assert.Empty(await store.GetLocalDraftsAsync(token));
+                Assert.Empty(await store.GetMailActionsAsync(token));
+            }
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
     [Fact]
     public async Task CancellingPendingActionsRestoresLocalItemsAndPreventsClaimingThem()
     {

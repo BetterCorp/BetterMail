@@ -1,0 +1,21 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="BetterMail.App.MailMoveWindow" Title="Move messages"
+        Icon="/Assets/BetterMail.ico" Width="540" Height="580" MinWidth="360" MinHeight="380"
+        WindowStartupLocation="CenterOwner">
+  <Grid Margin="20" RowDefinitions="Auto,Auto,*,Auto,Auto" RowSpacing="12">
+    <TextBlock x:Name="Heading" FontSize="18" FontWeight="SemiBold" Text="Move messages" />
+    <TextBlock Grid.Row="1" Text="Choose a destination folder" Opacity="0.7" />
+    <Border Grid.Row="2" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1" CornerRadius="6">
+      <TreeView x:Name="FoldersTree" SelectionChanged="FolderSelected" AutomationProperties.Name="Destination folders" />
+    </Border>
+    <StackPanel Grid.Row="3" Spacing="6">
+      <TextBlock x:Name="DestinationPath" Text="Select a folder" TextWrapping="Wrap" FontWeight="SemiBold" />
+      <TextBlock x:Name="SelectionHelp" TextWrapping="Wrap" Opacity="0.7" />
+    </StackPanel>
+    <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button Content="Cancel" IsCancel="True" Click="CancelClicked" />
+      <Button x:Name="MoveButton" Classes="primary" Content="Move" IsEnabled="False" IsDefault="True" Click="MoveClicked" />
+    </StackPanel>
+  </Grid>
+</Window>

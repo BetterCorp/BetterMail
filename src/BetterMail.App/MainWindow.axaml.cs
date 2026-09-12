@@ -31,6 +31,7 @@ public sealed partial class MainWindow : Window
     private CalendarWorkspaceViewModel? _subscribedCalendarWorkspace;
     private bool _isClosing;
     private bool _preservingMessageSelection;
+    private bool _updatingMessageSelection;
 
     private void EditPersonClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
@@ -53,7 +54,7 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         DataContextChanged += (_, _) => BindViewModel(DataContext as MainWindowViewModel);
-        SizeChanged += (_, args) => ApplyResponsiveLayout(args.NewSize.Width);
+        SizeChanged += (_, args) => { ApplyResponsiveLayout(args.NewSize.Width); _viewModel?.SetPeopleViewportWidth(args.NewSize.Width - 110); };
         KeyDown += MainWindowKeyDown;
         MessageList.AddHandler(ScrollViewer.ScrollChangedEvent, MessageListScrollChanged);
         Closing += (_, _) =>
@@ -256,11 +257,13 @@ public sealed partial class MainWindow : Window
 
     private void MessageListPointerReleased(object? sender, PointerReleasedEventArgs args)
     {
-        if (!PreservesMultiSelection(args.KeyModifiers) && MessageFrom(args.Source) is { } message)
+        if (!IsButtonSource(args.Source) && !PreservesMultiSelection(args.KeyModifiers) && MessageFrom(args.Source) is { } message)
         {
             SelectMessage(message);
         }
-        ShowPhoneMessage();
+        if (MessageList.SelectedItems?.Count == 0 && _viewModel is not null)
+            _viewModel.SelectedMessage = null;
+        if (MessageList.SelectedItems?.Count == 1) ShowPhoneMessage();
     }
 
     private void MessageSelectionChanged(object? sender, SelectionChangedEventArgs args)
@@ -269,9 +272,30 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
-        _viewModel?.SetSelectedMessages(
-            MessageList.SelectedItems?.OfType<MailMessage>() ?? [],
-            args.AddedItems.OfType<MailMessage>().LastOrDefault());
+        // A sync/read-state refresh replaces immutable message records. Keep the
+        // selected identities even when ListBox reports the old record removed.
+        if (_viewModel is not null && MessageList.SelectedItems is { } selection)
+        {
+            _preservingMessageSelection = true;
+            try
+            {
+                foreach (var old in args.RemovedItems.OfType<MailMessage>())
+                {
+                    var replacement = _viewModel.Messages.FirstOrDefault(message =>
+                        message.MailboxId == old.MailboxId && message.ProviderId == old.ProviderId && !ReferenceEquals(message, old));
+                    if (replacement is not null && !selection.Contains(replacement)) selection.Add(replacement);
+                }
+            }
+            finally { _preservingMessageSelection = false; }
+        }
+        _updatingMessageSelection = true;
+        try
+        {
+            _viewModel?.SetSelectedMessages(
+                MessageList.SelectedItems?.OfType<MailMessage>() ?? [],
+                args.AddedItems.OfType<MailMessage>().LastOrDefault());
+        }
+        finally { _updatingMessageSelection = false; }
     }
 
     private void MessagesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs args)
@@ -352,6 +376,7 @@ public sealed partial class MainWindow : Window
             selectedItems.Clear();
             selectedItems.Add(message);
         }
+        MessageList.Focus();
         _mailDragStart = args;
         _mailDragOrigin = args.GetPosition(this);
     }
@@ -414,7 +439,12 @@ public sealed partial class MainWindow : Window
 
     private void MessageListKeyDown(object? sender, KeyEventArgs args)
     {
-        if (args.Key == Key.Enter)
+        if (args.Key == Key.A && (args.KeyModifiers.HasFlag(KeyModifiers.Control) || args.KeyModifiers.HasFlag(KeyModifiers.Meta)))
+        {
+            MessageList.SelectAll();
+            args.Handled = true;
+        }
+        else if (args.Key == Key.Enter)
         {
             ShowPhoneMessage();
         }
@@ -500,6 +530,11 @@ public sealed partial class MainWindow : Window
             await Task.Delay(1200);
             button.Content = content;
         }
+    }
+
+    private void PeopleTableClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (_viewModel is not null) _viewModel.PeopleCardView = false;
     }
 
     private void ComposeContactClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
@@ -684,7 +719,8 @@ public sealed partial class MainWindow : Window
                         hydrated.Name,
                         hydrated.ContentType,
                         hydrated.Size,
-                        hydrated.ContentBytes));
+                        hydrated.ContentBytes,
+                        viewModel.FilesProvider, viewModel.Accounts.ToArray()));
                 }
             });
         previewViewModel.Reconcile(preview.Messages, preview.Selected);
@@ -697,8 +733,10 @@ public sealed partial class MainWindow : Window
             Height = 720,
             MinWidth = 420,
             MinHeight = 360,
-            Content = new ConversationThreadView { DataContext = previewViewModel }
+            Content = new ConversationThreadView { DataContext = previewViewModel, FeedbackOwner = viewModel }
         };
+        ((ConversationThreadView)window.Content!).Bind(ConversationThreadView.ShowSenderImagesProperty,
+            new Avalonia.Data.Binding(nameof(MainWindowViewModel.MailSenderImagesEnabled)) { Source = viewModel });
         _previewWindows[session] = window;
         window.Closing += (_, _) =>
         {
@@ -736,20 +774,28 @@ public sealed partial class MainWindow : Window
     private void MessageHeadersClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
         Execute(_viewModel?.ViewHeadersCommand);
 
-    private void MoveMenuOpened(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    private void SearchOptionsClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
     {
-        if (sender is MenuItem menu && _viewModel is not null)
+        if (_viewModel is null) return;
+        _viewModel.IsGlobalSearchOpen = false;
+        var viewModel = _viewModel;
+        IndependentWindow.Show(new SearchOptionsWindow(viewModel.SearchText, query =>
         {
-            menu.ItemsSource = _viewModel.Folders
-                .Where(_viewModel.CanMoveSelectionToFolder)
-                .Select(folder => new MenuItem
-                {
-                    Header = folder.DisplayName,
-                    Command = _viewModel.MoveToFolderCommand,
-                    CommandParameter = folder
-                })
-                .ToArray();
-        }
+            viewModel.SearchText = query;
+            viewModel.SearchCommand.Execute(null);
+        }));
+    }
+
+    private async void MoveMessagesClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (_viewModel is null) return;
+        if (sender is Button { CommandParameter: MailMessage message }) SelectMessage(message, preserveExisting: true);
+        var messages = _viewModel.MoveSelectionSnapshot();
+        if (messages.Count == 0) return;
+        var dialog = new MailMoveWindow(_viewModel.Folders, messages.Count,
+            folder => MainWindowViewModel.CanMoveMessagesToFolder(messages, folder));
+        var destination = await dialog.ChooseAsync(this);
+        if (destination is not null) await _viewModel.MoveSnapshotToFolderAsync(messages, destination);
     }
 
     private async void QuickActionClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
@@ -782,7 +828,7 @@ public sealed partial class MainWindow : Window
     {
         if (sender is Button { CommandParameter: MailMessage message })
         {
-            SelectMessage(message);
+            SelectMessage(message, preserveExisting: true);
         }
     }
 
@@ -797,7 +843,7 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
-        if (!preserveExisting && (selectedItems.Count != 1 || !selectedItems.Contains(message)))
+        if (!selectedItems.Contains(message) || (!preserveExisting && selectedItems.Count != 1))
         {
             selectedItems.Clear();
             selectedItems.Add(message);
@@ -806,7 +852,7 @@ public sealed partial class MainWindow : Window
     }
 
     internal static bool PreservesMultiSelection(KeyModifiers modifiers) =>
-        modifiers.HasFlag(KeyModifiers.Control) || modifiers.HasFlag(KeyModifiers.Shift);
+        modifiers.HasFlag(KeyModifiers.Control) || modifiers.HasFlag(KeyModifiers.Meta) || modifiers.HasFlag(KeyModifiers.Shift);
 
     private static bool IsButtonSource(object? source) =>
         source is Visual visual &&
@@ -880,6 +926,7 @@ public sealed partial class MainWindow : Window
             _viewModel.PropertyChanged += ViewModelPropertyChanged;
             _viewModel.Messages.CollectionChanged += MessagesCollectionChanged;
             AttachCalendarWorkspace(_viewModel.CalendarWorkspace);
+            MessageList.SelectedItem = _viewModel.SelectedMessage;
         }
         UpdateMailPanes();
         UpdateLoadOlderVisibility();
@@ -887,6 +934,14 @@ public sealed partial class MainWindow : Window
 
     private void ViewModelPropertyChanged(object? sender, PropertyChangedEventArgs args)
     {
+        if (args.PropertyName == nameof(MainWindowViewModel.SelectedMessage) && !_updatingMessageSelection)
+        {
+            var primary = _viewModel?.SelectedMessage;
+            if (primary is null) MessageList.SelectedItems?.Clear();
+            else if (MessageList.SelectedItems?.OfType<MailMessage>().Any(message =>
+                message.MailboxId == primary.MailboxId && message.ProviderId == primary.ProviderId) != true)
+                MessageList.SelectedItem = primary;
+        }
         if (args.PropertyName is nameof(MainWindowViewModel.ShowMailSurface)
             or nameof(MainWindowViewModel.IsSettingsOpen)
             or nameof(MainWindowViewModel.ActiveModule))
@@ -1014,7 +1069,8 @@ public sealed partial class MainWindow : Window
             attachment.Name,
             attachment.ContentType,
             attachment.Size,
-            attachment.ContentBytes));
+            attachment.ContentBytes,
+            _viewModel?.FilesProvider, _viewModel?.Accounts.ToArray()));
     }
 
 }

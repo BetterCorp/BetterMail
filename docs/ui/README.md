@@ -57,3 +57,34 @@ Additional Mobbin references inspected:
 [Sync activity](screenshots/sync-progress-dark.png) · [New folder](screenshots/drive-new-folder-light.png)
 
 All captures use fictional offline fixtures. The activity screenshot deliberately supplies synthetic progress values to the real UI; it is not a production sync trace or benchmark. The user's reference screenshot is not part of this repository. Responsiveness tests hold provider requests open and verify navigation and retained workspace state; no production-account performance benchmark was performed.
+
+
+## Save attachments to Drive
+
+Both inline-mail and detached conversation attachment previews offer **Save to Drive** alongside **Save as**. The destination window lists connected accounts with Files capability and their folders, including the account root. Saving uploads the existing attachment bytes in the background, disables repeat submission, and shows an indeterminate progress bar followed by the actual returned filename. Cancel upload (or closing the destination window) requests cancellation; uncertain results never claim that no file was created.
+
+OneDrive is supported in this change. Google Drive authorization and provider support remain deferred. Small OneDrive uploads now request `@microsoft.graph.conflictBehavior=rename`, matching the existing large-file upload session behavior, so duplicate filenames keep both files. See [Microsoft's conflict behavior documentation](https://learn.microsoft.com/en-us/graph/api/resources/driveitem?view=graph-rest-1.0#instance-attributes).
+
+[Attachment viewer](screenshots/attachment-preview-light.png) · [Destination, light](screenshots/attachment-save-drive-light.png) · [Destination, dark](screenshots/attachment-save-drive-dark.png)
+
+These are the actual Avalonia views with fictional offline data. Regression tests cover account/folder selection, root uploads, exact bytes and metadata, duplicate submissions, failure, cancellation, and mail-only account exclusion. No live account upload was performed.
+
+The destination picker exposes an editable filename and blocks upload when the name exceeds 255 characters or its path through the selected folders exceeds 400 characters. Inline validation updates when the filename or destination changes; users can shorten the name or choose a folder nearer the root. Limits follow [Microsoft documentation](https://support.microsoft.com/en-us/onedrive/what-are-file-path-length-limits).
+
+## Bulk selection, compact People, and background artwork
+
+Mail supports Ctrl/Cmd-click, Shift-click, and Ctrl/Cmd+A (all currently loaded rows). The selection count appears above the list. Delete, the toolbar Move menu, and dragging to a folder operate on the selection. Background read/flag updates preserve selected message identities. The offline preview checks native Ctrl-click, Shift-click, Ctrl+A, and selection retention after a message replacement.
+
+People uses compact, single-line rows: name and email remain visible; account provenance is available in the tooltip and actions menu. Arbitrary initial-letter badges are replaced with artwork or a neutral person outline.
+
+Contact artwork is off by default. Enable **Settings → Accounts → People images → Load external contact images** to opt in. Disabling it cancels pending row requests and removes displayed artwork, including cached images. When enabled, contact artwork tries a domain's `default._bimi` TXT logo, then the email's Gravatar, then the domain's `/favicon.ico`. Known shared mailbox domains (including Gmail, Outlook, Yahoo, iCloud, and Proton) use only Gravatar; they skip both BIMI DNS and favicon requests. This is an explicit domain list, not a mail-host lookup, so custom business domains retain their own artwork. These are visual hints, not authenticated sender badges; this does not verify BIMI certificates or message authentication. TXT lookup uses Cloudflare DNS over HTTPS, Gravatar receives a SHA-256 email hash, and image hosts receive HTTPS requests. Requests carry no mailbox credentials. There is no persistent image cache: small raster results and misses are cached in memory. Static SVG geometry is rasterized locally; unsupported/active SVG falls through to the next source. The SVG dependency is pinned to the SkiaSharp 3-compatible release used by Avalonia.
+
+Drive image files request Microsoft Graph's medium thumbnails instead of downloading the full originals. List and grid views use the same asynchronous image control. Artwork is loaded for visible rows with four concurrent workers, bounded downloads, timeouts, a bounded cache, and cancellation when rows leave the viewport. Recycled rows reject stale results. Public image connections reject private addresses and validate redirects; invalid/missing images retain the ordinary file/person icon.
+
+The updated People and Files screenshots use fictional contacts and locally generated thumbnail fixtures. [Bulk selection screenshot](screenshots/mail-multiselect-light.png) shows the real native selection state; disabled write buttons belong to the offline preview provider.
+
+Mail sender images are separately controlled by **Settings → Accounts → Mail images → Show sender images in mail** (off by default). The message list and conversation message headers, including separate message windows, share the contact artwork cache and lookup policy. Disabling Mail images cancels its pending loads and hides the image slots without changing the People setting.
+
+After normal mail and workspace sync finish, an optional background pass warms missing contact artwork from locally cached contacts. Either People images or Mail images must be enabled. It performs one lookup at a time, yields when image workers are busy, and cancels when normal sync restarts or both image settings are disabled. Successful contact images remain reusable while held in the bounded in-memory cache; misses wait 24 hours before retrying. Prefetch stops when the cache is full instead of evicting visible artwork. There is no persistent photo store: restarting the app or foreground cache eviction can require another lookup. Email changes naturally use a different cache key.
+
+People opens from the local contact cache and mail history, then refreshes in the background. Its Table/Cards switch persists across restarts; card rows remain virtualized and adapt from one to four columns. Calendar initializes from cached calendars and events before refreshing remotely, retains calendar visibility choices, and rejects outdated event results after navigation. First use without cached data still needs an initial provider fetch. The message list uses a compact single-line folder/count header, with a second line only for bulk selection.

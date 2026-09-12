@@ -42,6 +42,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
     private ConversationMessageItem? _selectedMessage;
     private readonly Dictionary<string, ConversationMessageItem> _messageCache = new(StringComparer.Ordinal);
     private bool _isActionRunning;
+    private int _runningActionCount;
     private bool _isLoadingAttachments;
     private int _attachmentVersion;
 
@@ -74,18 +75,18 @@ public sealed class ConversationThreadViewModel : ViewModelBase
         ToggleMessageCommand = new AsyncCommand<ConversationMessageItem>(ToggleMessageAsync);
         AllowRemoteContentCommand = new AsyncCommand<ConversationMessageItem>(AllowRemoteContentAsync);
         SelectMessageCommand = new AsyncCommand<ConversationMessageItem>(SelectMessageAsync);
-        ReplyCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.Reply), CanRunAction);
-        ReplyAllCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.ReplyAll), CanRunAction);
-        ForwardCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.Forward), CanRunAction);
-        ArchiveCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.Archive), CanRunAction);
-        DeleteCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.Delete), CanRunAction);
-        JunkCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.Junk), CanRunAction);
-        NotJunkCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.NotJunk), CanRunAction);
-        ToggleReadCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.ToggleRead), CanRunAction);
-        ToggleFlagCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.ToggleFlag), CanRunAction);
-        TogglePinCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.TogglePin), CanRunAction);
-        ViewHeadersCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.ViewHeaders), CanRunAction);
-        MoveToFolderCommand = new AsyncCommand<MailFolderItem>(MoveToFolderAsync, CanMoveToFolder);
+        ReplyCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.Reply), CanRunAction, allowConcurrent: true);
+        ReplyAllCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.ReplyAll), CanRunAction, allowConcurrent: true);
+        ForwardCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.Forward), CanRunAction, allowConcurrent: true);
+        ArchiveCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.Archive), CanRunAction, allowConcurrent: true);
+        DeleteCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.Delete), CanRunAction, allowConcurrent: true);
+        JunkCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.Junk), CanRunAction, allowConcurrent: true);
+        NotJunkCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.NotJunk), CanRunAction, allowConcurrent: true);
+        ToggleReadCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.ToggleRead), CanRunAction, allowConcurrent: true);
+        ToggleFlagCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.ToggleFlag), CanRunAction, allowConcurrent: true);
+        TogglePinCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.TogglePin), CanRunAction, allowConcurrent: true);
+        ViewHeadersCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.ViewHeaders), CanRunAction, allowConcurrent: true);
+        MoveToFolderCommand = new AsyncCommand<MailFolderItem>(MoveToFolderAsync, CanMoveToFolder, allowConcurrent: true);
         OpenDraftCommand = new AsyncCommand<LocalDraft>(draft => _openDraft?.Invoke(draft) ?? Task.CompletedTask);
         OpenAttachmentCommand = new AsyncCommand<MailAttachment>(OpenAttachmentAsync);
     }
@@ -214,8 +215,11 @@ public sealed class ConversationThreadViewModel : ViewModelBase
         }
     }
 
+    public event Action? Reconciling;
+    public event Action? Reconciled;
     public void Reconcile(IEnumerable<MailMessage> messages, MailMessage? selectedMessage = null)
     {
+        Reconciling?.Invoke();
         var projections = ConversationThread.Project(messages);
         var activeMessages = projections
             .SelectMany(static thread => thread.Messages)
@@ -251,6 +255,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
         Select(selected);
         RaisePropertyChanged(nameof(ShowThreadList));
         RaisePropertyChanged(nameof(ThreadItemCountText));
+        Reconciled?.Invoke();
     }
 
     private ConversationMessageItem GetMessageItem(string identity, MailMessage message)
@@ -383,52 +388,54 @@ public sealed class ConversationThreadViewModel : ViewModelBase
         return Task.CompletedTask;
     }
 
-    private bool CanRunAction() => SelectedMessage is not null && _action is not null && !IsActionRunning;
+    private bool CanRunAction() => SelectedMessage is not null && _action is not null;
 
     private async Task RunActionAsync(ConversationAction action)
     {
         var selected = SelectedMessage;
-        if (selected is null || IsActionRunning)
+        if (selected is null || _action is null)
         {
             return;
         }
+        _runningActionCount++;
         IsActionRunning = true;
         try
         {
-            var request = new ConversationActionRequest(action, selected.Message);
+            var original = selected.Message;
+            var request = new ConversationActionRequest(action, original);
             await _action!(request);
             if (action == ConversationAction.ToggleRead)
             {
-                selected.Update(selected.Message with { IsRead = !selected.Message.IsRead });
+                selected.Update(selected.Message with { IsRead = !original.IsRead });
             }
             else if (action == ConversationAction.ToggleFlag)
             {
-                selected.Update(selected.Message with { IsFlagged = !selected.Message.IsFlagged });
+                selected.Update(selected.Message with { IsFlagged = !original.IsFlagged });
             }
             else if (action == ConversationAction.TogglePin)
             {
-                selected.Update(selected.Message with { IsPinned = !selected.Message.IsPinned });
+                selected.Update(selected.Message with { IsPinned = !original.IsPinned });
             }
         }
         finally
         {
-            IsActionRunning = false;
+            IsActionRunning = --_runningActionCount > 0;
         }
     }
 
     private bool CanMoveToFolder(MailFolderItem? folder) =>
-        folder is not null && CanRunAction() && SelectedMessage?.Message.MailboxId == folder.MailboxId &&
-        SelectedMessage.Message.FolderId != folder.ProviderId;
+        folder is not null && CanRunAction() && SelectedMessage?.Message.MailboxId == folder.MailboxId;
 
     private Task MoveToFolderAsync(MailFolderItem folder) =>
         RunActionAsync(new ConversationActionRequest(ConversationAction.Move, SelectedMessage!.Message, folder));
 
     private async Task RunActionAsync(ConversationActionRequest request)
     {
-        if (_action is null || IsActionRunning)
+        if (_action is null)
         {
             return;
         }
+        _runningActionCount++;
         IsActionRunning = true;
         try
         {
@@ -436,7 +443,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
         }
         finally
         {
-            IsActionRunning = false;
+            IsActionRunning = --_runningActionCount > 0;
         }
     }
 

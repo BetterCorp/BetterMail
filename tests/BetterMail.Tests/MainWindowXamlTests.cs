@@ -27,11 +27,13 @@ public sealed class MainWindowXamlTests
     }
 
     [Fact]
-    public void BetterMailWindowsAreIndependent()
+    public void BetterMailWindowsAreIndependentExceptTheMoveDestinationPicker()
     {
         var appDirectory = Path.Combine(FindRepositoryRoot(), "src", "BetterMail.App");
         var windows = string.Join('\n', Directory.EnumerateFiles(appDirectory)
             .Where(path => Path.GetExtension(path) is ".cs" or ".axaml")
+            // The destination picker is deliberately modal; editors and workspace windows stay independent.
+            .Where(path => Path.GetFileName(path) != "MailMoveWindow.axaml.cs")
             .Select(File.ReadAllText));
 
         Assert.DoesNotContain("ShowDialog", windows);
@@ -188,7 +190,7 @@ public sealed class MainWindowXamlTests
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding GlobalSearchResults}" + (char)34, xaml);
         Assert.Contains("KeyDown=" + (char)34 + "GlobalSearchKeyDown" + (char)34, xaml);
         Assert.Contains("IsVisible=" + (char)34 + "{Binding StartsCategory}" + (char)34, xaml);
-        Assert.Contains("SelectedItem=" + (char)34 + "{Binding SelectedMessage, Mode=OneWay}" + (char)34, xaml);
+        Assert.DoesNotContain("SelectedItem=" + (char)34 + "{Binding SelectedMessage, Mode=OneWay}" + (char)34, xaml);
         Assert.Contains("ShowDraftsCommand", folderPane);
         Assert.DoesNotContain("<Expander Header=" + (char)34 + "{Binding DraftCountText}", folderPane);
         Assert.Contains("QuickActionClicked", xaml);
@@ -218,9 +220,9 @@ public sealed class MainWindowXamlTests
         Assert.Contains(BindingAttribute("IsVisible", "ShowWorkspaceSurface"), xaml);
         Assert.Contains(BindingAttribute("IsVisible", "ShowMailSurface"), xaml);
         Assert.Contains("ToggleMessageCommand", conversationXaml);
-        Assert.DoesNotContain("<SelectableTextBlock", threadHeaders);
+        Assert.Contains("<SelectableTextBlock", threadHeaders);
         Assert.Contains("<SelectableTextBlock Text=" + (char)34 + "{Binding SelectedThread.Subject", conversationXaml);
-        Assert.Contains("<TextBlock Text=" + (char)34 + "{Binding SenderAddress}", threadHeaders);
+        Assert.Contains("<SelectableTextBlock Text=" + (char)34 + "{Binding SenderAddress}", threadHeaders);
         Assert.Contains("TreeViewItem:pointerover /template/ ContentPresenter", folderPane);
         Assert.Contains("<Setter Property=" + (char)34 + "BorderThickness" + (char)34 + " Value=" + (char)34 + "0" + (char)34 + " />", folderPane);
         Assert.Contains("<TreeView", folderPane);
@@ -273,8 +275,8 @@ public sealed class MainWindowXamlTests
         Assert.Contains("SelectionChanged=" + (char)34 + "MessageSelectionChanged" + (char)34, xaml);
         Assert.Contains("DragDrop.AllowDrop=" + (char)34 + "True" + (char)34, folderPane);
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding Categories}" + (char)34, xaml);
-        Assert.Contains("ItemsSource=" + (char)34 + "{Binding SearchAccountFilters}" + (char)34, xaml);
-        Assert.Contains("ItemsSource=" + (char)34 + "{Binding SearchFolderFilters}" + (char)34, xaml);
+        Assert.DoesNotContain("ItemsSource=" + (char)34 + "{Binding SearchAccountFilters}" + (char)34, xaml);
+        Assert.DoesNotContain("ItemsSource=" + (char)34 + "{Binding SearchFolderFilters}" + (char)34, xaml);
         Assert.Contains("SelectedItem=" + (char)34 + "{Binding MailSyncRange}" + (char)34, settingsXaml);
         Assert.Contains("x:Name=" + (char)34 + "MailStatisticsSection" + (char)34, settingsXaml);
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding MailStatistics}" + (char)34, settingsXaml);

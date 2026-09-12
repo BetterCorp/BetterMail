@@ -130,6 +130,27 @@ public sealed class GoogleProviderTests
         Assert.Equal("sender@example.com", message.From.Address);
     }
 
+    [Theory]
+    [InlineData("report\"final.txt")]
+    [InlineData("report\\final.txt")]
+    [InlineData("report\"; filename=\"other.txt")]
+    [InlineData("report\\\"final.txt")]
+    public void AttachmentNamesRoundTripThroughQuotedMimeParameters(string name)
+    {
+        var mime = GoogleGmailProvider.BuildMime(new("account", "person@example.com", "Person"),
+            new("Subject", [new("Recipient", "recipient@example.com")], "Body", false,
+                Attachments: [new(name, "application/octet-stream", [1])]));
+        var lines = mime.Split("\r\n");
+        var disposition = new System.Net.Mime.ContentDisposition(Assert.Single(lines,
+            line => line.StartsWith("Content-Disposition:", StringComparison.Ordinal))["Content-Disposition: ".Length..]);
+        var type = new System.Net.Mime.ContentType(Assert.Single(lines,
+            line => line.StartsWith("Content-Type: application/octet-stream", StringComparison.Ordinal))["Content-Type: ".Length..]);
+        Assert.Equal(name, disposition.FileName);
+        Assert.Equal(name, type.Name);
+        Assert.Equal(1, disposition.Parameters.Count);
+        Assert.Equal(1, type.Parameters.Count);
+    }
+
     [Fact]
     public void BuildsMimeWithRecipientsBodyAndAttachment()
     {

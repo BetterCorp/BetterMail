@@ -10,7 +10,8 @@ public enum DraftSyncStatus
     Conflict,
     MissingRemote,
     UnsupportedAttachment,
-    Failed
+    Failed,
+    RemovedSent
 }
 
 public sealed record DraftSyncItem(
@@ -82,11 +83,18 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
 
                 if (!remoteById.TryGetValue(local.ProviderDraftId, out var remote))
                 {
+                    if (local.SyncedLocalUpdatedAt == local.UpdatedAt &&
+                        await provider.IsDraftSentAsync(account, mailbox, local.ProviderDraftId, cancellationToken).ConfigureAwait(false) &&
+                        await store.TryRemoveConfirmedSentDraftAsync(local, cancellationToken).ConfigureAwait(false))
+                    {
+                        results.Add(new(local.Id, local.ProviderDraftId, DraftSyncStatus.RemovedSent));
+                        continue;
+                    }
                     results.Add(new(
                         local.Id,
                         local.ProviderDraftId,
                         DraftSyncStatus.MissingRemote,
-                        "The server draft was not found; the local draft was kept."));
+                        "Not found in server drafts; sending could not be confirmed. Your local copy is kept. Discard it explicitly if no longer needed."));
                     continue;
                 }
                 if (remote.HasUnsupportedAttachments)

@@ -101,6 +101,22 @@ public sealed class DraftSynchronizationServiceTests
         Assert.Equal(0, store.HydrationCount);
     }
 
+    [Theory]
+    [InlineData(true, false, true)]
+    [InlineData(false, false, false)]
+    [InlineData(true, true, false)]
+    public async Task MissingDraftOnlyRemovesUnchangedConfirmedSentCopy(bool sent, bool edited, bool removed)
+    {
+        var baseline = DateTimeOffset.UtcNow.AddHours(-1);
+        var draft = Local("stale", "Draft", edited ? baseline.AddMinutes(1) : baseline) with
+        { ProviderDraftId = "remote", SyncedLocalUpdatedAt = baseline };
+        var store = new DraftStore([draft]);
+        var provider = new DraftProvider { DraftWasSent = sent };
+        var result = await new DraftSynchronizationService(provider, store).SynchronizeAsync(Account, Mailbox, TestContext.Current.CancellationToken);
+        Assert.Equal(removed ? DraftSyncStatus.RemovedSent : DraftSyncStatus.MissingRemote, Assert.Single(result.Items).Status);
+        Assert.Equal(removed ? 0 : 1, store.Drafts.Count);
+    }
+
     private static LocalDraft Local(string id, string subject, DateTimeOffset updatedAt) => new(
         id,
         Account.AccountId,
@@ -133,6 +149,8 @@ public sealed class DraftSynchronizationServiceTests
     {
         public List<LocalDraft> Drafts { get; } = [.. drafts];
         public int HydrationCount { get; private set; }
+        public Task<bool> TryRemoveConfirmedSentDraftAsync(LocalDraft expected, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Drafts.RemoveAll(draft => draft.Id == expected.Id && draft.UpdatedAt == expected.UpdatedAt && !draft.IsQueued) > 0);
 
         public Task SaveLocalDraftAsync(LocalDraft draft, CancellationToken cancellationToken = default)
         {
@@ -204,6 +222,8 @@ public sealed class DraftSynchronizationServiceTests
 
     private sealed class DraftProvider : IMailProvider
     {
+        public bool DraftWasSent { get; init; }
+        public Task<bool> IsDraftSentAsync(MailAccount account, Mailbox mailbox, string draftId, CancellationToken cancellationToken = default) => Task.FromResult(DraftWasSent);
         public string? FailingSubject { get; init; }
         public IReadOnlyList<CloudDraft> RemoteDrafts { get; init; } = [];
         public int UpdateCount { get; private set; }
