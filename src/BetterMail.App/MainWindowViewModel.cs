@@ -737,7 +737,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     public bool IsWorkspaceEmpty => !IsWorkspaceLoading && ActiveModule switch
     {
         "Calendar" => false,
-        "People" => People.Count == 0,
+        "People" => People.Count == 0 && !IsPeopleRefreshing,
         "To Do" => false,
         "Drive" => false,
         "Notes" => false,
@@ -3589,10 +3589,25 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         PeopleBackgroundRefresh = RefreshPeopleInBackgroundAsync();
     }
 
+    private int _peopleRefreshCount;
+    public bool IsPeopleRefreshing => _peopleRefreshCount > 0;
+    private void RaisePeopleProgress()
+    {
+        RaisePropertyChanged(nameof(IsPeopleRefreshing));
+        RaisePropertyChanged(nameof(IsWorkspaceEmpty));
+    }
+
     private async Task RefreshPeopleInBackgroundAsync()
     {
+        _peopleRefreshCount++;
+        RaisePeopleProgress();
         try { await LoadPeopleAsync(); }
         catch (Exception error) { PeopleErrorText = error.Message; }
+        finally
+        {
+            _peopleRefreshCount--;
+            RaisePeopleProgress();
+        }
     }
 
     private Task? _peopleLoadTask;
@@ -5389,11 +5404,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         ConversationAction.ToggleFlag => ToggleFlagMessagesAsync([request.Message]),
         ConversationAction.TogglePin => TogglePinMessagesAsync([request.Message]),
         ConversationAction.ViewHeaders => ViewHeadersAsync(request.Message),
-        ConversationAction.Move when request.Destination is not null => MoveMessagesAsync(
-            [request.Message],
-            request.Destination.ProviderId,
-            $"Moving to {request.Destination.DisplayName}...",
-            $"Moved to {request.Destination.DisplayName}"),
+        ConversationAction.Move when request.Destination is not null =>
+            MoveSnapshotToFolderAsync([request.Message], request.Destination),
         _ => Task.CompletedTask
     };
 

@@ -6,6 +6,39 @@ namespace BetterMail.Tests;
 
 public sealed class MainWindowViewModelTests
 {
+    [Fact]
+    public async Task UncachedPeopleShowNonBlockingProgressUntilProviderCompletes()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-empty-people-" + Guid.NewGuid());
+        var provider = new FakeWorkspaceProvider { ContactGate = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "account", "tenant", "me@example.test", "Me", ProviderCapabilities.Contacts);
+            var vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, workspaceProvider: provider);
+            vm.Accounts.Add(account);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, "Me");
+            vm.Mailboxes.Add(mailbox);
+            vm.ContactOwners.Add(new(account, mailbox));
+            await ((AsyncCommand)vm.ShowContactsCommand).ExecuteAsync().WaitAsync(TimeSpan.FromSeconds(5), token);
+            Assert.Empty(vm.People);
+            Assert.True(vm.IsPeopleRefreshing);
+            Assert.False(vm.IsWorkspaceLoading);
+            Assert.False(vm.IsWorkspaceEmpty);
+            provider.ContactGate.SetResult();
+            await vm.PeopleBackgroundRefresh.WaitAsync(TimeSpan.FromSeconds(5), token);
+            Assert.False(vm.IsPeopleRefreshing);
+            Assert.True(vm.IsWorkspaceEmpty);
+        }
+        finally
+        {
+            provider.ContactGate.TrySetResult();
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
     [Theory]
     [InlineData("drive", "Drive")]
     [InlineData("notes", "Notes")]
@@ -41,9 +74,11 @@ public sealed class MainWindowViewModelTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task MovePickerResolvesCurrentCachedMessageAfterSync(bool alreadyInDestination)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task MovePickerResolvesCurrentCachedMessageAfterSync(bool alreadyInDestination, bool standalone)
     {
         var token = TestContext.Current.CancellationToken;
         var directory = Path.Combine(Path.GetTempPath(), "bettermail-move-picker-" + Guid.NewGuid());
@@ -68,7 +103,8 @@ public sealed class MainWindowViewModelTests
             var snapshot = vm.MoveSelectionSnapshot();
             var fresh = stale with { FolderId = alreadyInDestination ? "archive" : "other", Subject = "Updated subject", Body = "Updated body", IsFlagged = true, IsRead = false };
             await store.ApplySyncPageAsync("fresh", new([fresh], null, false), token);
-            await vm.MoveSnapshotToFolderAsync(snapshot, destination);
+            if (standalone) await vm.HandlePreviewActionAsync(new(ConversationAction.Move, snapshot[0], destination));
+            else await vm.MoveSnapshotToFolderAsync(snapshot, destination);
             var actions = await store.GetMailActionsAsync(token);
             if (alreadyInDestination) Assert.Empty(actions);
             else

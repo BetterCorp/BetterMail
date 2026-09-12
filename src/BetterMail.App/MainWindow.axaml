@@ -930,6 +930,9 @@
 
           <Grid IsVisible="{Binding IsContactsModule}" RowDefinitions="Auto,Auto,*" Margin="18,10">
             <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+              <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsPeopleRefreshing}"
+                           Grid.ColumnSpan="2" Height="2" VerticalAlignment="Bottom"
+                           IsHitTestVisible="False" AutomationProperties.Name="Refreshing contacts" />
               <Button Classes="primary" Content="New contact" Command="{Binding NewContactCommand}" HorizontalAlignment="Left" AutomationProperties.Name="Create a contact" />
               <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
                 <RadioButton Content="Table" GroupName="PeopleView" IsChecked="{Binding PeopleTableView, Mode=OneWay}" Click="PeopleTableClicked" />
