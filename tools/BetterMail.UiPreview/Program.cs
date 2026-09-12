@@ -90,6 +90,37 @@ internal static class Program
         if (vm.SelectedMessages.Count != previewMessages.Length || list.SelectedItems!.Count != previewMessages.Length)
             throw new InvalidOperationException("A message metadata refresh collapsed multi-selection.");
         await Shot("mail-multiselect-light");
+        var moveFolders = folders.Concat(new[]
+        {
+            new MailFolderItem(new(mailbox.Id, "projects", "Projects", 0, 0, ParentProviderId: "inbox"), mailbox.DisplayName),
+            new MailFolderItem(new(mailbox.Id, "launch", "Autumn launch", 0, 0, ParentProviderId: "projects"), mailbox.DisplayName),
+            new MailFolderItem(new("studio:alex@studio.example", "inbox", "Inbox", 0, 0), "Studio"),
+            new MailFolderItem(new("studio:alex@studio.example", "archive", "Archive", 0, 0), "Studio")
+        }).ToArray();
+        var move = new MailMoveWindow(moveFolders, previewMessages.Length,
+            folder => folder.MailboxId == mailbox.Id && folder.ProviderId != "inbox");
+        var moveResult = move.ChooseAsync(window);
+        move.Position = new PixelPoint(0, 0);
+        await Task.Delay(200);
+        var tree = move.FindControl<TreeView>("FoldersTree")!;
+        var accountRoot = (TreeViewItem)tree.Items[0]!;
+        var inboxNode = accountRoot.Items.Cast<TreeViewItem>().Single(item => (string)item.Header! == "Inbox");
+        inboxNode.IsExpanded = true;
+        var projectsNode = (TreeViewItem)inboxNode.Items[0]!;
+        projectsNode.IsExpanded = true;
+        tree.SelectedItem = inboxNode;
+        if (move.FindControl<Button>("MoveButton")!.IsEnabled) throw new InvalidOperationException("Move accepted current folder.");
+        tree.SelectedItem = projectsNode.Items[0];
+        if (!move.FindControl<Button>("MoveButton")!.IsEnabled ||
+            !move.FindControl<TextBlock>("DestinationPath")!.Text!.EndsWith("Inbox / Projects / Autumn launch"))
+            throw new InvalidOperationException("Nested destination could not be selected.");
+        await Shot("mail-move-browser-light", move);
+        Application.Current!.RequestedThemeVariant = ThemeVariant.Dark;
+        await Shot("mail-move-browser-dark", move);
+        move.Close();
+        if (await moveResult is not null) throw new InvalidOperationException("Closing Move should cancel.");
+        Application.Current!.RequestedThemeVariant = ThemeVariant.Light;
+        Console.WriteLine("Move browser nesting, validation and cancellation checks passed.");
         vm.MailSenderImagesEnabled = true;
         await Task.Delay(200);
         var threadView = window.GetVisualDescendants().OfType<ConversationThreadView>().Single();

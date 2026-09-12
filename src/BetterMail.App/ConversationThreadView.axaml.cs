@@ -39,6 +39,18 @@ public sealed partial class ConversationThreadView : UserControl
         };
     }
 
+    private async void MoveClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (_viewModel?.SelectedMessage is not { } selected || TopLevel.GetTopLevel(this) is not Window owner) return;
+        var viewModel = _viewModel;
+        var dialog = new MailMoveWindow(viewModel.MoveFolders, 1,
+            folder => MainWindowViewModel.CanMoveMessagesToFolder([selected.Message], folder));
+        var destination = await dialog.ChooseAsync(owner);
+        // Do not apply the destination to a different message if background reconciliation changed selection.
+        if (destination is not null && ReferenceEquals(viewModel.SelectedMessage, selected))
+            viewModel.MoveToFolderCommand.Execute(destination);
+    }
+
     internal static bool IsCompactWidth(double width) => width < 640;
 
     private void BindViewModel(ConversationThreadViewModel? viewModel)

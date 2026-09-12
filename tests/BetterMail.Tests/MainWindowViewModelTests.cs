@@ -6,6 +6,135 @@ namespace BetterMail.Tests;
 
 public sealed class MainWindowViewModelTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MovePickerResolvesCurrentCachedMessageAfterSync(bool alreadyInDestination)
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-move-picker-" + Guid.NewGuid());
+        var provider = new RecordingProvider { MoveRelease = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        MainWindowViewModel? vm = null;
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "account", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, "Me");
+            await store.SaveAccountAsync(account, token);
+            await store.SaveMailboxAsync(mailbox, token);
+            vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
+            vm.Accounts.Add(account);
+            vm.Mailboxes.Add(mailbox);
+            var destination = new MailFolderItem(new(mailbox.Id, "archive", "Archive", 0, 0), "Me");
+            vm.Folders.Add(destination);
+            var stale = Message(mailbox.Id, "inbox", "Old subject", "Old body") with { IsRead = true };
+            vm.Messages.Add(stale);
+            vm.SetSelectedMessages([stale], stale);
+            var snapshot = vm.MoveSelectionSnapshot();
+            var fresh = stale with { FolderId = alreadyInDestination ? "archive" : "other", Subject = "Updated subject", Body = "Updated body", IsFlagged = true, IsRead = false };
+            await store.ApplySyncPageAsync("fresh", new([fresh], null, false), token);
+            await vm.MoveSnapshotToFolderAsync(snapshot, destination);
+            var actions = await store.GetMailActionsAsync(token);
+            if (alreadyInDestination) Assert.Empty(actions);
+            else
+            {
+                var action = Assert.Single(actions);
+                Assert.Equal("other", action.SourceFolderId);
+                Assert.True(action.SourceWasUnread);
+                Assert.Equal("Updated subject", action.Subject);
+            }
+            var cached = await store.GetMessageAsync(fresh.MailboxId, fresh.ProviderId, token);
+            Assert.Equal("Updated body", cached!.Body);
+            Assert.True(cached.IsFlagged);
+            provider.MoveRelease.SetResult();
+            await WaitUntilAsync(() => !vm.IsSyncing, token);
+        }
+        finally
+        {
+            provider.MoveRelease.TrySetResult();
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public async Task UncachedCalendarShowsProgressWhileProviderIsBlocked()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-empty-calendar-" + Guid.NewGuid());
+        var provider = new FakeWorkspaceProvider
+        {
+            CalendarGate = new(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "cached", "tenant", "me@example.test", "Me", ProviderCapabilities.Calendar);
+            var vm = new CalendarWorkspaceViewModel(provider, [account], store: store);
+            await vm.InitializeAsync(token).WaitAsync(TimeSpan.FromSeconds(5), token);
+            Assert.Empty(vm.CalendarGroups.SelectMany(group => group.Calendars));
+            Assert.True(vm.IsLoading);
+            Assert.False(vm.BackgroundRefresh.IsCompleted);
+            provider.CalendarGate.SetResult();
+            await vm.BackgroundRefresh.WaitAsync(TimeSpan.FromSeconds(5), token);
+            Assert.False(vm.IsLoading);
+            Assert.NotEmpty(vm.CalendarGroups.SelectMany(group => group.Calendars));
+        }
+        finally
+        {
+            provider.CalendarGate.TrySetResult();
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public async Task CachedPeopleAndCalendarOpenBeforeBlockedProviderCompletes()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-cached-views-" + Guid.NewGuid());
+        var provider = new FakeWorkspaceProvider
+        {
+            ContactGate = new(TaskCreationOptions.RunContinuationsAsynchronously),
+            CalendarGate = new(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "cached", "tenant", "me@example.test", "Me", ProviderCapabilities.Contacts | ProviderCapabilities.Calendar);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, "Me");
+            var contact = new ContactInfo("cached-contact", "Cached person", ["cached@example.test"], account.AccountId);
+            var calendar = new CalendarInfo("calendar", "Calendar", "#0F6CBD", true, account.AccountId);
+            await store.ReplaceWorkspaceItemsAsync("contact", account.AccountId, "all", new[] { contact }, c => c.ProviderId, c => c.DisplayName, token);
+            await store.ReplaceWorkspaceItemsAsync("calendar", account.AccountId, "all", new[] { calendar }, c => c.ProviderId, c => c.Name, token);
+            var vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, workspaceProvider: provider);
+            vm.Accounts.Add(account);
+            vm.Mailboxes.Add(mailbox);
+            vm.ContactOwners.Add(new(account, mailbox));
+            await ((AsyncCommand)vm.ShowContactsCommand).ExecuteAsync().WaitAsync(TimeSpan.FromSeconds(5), token);
+            Assert.False(provider.ContactGate.Task.IsCompleted);
+            Assert.Contains(vm.People, person => person.DisplayName == "Cached person");
+            Assert.False(vm.IsWorkspaceLoading);
+            vm.ModuleSearchText = "Planning";
+            await ((AsyncCommand)vm.ShowContactsCommand).ExecuteAsync().WaitAsync(TimeSpan.FromSeconds(5), token);
+            await ((AsyncCommand)vm.ShowCalendarCommand).ExecuteAsync().WaitAsync(TimeSpan.FromSeconds(5), token);
+            Assert.False(provider.CalendarGate.Task.IsCompleted);
+            Assert.Single(vm.CalendarWorkspace!.CalendarGroups.Single().Calendars);
+            provider.CalendarGate.SetResult();
+            provider.ContactGate.SetResult();
+            await vm.CalendarWorkspace.BackgroundRefresh.WaitAsync(TimeSpan.FromSeconds(5), token);
+            await vm.PeopleBackgroundRefresh.WaitAsync(TimeSpan.FromSeconds(5), token);
+            Assert.Contains(vm.People, person => person.DisplayName == "Planning Person");
+        }
+        finally
+        {
+            provider.ContactGate.TrySetResult();
+            provider.CalendarGate.TrySetResult();
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
     [Fact]
     public async Task UncachedCalendarShowsProgressWhileProviderIsBlocked()
     {

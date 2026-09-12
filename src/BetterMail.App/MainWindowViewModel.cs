@@ -3957,6 +3957,27 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             messages.All(message => message.FolderId != folder.ProviderId);
     }
 
+    internal IReadOnlyList<MailMessage> MoveSelectionSnapshot() =>
+        IsMailInteractionContext && !_isMailActionRunning ? ActionMessages().ToArray() : [];
+
+    internal static bool CanMoveMessagesToFolder(IReadOnlyList<MailMessage> messages, MailFolderItem folder) =>
+        messages.Count > 0 && messages.All(message => message.MailboxId == folder.MailboxId && message.FolderId != folder.ProviderId);
+
+    internal async Task MoveSnapshotToFolderAsync(IReadOnlyList<MailMessage> messages, MailFolderItem folder)
+    {
+        // The picker keeps the identities selected when it opened, but sync may have
+        // replaced their contents (or removed them) while the user chose a folder.
+        var current = new List<MailMessage>();
+        foreach (var snapshot in messages.DistinctBy(MessageKey))
+        {
+            var message = await GetCachedMessageAsync(snapshot);
+            if (message is not null) current.Add(message);
+        }
+        var destination = Folders.FirstOrDefault(item => item.MailboxId == folder.MailboxId && item.ProviderId == folder.ProviderId);
+        if (destination is not null && CanMoveMessagesToFolder(current, destination))
+            await MoveMessagesAsync(current, destination.ProviderId, $"Moving to {destination.DisplayName}...", $"Moved to {destination.DisplayName}");
+    }
+
     internal Task MoveSelectionToFolderAsync(MailFolderItem folder) =>
         MoveMessagesAsync(
             ActionMessages(),
@@ -5414,8 +5435,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         };
 
     internal IReadOnlyList<MailFolderItem> MoveFoldersFor(MailMessage message) =>
-        Folders.Where(folder => folder.MailboxId == message.MailboxId && folder.ProviderId != message.FolderId)
-            .ToArray();
+        Folders.ToArray();
 
     internal Task HandlePreviewActionAsync(ConversationActionRequest request) => request.Action switch
     {

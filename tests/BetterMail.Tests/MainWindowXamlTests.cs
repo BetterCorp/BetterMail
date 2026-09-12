@@ -27,11 +27,13 @@ public sealed class MainWindowXamlTests
     }
 
     [Fact]
-    public void BetterMailWindowsAreIndependent()
+    public void BetterMailWindowsAreIndependentExceptTheMoveDestinationPicker()
     {
         var appDirectory = Path.Combine(FindRepositoryRoot(), "src", "BetterMail.App");
         var windows = string.Join('\n', Directory.EnumerateFiles(appDirectory)
             .Where(path => Path.GetExtension(path) is ".cs" or ".axaml")
+            // The destination picker is deliberately modal; editors and workspace windows stay independent.
+            .Where(path => Path.GetFileName(path) != "MailMoveWindow.axaml.cs")
             .Select(File.ReadAllText));
 
         Assert.DoesNotContain("ShowDialog", windows);

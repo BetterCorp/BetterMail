@@ -279,13 +279,7 @@
             <Button Classes="command" Content="↪ Forward" Command="{Binding ForwardCommand}" AutomationProperties.Name="Forward selected message" />
             <Button Classes="command" Content="Archive" Command="{Binding ArchiveCommand}" AutomationProperties.Name="Archive selected message" AutomationProperties.HelpText="Keyboard shortcut Backspace" />
             <Button Classes="command" Content="Delete" Command="{Binding DeleteCommand}" AutomationProperties.Name="Delete selected message" />
-            <Button Classes="command" Content="Move" AutomationProperties.Name="Move selected messages">
-              <Button.Flyout>
-                <Flyout><ScrollViewer MaxHeight="420" MinWidth="230"><ItemsControl ItemsSource="{Binding Folders}"><ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="app:MailFolderItem"><Button Classes="command" Content="{Binding DisplayName}" HorizontalContentAlignment="Left" Command="{Binding $parent[Window].DataContext.MoveToFolderCommand}" CommandParameter="{Binding}" /></DataTemplate>
-                </ItemsControl.ItemTemplate></ItemsControl></ScrollViewer></Flyout>
-              </Button.Flyout>
-            </Button>
+            <Button Classes="command" Content="Move" AutomationProperties.Name="Move selected messages" Click="MoveMessagesClicked" />
           </StackPanel>
           <Button Grid.Column="3"
                   Classes="command"
@@ -300,13 +294,7 @@
                   <Button Classes="command" Content="Forward" HorizontalContentAlignment="Left" Click="MessageForwardClicked" AutomationProperties.Name="Forward selected message" />
                   <Button Classes="command" Content="Archive" HorizontalContentAlignment="Left" Click="MessageArchiveClicked" AutomationProperties.Name="Archive selected message" AutomationProperties.HelpText="Keyboard shortcut Backspace" />
                   <Button Classes="command" Content="Delete" HorizontalContentAlignment="Left" Click="MessageDeleteClicked" AutomationProperties.Name="Delete selected message" />
-                  <Button Classes="command" Content="Move to folder" HorizontalContentAlignment="Left">
-                    <Button.Flyout>
-                      <Flyout><ScrollViewer MaxHeight="420" MinWidth="230"><ItemsControl ItemsSource="{Binding Folders}"><ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="app:MailFolderItem"><Button Classes="command" Content="{Binding DisplayName}" HorizontalContentAlignment="Left" Command="{Binding $parent[Window].DataContext.MoveToFolderCommand}" CommandParameter="{Binding}" /></DataTemplate>
-                      </ItemsControl.ItemTemplate></ItemsControl></ScrollViewer></Flyout>
-                    </Button.Flyout>
-                  </Button>
+                  <Button Classes="command" Content="Move to folder" HorizontalContentAlignment="Left" Click="MoveMessagesClicked" />
                   <Border Height="1" Background="{DynamicResource BetterMailDividerBrush}" Margin="4" />
                   <Button Classes="command" Content="Junk" HorizontalContentAlignment="Left" Click="MessageJunkClicked" AutomationProperties.Name="Mark selected message as junk" />
                   <Button Classes="command" Content="{Binding ToggleFlagText}" HorizontalContentAlignment="Left" Click="MessageFlagClicked" AutomationProperties.Name="{Binding ToggleFlagText}" />
@@ -598,7 +586,7 @@
                       <MenuItem Header="Delete" Click="MessageDeleteClicked" AutomationProperties.Name="Delete message" />
                       <MenuItem Header="Junk" Click="MessageJunkClicked" AutomationProperties.Name="Mark message as junk" />
                       <MenuItem Header="Not junk" Click="MessageNotJunkClicked" AutomationProperties.Name="Mark message as not junk" />
-                      <MenuItem Header="Move to folder" SubmenuOpened="MoveMenuOpened" AutomationProperties.Name="Move message to folder" />
+                      <MenuItem Header="Move to folder" Click="MoveMessagesClicked" AutomationProperties.Name="Move message to folder" />
                       <MenuItem Header="Flag or clear flag" Click="MessageFlagClicked" AutomationProperties.Name="Toggle message flag" />
                       <MenuItem Header="Pin or unpin" Click="MessagePinClicked" AutomationProperties.Name="Toggle message pin" />
                       <MenuItem Header="Mark read or unread" Click="MessageReadClicked" AutomationProperties.Name="Toggle message read state" />
@@ -677,25 +665,7 @@
                                       CommandParameter="{Binding $parent[ItemsControl].DataContext}"
                                       PointerPressed="QuickActionPressed"
                                       ToolTip.Tip="{Binding Label}"
-                                      AutomationProperties.Name="{Binding Label}">
-                                <Button.Flyout>
-                                  <Flyout>
-                                    <ScrollViewer MaxHeight="420" MinWidth="230">
-                                      <ItemsControl ItemsSource="{ReflectionBinding $parent[Window].DataContext.Folders}">
-                                        <ItemsControl.ItemTemplate>
-                                          <DataTemplate x:DataType="app:MailFolderItem">
-                                            <Button Classes="command"
-                                                    Content="{Binding DisplayName}"
-                                                    HorizontalContentAlignment="Left"
-                                                    Command="{ReflectionBinding $parent[Window].DataContext.MoveToFolderCommand}"
-                                                    CommandParameter="{Binding}" />
-                                          </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                      </ItemsControl>
-                                    </ScrollViewer>
-                                  </Flyout>
-                                </Button.Flyout>
-                              </Button>
+                                      AutomationProperties.Name="{Binding Label}" Click="MoveMessagesClicked" />
                               <Button Classes="command"
                                       Content="{Binding Icon}"
                                       FontFamily="Segoe UI Symbol"
@@ -712,22 +682,7 @@
                                       <Button Classes="command" Content="Forward" HorizontalContentAlignment="Left" Click="MessageForwardClicked" />
                                       <Button Classes="command" Content="Archive" HorizontalContentAlignment="Left" Click="MessageArchiveClicked" />
                                       <Button Classes="command" Content="Delete" HorizontalContentAlignment="Left" Click="MessageDeleteClicked" />
-                                      <Button Classes="command" Content="Move to folder" HorizontalContentAlignment="Left">
-                                        <Button.Flyout>
-                                          <Flyout>
-                                            <ScrollViewer MaxHeight="420" MinWidth="230">
-                                              <ItemsControl ItemsSource="{ReflectionBinding $parent[Window].DataContext.Folders}">
-                                                <ItemsControl.ItemTemplate>
-                                                  <DataTemplate x:DataType="app:MailFolderItem">
-                                                    <Button Classes="command" Content="{Binding DisplayName}" HorizontalContentAlignment="Left"
-                                                            Command="{ReflectionBinding $parent[Window].DataContext.MoveToFolderCommand}" CommandParameter="{Binding}" />
-                                                  </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                              </ItemsControl>
-                                            </ScrollViewer>
-                                          </Flyout>
-                                        </Button.Flyout>
-                                      </Button>
+                                      <Button Classes="command" Content="Move to folder" HorizontalContentAlignment="Left" Click="MoveMessagesClicked" />
                                       <Border Height="1" Background="{DynamicResource BetterMailDividerBrush}" Margin="4" />
                                       <Button Classes="command" Content="Junk" HorizontalContentAlignment="Left" Click="MessageJunkClicked" />
                                       <Button Classes="command" Content="{ReflectionBinding $parent[Window].DataContext.ToggleFlagText}" HorizontalContentAlignment="Left" Click="MessageFlagClicked" />
