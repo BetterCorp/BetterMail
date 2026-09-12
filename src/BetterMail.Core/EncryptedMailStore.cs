@@ -395,9 +395,10 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
                         continue;
                     if (moves.Any(static action => !action.Accepted))
                     {
+                        var failed = moves.FirstOrDefault(static action => !action.Accepted && action.Error is not null);
                         if (!message.IsDeleted)
                             await UpsertMessageAsync(connection, transaction, message with
-                            { FolderId = latest.Error is not null ? latest.SourceFolderId ?? latest.DestinationId! : latest.DestinationId!,
+                            { FolderId = failed?.SourceFolderId ?? latest.DestinationId!,
                               IsRead = pendingStates.LastOrDefault(state => state.ReadValue is not null)?.ReadValue ?? true }, cancellationToken).ConfigureAwait(false);
                         continue;
                     }

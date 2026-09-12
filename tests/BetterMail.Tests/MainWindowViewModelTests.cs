@@ -7,6 +7,40 @@ namespace BetterMail.Tests;
 public sealed class MainWindowViewModelTests
 {
     [Theory]
+    [InlineData("drive", "Drive")]
+    [InlineData("notes", "Notes")]
+    public async Task OpeningStructuredWorkspaceSearchUsesOnlyContentTerms(string type, string module)
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-open-search-" + Guid.NewGuid());
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "account", "tenant", "alex@example.test", "Alex", ProviderCapabilities.Files | ProviderCapabilities.Notes);
+            await store.SaveAccountAsync(account, token);
+            var vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, workspaceProvider: new FakeWorkspaceProvider());
+            vm.Accounts.Add(account);
+            vm.SearchText = $"Planning type:{type} account:{{alex@example.test}}";
+            await ((AsyncCommand)vm.SearchCommand).ExecuteAsync();
+            var result = Assert.Single(vm.GlobalSearchResults, item => item.Module == module);
+            await ((AsyncCommand<GlobalSearchResult>)vm.OpenGlobalSearchResultCommand).ExecuteAsync(result);
+            if (module == "Drive")
+            {
+                Assert.Equal("Planning", vm.DriveWorkspace!.SearchQuery);
+                await WaitUntilAsync(() => !vm.DriveWorkspace.IsBusy, token);
+                Assert.NotEmpty(vm.DriveWorkspace.SearchResults);
+            }
+            else
+            {
+                Assert.Equal("Planning", vm.NotesWorkspace!.SearchText);
+                Assert.NotEmpty(vm.NotesWorkspace.VisibleRoots);
+            }
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task MovePickerResolvesCurrentCachedMessageAfterSync(bool alreadyInDestination)
@@ -2812,6 +2846,15 @@ public sealed class MainWindowViewModelTests
             DownloadCount++;
             await destination.WriteAsync("plan"u8.ToArray(), cancellationToken);
         }
+
+        public Task<IReadOnlyList<NoteNotebook>> GetNotebooksAsync(
+            MailAccount account, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<NoteNotebook>>(
+                [new("planning-notebook", "Planning", account.AccountId, account.ProviderId)]);
+
+        public Task<IReadOnlyList<NoteSection>> GetSectionsAsync(
+            MailAccount account, NoteNotebook notebook, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<NoteSection>>([]);
 
         public Task<IReadOnlyList<NoteInfo>> GetNotesAsync(
             MailAccount account, CancellationToken cancellationToken = default) =>

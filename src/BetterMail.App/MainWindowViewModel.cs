@@ -2779,16 +2779,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 await ShowWorkspaceModuleAsync("Drive");
                 if (DriveWorkspace is not null)
                 {
-                    DriveWorkspace.SearchQuery = SearchText;
-                    DriveWorkspace.SearchCommand.Execute(null);
+                    DriveWorkspace.SearchQuery = SearchQuery.Parse(SearchText).Text;
+                    await ((AsyncCommand)DriveWorkspace.SearchCommand).ExecuteAsync();
                 }
                 break;
             case "Notes":
                 await ShowWorkspaceModuleAsync("Notes");
                 if (NotesWorkspace is not null)
                 {
-                    NotesWorkspace.SearchText = SearchText;
-                    NotesWorkspace.SearchCommand.Execute(null);
+                    NotesWorkspace.SearchText = SearchQuery.Parse(SearchText).Text;
+                    await ((AsyncCommand)NotesWorkspace.SearchCommand).ExecuteAsync();
                 }
                 break;
         }

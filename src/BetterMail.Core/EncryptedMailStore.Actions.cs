@@ -124,7 +124,8 @@ public sealed partial class EncryptedMailStore
             if (action.Kind == MailActionKind.Move)
             {
                 var previous = related.Length > 1 ? related[^2] : null;
-                var folder = previous?.DestinationId ?? action.SourceFolderId;
+                var failed = related.FirstOrDefault(candidate => candidate.Id != action.Id && !candidate.Accepted && candidate.Error is not null);
+                var folder = failed?.SourceFolderId ?? previous?.DestinationId ?? action.SourceFolderId;
                 if (folder is null) return false;
                 command.CommandText = "UPDATE messages SET folder_id = $folder, is_read = $read WHERE mailbox_id = $mailbox AND provider_id = $provider;";
                 command.Parameters.AddWithValue("$folder", folder);
@@ -164,26 +165,26 @@ public sealed partial class EncryptedMailStore
     public Task FailMailActionAsync(string id, string error, CancellationToken cancellationToken = default) =>
         WithLockAsync(async connection =>
         {
-            var action = (await ReadActionsAsync(connection, null, cancellationToken).ConfigureAwait(false))
-                .FirstOrDefault(action => action.Id == id);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            var action = (await ReadActionsAsync(connection, transaction, cancellationToken).ConfigureAwait(false))
+                .FirstOrDefault(action => action.Id == id && !action.Accepted);
             if (action is not null)
             {
-                await WriteActionAsync(connection, null, action with { Running = false, Error = error }, cancellationToken).ConfigureAwait(false);
+                await WriteActionAsync(connection, transaction, action with { Running = false, Error = error }, cancellationToken).ConfigureAwait(false);
                 if (action.Kind == MailActionKind.Move && action.SourceFolderId is not null)
                 {
-                    var later = (await ReadActionsAsync(connection, null, cancellationToken).ConfigureAwait(false))
-                        .LastOrDefault(candidate => candidate.Kind == MailActionKind.Move && candidate.MailboxId == action.MailboxId && candidate.ItemId == action.ItemId);
-                    if (later?.Id == action.Id)
-                    {
-                        await using var command = connection.CreateCommand();
-                        command.CommandText = "UPDATE messages SET folder_id = $folder WHERE mailbox_id = $mailbox AND provider_id = $provider;";
-                        command.Parameters.AddWithValue("$folder", action.SourceFolderId);
-                        command.Parameters.AddWithValue("$mailbox", action.MailboxId);
-                        command.Parameters.AddWithValue("$provider", action.ProviderId!);
-                        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-                    }
+                    // Follow-up moves cannot run until this failure is recovered. Restore
+                    // the actual source even if a newer destination was optimistically shown.
+                    await using var command = connection.CreateCommand();
+                    command.Transaction = transaction;
+                    command.CommandText = "UPDATE messages SET folder_id = $folder WHERE mailbox_id = $mailbox AND provider_id = $provider;";
+                    command.Parameters.AddWithValue("$folder", action.SourceFolderId);
+                    command.Parameters.AddWithValue("$mailbox", action.MailboxId);
+                    command.Parameters.AddWithValue("$provider", action.ProviderId!);
+                    await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
                 }
             }
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }, cancellationToken);
 
     public Task MarkSendAttemptedAsync(string draftId, CancellationToken cancellationToken = default) =>

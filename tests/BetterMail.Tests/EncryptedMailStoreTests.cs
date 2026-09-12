@@ -6,6 +6,48 @@ namespace BetterMail.Tests;
 
 public sealed class EncryptedMailStoreTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedMoveWithFollowUpRestoresSourceAcrossSyncAndRecovery(bool cancelFollowUp)
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-failed-move-chain-" + Guid.NewGuid());
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "account", "tenant", "alex@work.example", "Alex", ProviderCapabilities.Mail);
+            var message = Message("account:alex@work.example", "original", "Test", "Body");
+            await store.ApplySyncPageAsync("seed", new([message], null, false), token);
+            var archive = new MailFolder(message.MailboxId, "archive", "Archive", 0, 0);
+            var first = await store.QueueMoveAsync(account, message, archive, token);
+            first = (await store.StartMailActionAsync(first.Id, token))!;
+            var followUp = await store.QueueMoveAsync(account, message with { FolderId = "archive" }, archive with { ProviderId = "done" }, token);
+            await store.FailMailActionAsync(first.Id, "Offline", token);
+            Assert.Equal(message.FolderId, (await store.GetMessageAsync(message.MailboxId, message.ProviderId, token))!.FolderId);
+            Assert.Equal(2, (await store.GetMailActionsAsync(token)).Count);
+            await store.ApplySyncPageAsync("refresh", new([message], null, false), token);
+            Assert.Equal(message.FolderId, (await store.GetMessageAsync(message.MailboxId, message.ProviderId, token))!.FolderId);
+            if (cancelFollowUp)
+            {
+                Assert.True(await store.CancelMailActionAsync(followUp.Id, token));
+                Assert.Equal(message.FolderId, (await store.GetMessageAsync(message.MailboxId, message.ProviderId, token))!.FolderId);
+            }
+            else
+            {
+                first = (await store.StartMailActionAsync(first.Id, token))!;
+                await store.CompleteMoveAsync(first, message with { ProviderId = "moved", FolderId = "archive" }, token);
+                var pending = Assert.Single(await store.GetMailActionsAsync(token));
+                Assert.Equal(followUp.Id, pending.Id);
+                Assert.Equal("archive", pending.SourceFolderId);
+                Assert.Equal("moved", pending.ProviderId);
+                Assert.Equal("done", (await store.GetMessageAsync(message.MailboxId, "moved", token))!.FolderId);
+            }
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
     [Fact]
     public async Task PendingActionsCoalesceAndFollowMovedProviderIdsWithoutLosingNewerState()
     {
