@@ -209,17 +209,48 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
     public int EditorMonth { get => _editorMonth; set => SetProperty(ref _editorMonth, value); }
     public DayOfWeek EditorFirstDayOfWeek { get => _editorFirstDayOfWeek; set => SetProperty(ref _editorFirstDayOfWeek, value); }
 
+    internal Task BackgroundRefresh { get; private set; } = Task.CompletedTask;
+    private int _calendarLoadVersion;
+    private int _eventsLoadVersion;
+
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
+        var version = ++_calendarLoadVersion;
+        if (_store is not null)
+        {
+            await InitializeCoreAsync(version, true, cancellationToken);
+            BackgroundRefresh = RefreshCalendarInBackgroundAsync(version, cancellationToken);
+        }
+        else await InitializeCoreAsync(version, false, cancellationToken);
+    }
 
+    private async Task RefreshCalendarInBackgroundAsync(int version, CancellationToken token)
+    {
+        try { await InitializeCoreAsync(version, false, token); }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception error) { if (version == _calendarLoadVersion) Error = error.Message; }
+    }
+
+    private async Task InitializeCoreAsync(int version, bool cacheOnly, CancellationToken cancellationToken)
+    {
         LoadIssues.Clear();
         _calendarIssues.Clear();
         var results = await Task.WhenAll(_accounts.Select((account, index) =>
-            LoadAccountAsync(account, index, cancellationToken)));
+            LoadAccountAsync(account, index, cancellationToken, cacheOnly)));
+        if (version != _calendarLoadVersion) return;
+        var previous = CalendarGroups.SelectMany(group => group.Calendars.Select(calendar =>
+            (Key: (group.Account.AccountId, calendar.Info.ProviderId), Calendar: calendar))).ToDictionary(item => item.Key, item => item.Calendar);
         CalendarGroups.Clear();
         EditableCalendars.Clear();
-        foreach (var result in results)
+        foreach (var loaded in results)
         {
+            var result = loaded with { Group = loaded.Group with { Calendars = loaded.Group.Calendars.Select(calendar =>
+            {
+                if (!previous.TryGetValue((loaded.Group.Account.AccountId, calendar.Info.ProviderId), out var existing)) return calendar;
+                if (existing.Info == calendar.Info) return existing;
+                calendar.IsVisible = existing.IsVisible;
+                return calendar;
+            }).ToArray() } };
             CalendarGroups.Add(result.Group);
             if (result.Error is not null)
             {
@@ -232,7 +263,7 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
         }
         _initialized = true;
         ((AsyncCommand)NewEventCommand).Refresh();
-        await RefreshEventsAsync(cancellationToken);
+        await RefreshEventsCoreAsync(cancellationToken, cacheOnly, ++_eventsLoadVersion);
     }
 
     public async Task UpdateAccountsAsync(
@@ -262,12 +293,15 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
     private async Task<AccountLoadResult> LoadAccountAsync(
         MailAccount account,
         int accountIndex,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool cacheOnly = false)
     {
         try
         {
-            var calendars = await _provider.GetCalendarsAsync(account, cancellationToken);
-            if (_store is not null)
+            var calendars = cacheOnly && _store is not null
+                ? await _store.GetWorkspaceItemsAsync<CalendarInfo>("calendar", account.AccountId, "all", cancellationToken)
+                : await _provider.GetCalendarsAsync(account, cancellationToken);
+            if (_store is not null && !cacheOnly)
             {
                 await _store.ReplaceWorkspaceItemsAsync(
                     "calendar", account.AccountId, "all", calendars,
@@ -299,7 +333,18 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
 
     private async Task RefreshEventsAsync(CancellationToken cancellationToken)
     {
-        if (!_initialized || IsLoading)
+        var version = ++_eventsLoadVersion;
+        if (_store is not null)
+        {
+            await RefreshEventsCoreAsync(cancellationToken, true, version);
+            if (version == _eventsLoadVersion) _ = RefreshEventsCoreAsync(cancellationToken, false, version);
+        }
+        else await RefreshEventsCoreAsync(cancellationToken, false, version);
+    }
+
+    private async Task RefreshEventsCoreAsync(CancellationToken cancellationToken, bool cacheOnly, int version)
+    {
+        if (!_initialized)
         {
             return;
         }
@@ -318,7 +363,8 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
                 .SelectMany(group => group.Calendars.Select(calendar => (group.Account, Calendar: calendar)))
                 .ToArray();
             var results = await Task.WhenAll(calendars.Select(item =>
-                LoadEventsAsync(item.Account, item.Calendar, range.Start, range.End, cancellationToken)));
+                LoadEventsAsync(item.Account, item.Calendar, range.Start, range.End, cancellationToken, cacheOnly)));
+            if (version != _eventsLoadVersion) return;
             _events.Clear();
             foreach (var result in results)
             {
@@ -343,7 +389,7 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
         }
         finally
         {
-            IsLoading = false;
+            if (version == _eventsLoadVersion) IsLoading = false;
         }
     }
 
@@ -352,10 +398,16 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
         CalendarChoice calendar,
         DateTimeOffset from,
         DateTimeOffset to,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool cacheOnly = false)
     {
         try
         {
+            if (cacheOnly && _store is not null)
+            {
+                var cached = await _store.GetCalendarEventsAsync(account.AccountId, calendar.Info.ProviderId, from, to, cancellationToken);
+                return new(cached.Select(item => new CalendarEventSource(account, calendar, item)).ToArray(), null);
+            }
             var events = await _provider.GetEventsAsync(
                 account, calendar.Info.ProviderId, from, to, cancellationToken);
             if (_store is not null)
