@@ -194,10 +194,7 @@ public sealed class NotesWorkspaceViewModel : ViewModelBase
             var cached = await GetCachedChildrenAsync(node, cancellationToken);
             node.ReplaceChildren(cached);
             node.IsLoaded = cached.Count > 0;
-            if (cached.Count == 0)
-            {
-                node.Error = $"{node.Account.EmailAddress}: {ex.Message}";
-            }
+            node.Error = $"{node.Account.EmailAddress}: {WorkspaceErrors.Describe(ex)}";
         }
         finally
         {
@@ -311,7 +308,7 @@ public sealed class NotesWorkspaceViewModel : ViewModelBase
                 }
                 else
                 {
-                    OperationError = $"{node.Account.EmailAddress}: {ex.Message}";
+                    OperationError = $"{node.Account.EmailAddress}: {WorkspaceErrors.Describe(ex)}";
                 }
             }
         }

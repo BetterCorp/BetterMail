@@ -131,7 +131,8 @@ public sealed partial class MainWindowViewModel
                         // A cloud draft creation already in flight can finish after local deletion was queued.
                         var draft = await _store.GetLocalDraftAsync(action.ItemId, timeout.Token);
                         var providerId = draft?.ProviderDraftId ?? action.ProviderId;
-                        if (providerId is not null && _provider.SupportsCloudDraftsFor(account))
+                        if (providerId is not null && _provider.SupportsCloudDraftsFor(account) &&
+                            !await _provider.IsDraftSentAsync(account, mailbox, providerId, timeout.Token))
                         {
                             try { await _provider.DeleteDraftAsync(account, mailbox, providerId, timeout.Token); }
                             catch (HttpRequestException exception) when (exception.StatusCode == HttpStatusCode.NotFound) { }

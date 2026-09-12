@@ -236,6 +236,31 @@ public sealed partial class EncryptedMailStore
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }, cancellationToken);
 
+    public Task<bool> TryRemoveConfirmedSentDraftAsync(LocalDraft expected, CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            if (expected.IsQueued || expected.ProviderDraftId is null || expected.SyncedLocalUpdatedAt != expected.UpdatedAt) return false;
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                DELETE FROM local_drafts WHERE id = $id AND account_id = $account AND mailbox_id = $mailbox
+                AND provider_draft_id = $provider AND updated_at = $updated AND synced_local_updated_at = $updated
+                AND is_queued = 0;
+                """;
+            command.Parameters.AddWithValue("$id", expected.Id);
+            command.Parameters.AddWithValue("$account", expected.AccountId);
+            command.Parameters.AddWithValue("$mailbox", expected.MailboxId);
+            command.Parameters.AddWithValue("$provider", expected.ProviderDraftId);
+            command.Parameters.AddWithValue("$updated", expected.UpdatedAt.ToString("O"));
+            if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 0) return false;
+            await WriteActionAsync(connection, transaction, new MailAction("delete:" + expected.Id,
+                expected.AccountId, expected.MailboxId, expected.Id, MailActionKind.DeleteDraft,
+                expected.Subject, DateTimeOffset.UtcNow, expected.ProviderDraftId, Accepted: true), cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return true;
+        }, cancellationToken);
+
     public Task CompleteDraftDeletionAsync(MailAction action, string? providerId, CancellationToken cancellationToken = default) =>
         WithLockAsync(async connection =>
         {

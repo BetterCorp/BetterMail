@@ -372,7 +372,7 @@ public sealed partial class MainWindowViewModel
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                issues.Enqueue($"{account.EmailAddress}: {exception.Message}");
+                issues.Enqueue($"{account.EmailAddress} · People: {WorkspaceErrors.Describe(exception)}");
             }
         }
 
@@ -401,7 +401,7 @@ public sealed partial class MainWindowViewModel
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                issues.Enqueue($"{account.EmailAddress}: {exception.Message}");
+                issues.Enqueue($"{account.EmailAddress} · Calendar: {WorkspaceErrors.Describe(exception)}");
             }
         }
 
@@ -429,7 +429,7 @@ public sealed partial class MainWindowViewModel
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                issues.Enqueue($"{account.EmailAddress}: {exception.Message}");
+                issues.Enqueue($"{account.EmailAddress} · To Do: {WorkspaceErrors.Describe(exception)}");
             }
         }
 
@@ -447,33 +447,42 @@ public sealed partial class MainWindowViewModel
                     static item => item.ProviderId,
                     static item => item.Name);
                 var notes = new List<NoteInfo>();
+                var complete = true;
                 foreach (var notebook in notebooks)
                 {
-                    var sections = await _workspaceProvider.GetSectionsAsync(account, notebook);
-                    await _store.ReplaceWorkspaceItemsAsync(
-                        "note-section", account.AccountId, notebook.ProviderId, sections,
-                        static item => item.ProviderId,
-                        static item => item.Name);
-                    foreach (var section in sections)
+                    try
                     {
-                        var pages = await _workspaceProvider.GetPagesAsync(account, section);
+                        var sections = await _workspaceProvider.GetSectionsAsync(account, notebook);
                         await _store.ReplaceWorkspaceItemsAsync(
-                            "note-page", account.AccountId, section.ProviderId, pages,
+                            "note-section", account.AccountId, notebook.ProviderId, sections,
                             static item => item.ProviderId,
-                            static item => item.Title);
-                        notes.AddRange(pages.Select(page => new NoteInfo(
-                            page.ProviderId, page.Title, page.ModifiedAt, page.WebUrl,
-                            page.AccountId, page.AccountProviderId, page.SectionProviderId)));
+                            static item => item.Name);
+                        foreach (var section in sections)
+                        {
+                            var pages = await _workspaceProvider.GetPagesAsync(account, section);
+                            await _store.ReplaceWorkspaceItemsAsync(
+                                "note-page", account.AccountId, section.ProviderId, pages,
+                                static item => item.ProviderId,
+                                static item => item.Title);
+                            notes.AddRange(pages.Select(page => new NoteInfo(
+                                page.ProviderId, page.Title, page.ModifiedAt, page.WebUrl,
+                                page.AccountId, page.AccountProviderId, page.SectionProviderId)));
+                        }
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        complete = false;
+                        issues.Enqueue($"{account.EmailAddress} · Notes · {notebook.Name}: {WorkspaceErrors.Describe(exception)}");
                     }
                 }
-                await _store.ReplaceWorkspaceItemsAsync(
+                if (complete) await _store.ReplaceWorkspaceItemsAsync(
                     "note", account.AccountId, "all", notes,
                     static item => item.ProviderId,
                     static item => item.Title);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                issues.Enqueue($"{account.EmailAddress}: {exception.Message}");
+                issues.Enqueue($"{account.EmailAddress} · Notes: {WorkspaceErrors.Describe(exception)}");
             }
         }
     }

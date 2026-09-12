@@ -6,6 +6,37 @@ namespace BetterMail.Tests;
 
 public sealed class EncryptedMailStoreTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConfirmedSentCleanupProtectsEditsAndPreventsResurrection(bool editDuringCheck)
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-sent-cleanup-" + Guid.NewGuid());
+        var key = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), key);
+            await store.InitializeAsync(token);
+            var baseline = DateTimeOffset.UtcNow;
+            var draft = new LocalDraft("local", "account", "mailbox", "to@example.com", "", "", "Draft", "Body", [], baseline,
+                ProviderDraftId: "remote", SyncedLocalUpdatedAt: baseline);
+            await store.SaveLocalDraftAsync(draft, token);
+            if (editDuringCheck) await store.SaveLocalDraftAsync(draft with { Body = "New local edit", UpdatedAt = baseline.AddSeconds(1) }, token);
+            Assert.Equal(!editDuringCheck, await store.TryRemoveConfirmedSentDraftAsync(draft, token));
+            if (editDuringCheck)
+                Assert.Equal("New local edit", (await store.GetLocalDraftAsync(draft.Id, token))!.Body);
+            else
+            {
+                await store.SaveLocalDraftAsync(draft, token);
+                await store.SaveLocalDraftAsync(draft with { Id = "late-import" }, token);
+                Assert.Empty(await store.GetLocalDraftsAsync(token));
+                Assert.Empty(await store.GetMailActionsAsync(token));
+            }
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
     [Fact]
     public async Task CancellingPendingActionsRestoresLocalItemsAndPreventsClaimingThem()
     {
