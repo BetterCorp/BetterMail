@@ -3963,10 +3963,20 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     internal static bool CanMoveMessagesToFolder(IReadOnlyList<MailMessage> messages, MailFolderItem folder) =>
         messages.Count > 0 && messages.All(message => message.MailboxId == folder.MailboxId && message.FolderId != folder.ProviderId);
 
-    internal Task MoveSnapshotToFolderAsync(IReadOnlyList<MailMessage> messages, MailFolderItem folder) =>
-        CanMoveMessagesToFolder(messages, folder) && Folders.Any(item => item.MailboxId == folder.MailboxId && item.ProviderId == folder.ProviderId)
-            ? MoveMessagesAsync(messages, folder.ProviderId, $"Moving to {folder.DisplayName}...", $"Moved to {folder.DisplayName}")
-            : Task.CompletedTask;
+    internal async Task MoveSnapshotToFolderAsync(IReadOnlyList<MailMessage> messages, MailFolderItem folder)
+    {
+        // The picker keeps the identities selected when it opened, but sync may have
+        // replaced their contents (or removed them) while the user chose a folder.
+        var current = new List<MailMessage>();
+        foreach (var snapshot in messages.DistinctBy(MessageKey))
+        {
+            var message = await GetCachedMessageAsync(snapshot);
+            if (message is not null) current.Add(message);
+        }
+        var destination = Folders.FirstOrDefault(item => item.MailboxId == folder.MailboxId && item.ProviderId == folder.ProviderId);
+        if (destination is not null && CanMoveMessagesToFolder(current, destination))
+            await MoveMessagesAsync(current, destination.ProviderId, $"Moving to {destination.DisplayName}...", $"Moved to {destination.DisplayName}");
+    }
 
     internal Task MoveSelectionToFolderAsync(MailFolderItem folder) =>
         MoveMessagesAsync(
