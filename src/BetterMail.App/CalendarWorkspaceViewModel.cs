@@ -159,7 +159,7 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
 
     public bool IsLoading
     {
-        get => _isLoading;
+        get => _isLoading || _loadingCalendarVersion is not null;
         private set
         {
             if (SetProperty(ref _isLoading, value))
@@ -211,6 +211,7 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
 
     internal Task BackgroundRefresh { get; private set; } = Task.CompletedTask;
     private int _calendarLoadVersion;
+    private int? _loadingCalendarVersion;
     private int _eventsLoadVersion;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -221,14 +222,32 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
             await InitializeCoreAsync(version, true, cancellationToken);
             BackgroundRefresh = RefreshCalendarInBackgroundAsync(version, cancellationToken);
         }
-        else await InitializeCoreAsync(version, false, cancellationToken);
+        else await InitializeWithProgressAsync(version, cancellationToken);
     }
 
     private async Task RefreshCalendarInBackgroundAsync(int version, CancellationToken token)
     {
-        try { await InitializeCoreAsync(version, false, token); }
+        try { await InitializeWithProgressAsync(version, token); }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception error) { if (version == _calendarLoadVersion) Error = error.Message; }
+    }
+
+    private async Task InitializeWithProgressAsync(int version, CancellationToken token)
+    {
+        if (version != _calendarLoadVersion) return;
+        _loadingCalendarVersion = version;
+        RaisePropertyChanged(nameof(IsLoading));
+        ((AsyncCommand)RefreshCommand).Refresh();
+        try { await InitializeCoreAsync(version, false, token); }
+        finally
+        {
+            if (_loadingCalendarVersion == version)
+            {
+                _loadingCalendarVersion = null;
+                RaisePropertyChanged(nameof(IsLoading));
+                ((AsyncCommand)RefreshCommand).Refresh();
+            }
+        }
     }
 
     private async Task InitializeCoreAsync(int version, bool cacheOnly, CancellationToken cancellationToken)
