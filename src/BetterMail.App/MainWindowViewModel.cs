@@ -203,14 +203,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         AddSharedMailboxForAccountCommand = new AsyncCommand<MailAccount>(RequestSharedMailboxAsync);
         ReauthenticateAccountCommand = new AsyncCommand<MailAccount>(ReauthenticateAccountAsync);
         SyncCommand = new AsyncCommand(SyncAsync, () => Accounts.Count > 0 && _provider is not null && !IsSyncing);
-        ToggleReadCommand = new AsyncCommand(ToggleReadAsync, CanRunSelectedMailAction);
-        ArchiveCommand = new AsyncCommand(() => MoveSelectedMessageAsync("archive", "Archiving...", "Archived"), CanRunSelectedMailAction);
-        DeleteCommand = new AsyncCommand(() => MoveSelectedMessageAsync("deleteditems", "Moving to Deleted Items...", "Moved to Deleted Items"), CanRunSelectedMailAction);
-        JunkCommand = new AsyncCommand(() => MoveSelectedMessageAsync("junkemail", "Moving to Junk Email...", "Moved to Junk Email"), CanRunSelectedMailAction);
-        NotJunkCommand = new AsyncCommand(() => MoveSelectedMessageAsync("inbox", "Moving to Inbox...", "Marked as not junk"), CanRunSelectedMailAction);
-        ToggleFlagCommand = new AsyncCommand(ToggleFlagAsync, CanRunSelectedMailAction);
-        TogglePinCommand = new AsyncCommand(TogglePinAsync, CanRunSelectedMailAction);
-        MoveToFolderCommand = new AsyncCommand<MailFolderItem>(MoveSelectionToFolderAsync, CanMoveSelectionToFolder);
+        ToggleReadCommand = new AsyncCommand(ToggleReadAsync, CanRunSelectedMailAction, allowConcurrent: true);
+        ArchiveCommand = new AsyncCommand(() => MoveSelectedMessageAsync("archive", "Archiving...", "Archived"), CanRunSelectedMailAction, allowConcurrent: true);
+        DeleteCommand = new AsyncCommand(() => MoveSelectedMessageAsync("deleteditems", "Moving to Deleted Items...", "Moved to Deleted Items"), CanRunSelectedMailAction, allowConcurrent: true);
+        JunkCommand = new AsyncCommand(() => MoveSelectedMessageAsync("junkemail", "Moving to Junk Email...", "Moved to Junk Email"), CanRunSelectedMailAction, allowConcurrent: true);
+        NotJunkCommand = new AsyncCommand(() => MoveSelectedMessageAsync("inbox", "Moving to Inbox...", "Marked as not junk"), CanRunSelectedMailAction, allowConcurrent: true);
+        ToggleFlagCommand = new AsyncCommand(ToggleFlagAsync, CanRunSelectedMailAction, allowConcurrent: true);
+        TogglePinCommand = new AsyncCommand(TogglePinAsync, CanRunSelectedMailAction, allowConcurrent: true);
+        MoveToFolderCommand = new AsyncCommand<MailFolderItem>(MoveSelectionToFolderAsync, CanMoveSelectionToFolder, allowConcurrent: true);
         ShowUnifiedInboxCommand = new AsyncCommand(ShowUnifiedInboxAsync);
         ShowPinnedCommand = new AsyncCommand(() => ShowUnifiedFilterAsync(MailMessageFilter.Pinned));
         ShowFlaggedCommand = new AsyncCommand(() => ShowUnifiedFilterAsync(MailMessageFilter.Flagged));
@@ -877,7 +877,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 MailMessageFilter.Flagged => "Flagged",
                 _ => _selectedFolder?.DisplayName ?? "Inbox"
             };
-    public double MessageRowHeight => IsCompact ? 58 : 78;
+    public double MessageRowHeight => (IsCompact ? 58 : 78) + (IsSearchResultsView ? 18 : 0);
     public Avalonia.Thickness MessageRowMargin => IsCompact
         ? new(10, 2, 9, 3)
         : new(12, 8, 11, 9);
@@ -1061,6 +1061,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             if (SetProperty(ref _isSearchResultsView, value))
             {
+                RaisePropertyChanged(nameof(MessageRowHeight));
                 RaisePropertyChanged(nameof(CurrentFolderName));
                 RaisePropertyChanged(nameof(IsUnifiedInbox));
                 RaisePropertyChanged(nameof(IsUnifiedSection));
@@ -1071,7 +1072,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             }
         }
     }
-    public string SearchResultSummary => $"Showing messages for ‘{SearchText.Trim()}’";
+    public string SearchResultSummary => _mailSearchSummary;
 
     public bool HasSearchText => !string.IsNullOrWhiteSpace(SearchText);
 
@@ -2012,7 +2013,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         _globalSearchCancellation?.Dispose();
         _globalSearchCancellation = new CancellationTokenSource();
         var source = _globalSearchCancellation;
-        var query = SearchText.Trim();
+        var rawQuery = SearchText.Trim();
+        var query = rawQuery;
+        SearchError = null;
         lock (_globalSearchResultsGate)
         {
             GlobalSearchResults.Clear();
@@ -2027,6 +2030,32 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         if (!forceOpen && string.Equals(_dismissedSearchText, query, StringComparison.Ordinal))
         {
             IsGlobalSearchRunning = false;
+            return;
+        }
+
+        SearchQuery parsed;
+        IReadOnlyList<MailFolderKey> searchFolders;
+        try
+        {
+            parsed = SearchQuery.Parse(rawQuery);
+            _selectedSearchScope = parsed.Scope;
+            _selectedSearchAccountFilter = ResolveQueryAccount(parsed["account"]);
+            if (_selectedSearchAccountFilter?.MailboxId is not null && parsed.Scope != "Mail")
+                throw new FormatException("Shared-mailbox searches require type:mail. Other workspace searches use the linked account's address.");
+            _selectedSearchFolderFilter = null;
+            _includeArchivedMailInSearch = parsed["archives"] == "true";
+            query = parsed.Text;
+            searchFolders = ResolveQueryFolders(parsed);
+            SearchNotice = parsed.HasMailFilters
+                ? "Advanced filters search synced mail. Sync first to include mail that is not cached yet."
+                : "";
+        }
+        catch (FormatException exception)
+        {
+            SearchError = exception.Message;
+            ClearLatestMailSearchResults();
+            IsGlobalSearchRunning = false;
+            IsGlobalSearchOpen = true;
             return;
         }
 
@@ -2048,10 +2077,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             {
                 var localMailSearch = AddGlobalResultsAsync(
                     "Mail",
-                    SearchCachedMailGloballyAsync(query, source.Token),
+                    SearchCachedMailGloballyAsync(parsed, searchFolders, source.Token),
                     source);
                 searches.Add(localMailSearch);
-                searches.Add(EnrichMailSearchFromProviderAsync(query, localMailSearch, source));
+                if (!parsed.HasMailFilters && query.Length > 0)
+                    searches.Add(EnrichMailSearchFromProviderAsync(query, localMailSearch, source));
             }
             AddSearch("People", () => SearchPeopleGloballyAsync(query, source.Token));
             AddSearch("Calendar", () => SearchCalendarGloballyAsync(query, source.Token));
@@ -2125,15 +2155,20 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     }
 
     private async Task<IReadOnlyList<GlobalSearchResult>> SearchCachedMailGloballyAsync(
-        string query,
+        SearchQuery query,
+        IReadOnlyList<MailFolderKey> folders,
         CancellationToken cancellationToken)
     {
-        var messages = (await _store!.SearchAsync(query, 500, cancellationToken))
-            .Where(IsSearchableMail)
+        var account = SelectedSearchAccountFilter;
+        var messages = (await _store!.SearchFilteredMailAsync(query, folders, 500, cancellationToken,
+                account?.AccountId, account?.MailboxId, includeUnknownFolders: query["in"] is null, knownFolders: Folders.Select(folder => new MailFolderKey(folder.MailboxId, folder.ProviderId)).ToArray()))
             .OrderByDescending(static message => message.ReceivedAt)
             .ThenByDescending(static message => message.ProviderId, StringComparer.Ordinal)
             .ToArray();
         cancellationToken.ThrowIfCancellationRequested();
+        _latestMailAccount = account;
+        _latestMailQuery = query;
+        _latestMailFolders = folders;
         _latestMailSearchResults.Clear();
         _latestMailSearchResults.AddRange(messages);
         return messages.Take(100)
@@ -2312,7 +2347,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         string query,
         CancellationToken cancellationToken)
     {
-        var discoveredTask = _store!.GetDiscoveredPeopleAsync(query, 8, cancellationToken);
+        var allowedMailboxes = Mailboxes.Where(MailboxMatchesSearchFilters).Select(mailbox => mailbox.Id).ToArray();
+        var discoveredTask = _store!.GetDiscoveredPeopleAsync(query, 8, cancellationToken, allowedMailboxes);
         var savedTask = _workspaceProvider is null
             ? Task.FromResult<IReadOnlyList<ContactInfo>>([])
             : SearchAccountsAsync(
@@ -2623,7 +2659,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             .ToDictionary(static folder => folder.ProviderId, StringComparer.Ordinal);
         var parts = new Stack<string>();
         var folderId = folderProviderId;
-        while (folders.TryGetValue(folderId, out var folder))
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        while (visited.Add(folderId) && folders.TryGetValue(folderId, out var folder))
         {
             parts.Push(folder.DisplayName);
             folderId = folder.ParentProviderId ?? "";
@@ -2631,7 +2668,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         return parts.Count == 0 ? "Unknown folder" : string.Join(" / ", parts);
     }
 
-    private string MailLocation(MailMessage message)
+    internal string MailLocation(MailMessage message)
     {
         var mailbox = Mailboxes.FirstOrDefault(candidate => candidate.Id == message.MailboxId);
         var folder = MailFolderPath(message.MailboxId, message.FolderId);
@@ -2720,7 +2757,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 ShowMailSearchResults(message);
                 break;
             case "People":
-                ModuleSearchText = SearchText;
+                ModuleSearchText = SearchQuery.Parse(SearchText).Text;
                 await ShowWorkspaceModuleAsync("People");
                 break;
             case "Calendar":
@@ -2734,7 +2771,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 await ShowWorkspaceModuleAsync("To Do");
                 if (TasksWorkspace is not null)
                 {
-                    TasksWorkspace.SearchText = SearchText;
+                    TasksWorkspace.SearchText = SearchQuery.Parse(SearchText).Text;
                     TasksWorkspace.SearchCommand.Execute(null);
                 }
                 break;
@@ -2794,6 +2831,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         ActiveModule = "Mail";
         IsDraftsView = false;
         SetSelectedFolder(null);
+        _displayedMailAccount = _latestMailAccount;
+        _displayedMailQuery = _latestMailQuery;
+        _displayedMailFolders = results is null ? _latestMailFolders
+            : _latestMailFolders.Where(folder => results.Any(message => message.MailboxId == folder.MailboxId)).ToArray();
+        _mailSearchSummary = $"Query: {_latestMailQuery?.Serialize()}\nAccount: {_latestMailQuery?["account"] ?? "All linked accounts"}\nFolder: {_latestMailQuery?["in"] ?? "All searchable folders"}\nArchives: {(_latestMailQuery?["archives"] == "true" ? "included" : "excluded unless explicitly selected")}";
+        if (results is not null && selected is not null)
+        {
+            _mailSearchSummary += $"\nShowing group: {SearchGroupFor(selected)}";
+            _displayedMailAccount = new SearchAccountFilter(SearchGroupFor(selected), null, selected.MailboxId);
+        }
+        RaisePropertyChanged(nameof(SearchResultSummary));
         IsSearchResultsView = true;
         Replace(Messages, (results ?? _latestMailSearchResults)
             .OrderByDescending(static message => message.ReceivedAt)
@@ -2830,14 +2878,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             if (SetProperty(ref _isLoadingMessages, value)) RaisePropertyChanged(nameof(ShowEmptyState));
         }
     }
-    private async Task LoadMessagesAsync()
+    private async Task LoadMessagesAsync(bool showLoading = true)
     {
         var loadVersion = ++_messageLoadVersion;
         _messageLoadCancellation?.Cancel();
         _messageLoadCancellation?.Dispose();
         var cancellation = _messageLoadCancellation = new CancellationTokenSource();
         var token = cancellation.Token;
-        IsLoadingMessages = true;
+        if (showLoading) IsLoadingMessages = true;
         try
         {
             var requestedFolder = _selectedFolder;
@@ -2846,12 +2894,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             {
                 return;
             }
-            if (IsSearchResultsView && SearchText.Trim().Length >= 2)
+            if (IsSearchResultsView && _displayedMailQuery is { } displayedQuery)
             {
                 _messagePageCursor = null;
-                await SearchCachedMailGloballyAsync(SearchText.Trim(), token);
+                var found = await _store.SearchFilteredMailAsync(displayedQuery, _displayedMailFolders, 500, token,
+                    _displayedMailAccount?.AccountId, _displayedMailAccount?.MailboxId, includeUnknownFolders: displayedQuery["in"] is null, knownFolders: Folders.Select(folder => new MailFolderKey(folder.MailboxId, folder.ProviderId)).ToArray());
                 if (loadVersion != _messageLoadVersion) return;
-                ReconcileMessages(_latestMailSearchResults);
+                ReconcileMessages(found);
                 RaiseMessageState();
                 RaisePropertyChanged(nameof(HasMoreMessages));
                 return;
@@ -3888,34 +3937,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private Task ToggleReadAsync() => ToggleReadMessagesAsync(ActionMessages());
 
-    private async Task ToggleReadMessagesAsync(IReadOnlyList<MailMessage> messages)
-    {
-        if (messages.Count == 0 || _isMailActionRunning)
-        {
-            return;
-        }
-
-        Error = null;
-        var isRead = !messages[0].IsRead;
-        BeginMailAction(isRead ? "Marking read..." : "Marking unread...");
-        try
-        {
-            foreach (var message in messages)
-            {
-                await UpdateReadStateAsync(message, isRead);
-            }
-            Status = "Up to date";
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            Error = exception.Message;
-            Status = "Action failed";
-        }
-        finally
-        {
-            EndMailAction();
-        }
-    }
+    private Task ToggleReadMessagesAsync(IReadOnlyList<MailMessage> messages) =>
+        QueueMessageStateChangesAsync(messages, read: messages.Count > 0 ? !messages[0].IsRead : null);
 
     private bool CanRunSelectedMailAction() =>
         IsMailInteractionContext && ActionMessages().Count > 0 && _provider is not null && !_isMailActionRunning;
@@ -3953,15 +3976,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     {
         var messages = ActionMessages();
         return folder is not null && IsMailInteractionContext && !_isMailActionRunning &&
-            messages.Count > 0 && messages.All(message => message.MailboxId == folder.MailboxId) &&
-            messages.All(message => message.FolderId != folder.ProviderId);
+            messages.Count > 0 && messages.All(message => message.MailboxId == folder.MailboxId);
     }
 
     internal IReadOnlyList<MailMessage> MoveSelectionSnapshot() =>
         IsMailInteractionContext && !_isMailActionRunning ? ActionMessages().ToArray() : [];
 
     internal static bool CanMoveMessagesToFolder(IReadOnlyList<MailMessage> messages, MailFolderItem folder) =>
-        messages.Count > 0 && messages.All(message => message.MailboxId == folder.MailboxId && message.FolderId != folder.ProviderId);
+        messages.Count > 0 && messages.All(message => message.MailboxId == folder.MailboxId);
 
     internal Task MoveSnapshotToFolderAsync(IReadOnlyList<MailMessage> messages, MailFolderItem folder) =>
         CanMoveMessagesToFolder(messages, folder) && Folders.Any(item => item.MailboxId == folder.MailboxId && item.ProviderId == folder.ProviderId)
@@ -3981,151 +4003,68 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         string actionStatus,
         string successStatus)
     {
-        if (messages.Count == 0 || _provider is null || _store is null || _isMailActionRunning)
+        if (messages.Count == 0 || _provider is null || _store is null) return;
+        messages = messages.Where(message =>
         {
-            return;
-        }
-
-        var movedKeys = messages.Select(MessageKey).ToHashSet(StringComparer.Ordinal);
-        var selectedWasMoved = SelectedMessage is not null && movedKeys.Contains(MessageKey(SelectedMessage));
-        if (selectedWasMoved)
-        {
-            _selectionWorkCancellation?.Cancel();
-        }
+            var destination = Folders.FirstOrDefault(folder => folder.MailboxId == message.MailboxId &&
+                (folder.ProviderId == destinationFolderId || folder.WellKnownName == destinationFolderId))?.ProviderId ?? destinationFolderId;
+            var pending = BusyActions.LastOrDefault(action => action.Kind == MailActionKind.Move && ActionMatches(action, message));
+            return pending is not null ? pending.DestinationId != destination || pending.Error is not null : message.FolderId != destination;
+        }).ToArray();
+        if (messages.Count == 0) { Status = "Messages are already in this folder or queued for it"; return; }
+        BeginMessageFeedback(messages);
+        var feedback = Task.Delay(350);
         Error = null;
-        BeginMailAction(actionStatus);
+        Status = actionStatus;
         try
         {
-            var firstIndex = messages.Select(Messages.IndexOf).Where(static index => index >= 0).DefaultIfEmpty(0).Min();
             foreach (var message in messages)
             {
-                if (!TryGetMessageContext(message, out var account, out var mailbox))
-                {
-                    continue;
-                }
+                if (!TryGetMessageContext(message, out var account, out var mailbox)) continue;
                 var destination = Folders.FirstOrDefault(folder => folder.MailboxId == mailbox.Id &&
                     (folder.ProviderId == destinationFolderId || folder.WellKnownName == destinationFolderId))?.Folder
                     ?? new MailFolder(mailbox.Id, destinationFolderId, destinationFolderId, 0, 0);
-                await _store.QueueMoveAsync(account, message, destination);
+                var action = await _store.QueueMoveAsync(account, message, destination);
+                ShowQueuedAction(action);
+            }
+            await feedback;
+            // Evaluate today's selection, not the selection from before the asynchronous queue writes.
+            foreach (var message in messages)
+            {
                 var displayed = Messages.FirstOrDefault(candidate => SameMessage(candidate, message));
-                if (displayed is not null)
+                var actualDestination = Folders.FirstOrDefault(folder => folder.MailboxId == message.MailboxId &&
+                    (folder.ProviderId == destinationFolderId || folder.WellKnownName == destinationFolderId))?.ProviderId ?? destinationFolderId;
+                if (displayed?.FolderId == actualDestination ||
+                    ConversationThread.SelectedMessage is { Message: var reading } && SameMessage(reading, message) && reading.FolderId == actualDestination)
+                    continue;
+                if (displayed is not null && displayed.FolderId == message.FolderId)
                 {
+                    var index = Messages.IndexOf(displayed);
+                    var wasCurrent = SameMessage(SelectedMessage, displayed);
                     Messages.Remove(displayed);
+                    foreach (var selected in SelectedMessages.Where(item => SameMessage(item, displayed)).ToArray()) SelectedMessages.Remove(selected);
+                    if (wasCurrent && (SelectedMessage is null || SameMessage(SelectedMessage, displayed)))
+                        SelectedMessage = Messages.Count == 0 ? null : Messages[Math.Min(index, Messages.Count - 1)];
                 }
-                ConversationThread.Reconcile(ConversationThread.Threads.SelectMany(static thread => thread.Messages)
-                    .Select(static item => item.Message).Where(candidate => !SameMessage(candidate, message)));
-            }
-
-            foreach (var selected in SelectedMessages.Where(message => movedKeys.Contains(MessageKey(message))).ToArray())
-            {
-                SelectedMessages.Remove(selected);
-            }
-            if (selectedWasMoved)
-            {
-                SelectedMessage = Messages.Count == 0 ? null : Messages[Math.Min(firstIndex, Messages.Count - 1)];
+                ConversationThread.Reconcile(ConversationThread.Threads.SelectMany(thread => thread.Messages)
+                    .Select(item => item.Message).Where(candidate => !SameMessage(candidate, message)));
             }
             RaiseMessageState();
-            await RefreshUnifiedCountsAsync();
-            await RefreshBusyActionsAsync();
             Status = successStatus;
+            _ = SyncAsync();
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            Error = exception.Message;
-            Status = "Action failed";
-        }
-        finally
-        {
-            EndMailAction();
-        }
-        _ = SyncAsync();
+        catch (Exception exception) { Error = exception.Message; Status = "Could not queue move"; }
+        finally { EndMessageFeedback(messages); }
     }
 
     private Task ToggleFlagAsync() => ToggleFlagMessagesAsync(ActionMessages());
 
-    private async Task ToggleFlagMessagesAsync(IReadOnlyList<MailMessage> messages)
-    {
-        if (messages.Count == 0 || _provider is null || _store is null || _isMailActionRunning)
-        {
-            return;
-        }
-
-        Error = null;
-        var isFlagged = !messages[0].IsFlagged;
-        BeginMailAction(isFlagged ? "Flagging message..." : "Clearing flag...");
-        try
-        {
-            foreach (var message in messages)
-            {
-                if (!TryGetMessageContext(message, out var account, out var mailbox))
-                {
-                    continue;
-                }
-                await _provider.SetFlaggedAsync(account, mailbox, message.ProviderId, isFlagged);
-                await _store.UpdateMessageStateAsync(
-                    message.MailboxId,
-                    message.ProviderId,
-                    isFlagged: isFlagged);
-                ApplyMessageStateUpdate(message, isFlagged: isFlagged);
-            }
-
-            if (!isFlagged && IsFlaggedView)
-            {
-                ReconcileMessages(Messages.Where(static message => message.IsFlagged).ToArray());
-            }
-            await RefreshUnifiedCountsAsync();
-
-            Status = isFlagged ? "Message flagged" : "Flag cleared";
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            Error = exception.Message;
-            Status = "Action failed";
-        }
-        finally
-        {
-            EndMailAction();
-        }
-    }
+    private Task ToggleFlagMessagesAsync(IReadOnlyList<MailMessage> messages) =>
+        QueueMessageStateChangesAsync(messages, flagged: messages.Count > 0 ? !messages[0].IsFlagged : null);
 
     private Task TogglePinAsync() => TogglePinMessagesAsync(ActionMessages());
-
-    private async Task TogglePinMessagesAsync(IReadOnlyList<MailMessage> messages)
-    {
-        if (messages.Count == 0 || _store is null || _isMailActionRunning)
-        {
-            return;
-        }
-
-        var isPinned = !messages[0].IsPinned;
-        BeginMailAction(isPinned ? "Pinning message..." : "Unpinning message...");
-        try
-        {
-            foreach (var message in messages)
-            {
-                await _store.UpdateMessageStateAsync(
-                    message.MailboxId,
-                    message.ProviderId,
-                    isPinned: isPinned);
-                ApplyMessageStateUpdate(message, isPinned: isPinned);
-            }
-            if (!isPinned && IsPinnedView)
-            {
-                ReconcileMessages(Messages.Where(static message => message.IsPinned).ToArray());
-            }
-            await RefreshUnifiedCountsAsync();
-            Status = isPinned ? "Message pinned" : "Message unpinned";
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            Error = exception.Message;
-            Status = "Action failed";
-        }
-        finally
-        {
-            EndMailAction();
-        }
-    }
+    private Task TogglePinMessagesAsync(IReadOnlyList<MailMessage> messages) =>
+        QueueMessageStateChangesAsync(messages, pinned: messages.Count > 0 ? !messages[0].IsPinned : null);
 
     private void BeginMailAction(string status)
     {

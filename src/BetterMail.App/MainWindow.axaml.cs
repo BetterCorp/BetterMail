@@ -733,7 +733,7 @@ public sealed partial class MainWindow : Window
             Height = 720,
             MinWidth = 420,
             MinHeight = 360,
-            Content = new ConversationThreadView { DataContext = previewViewModel }
+            Content = new ConversationThreadView { DataContext = previewViewModel, FeedbackOwner = viewModel }
         };
         ((ConversationThreadView)window.Content!).Bind(ConversationThreadView.ShowSenderImagesProperty,
             new Avalonia.Data.Binding(nameof(MainWindowViewModel.MailSenderImagesEnabled)) { Source = viewModel });
@@ -773,6 +773,18 @@ public sealed partial class MainWindow : Window
         Execute(_viewModel?.ToggleReadCommand);
     private void MessageHeadersClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
         Execute(_viewModel?.ViewHeadersCommand);
+
+    private void SearchOptionsClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (_viewModel is null) return;
+        _viewModel.IsGlobalSearchOpen = false;
+        var viewModel = _viewModel;
+        IndependentWindow.Show(new SearchOptionsWindow(viewModel.SearchText, query =>
+        {
+            viewModel.SearchText = query;
+            viewModel.SearchCommand.Execute(null);
+        }));
+    }
 
     private async void MoveMessagesClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
     {

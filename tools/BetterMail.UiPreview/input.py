@@ -23,6 +23,11 @@ if sys.argv[2] == 'click':
     t.XTestFakeMotionEvent(d, -1, int(sys.argv[3]), int(sys.argv[4]), 0)
     t.XTestFakeButtonEvent(d, 1, 1, 0)
     t.XTestFakeButtonEvent(d, 1, 0, 0)
+elif sys.argv[2] == 'drag':
+    t.XTestFakeMotionEvent(d, -1, int(sys.argv[3]), int(sys.argv[4]), 0)
+    t.XTestFakeButtonEvent(d, 1, 1, 0)
+    t.XTestFakeMotionEvent(d, -1, int(sys.argv[5]), int(sys.argv[6]), 100)
+    t.XTestFakeButtonEvent(d, 1, 0, 100)
 else:
     key(sys.argv[2], 1)
     key(sys.argv[2], 0)

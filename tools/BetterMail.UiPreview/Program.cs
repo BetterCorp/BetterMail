@@ -58,6 +58,37 @@ internal static class Program
         await CheckImageConsentAsync();
         window.Activate();
         await Shot("mail-light");
+        var searchOptions = new SearchOptionsWindow("budget type:mail account:{alex@work.example} in:{Inbox/Projects} date:{>=2026-09-01}", _ => { })
+        { WindowDecorations = WindowDecorations.None, WindowStartupLocation = WindowStartupLocation.Manual, Position = new PixelPoint(0, 0) };
+        searchOptions.Show();
+        await Shot("search-options-light", searchOptions);
+        Application.Current!.RequestedThemeVariant = ThemeVariant.Dark;
+        await Shot("search-options-dark", searchOptions);
+        searchOptions.FindControl<SelectableTextBlock>("SyntaxHelp")!.BringIntoView();
+        await Shot("search-syntax-dark", searchOptions);
+        searchOptions.Close();
+        Application.Current!.RequestedThemeVariant = ThemeVariant.Light;
+        var query = SearchQuery.Parse("type:mail account:{alex@work.example} in:Inbox");
+        vm.SearchText = query.Serialize();
+        typeof(MainWindowViewModel).GetField("_latestMailQuery", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(vm, query);
+        typeof(MainWindowViewModel).GetMethod("ShowMailSearchResults", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(vm, [null, previewMessages]);
+        await Shot("mail-search-context-light");
+        typeof(MainWindowViewModel).GetProperty("IsSearchResultsView")!.SetValue(vm, false);
+        vm.SearchText = "";
+        vm.BusyActions.Add(new MailAction("preview-move", account.AccountId, mailbox.Id, previewMessages[0].ProviderId,
+            MailActionKind.Move, previewMessages[0].Subject, DateTimeOffset.Now, previewMessages[0].ProviderId, "archive", "Archive"));
+        typeof(MainWindowViewModel).GetMethod("MailActionStateChanged", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(vm, null);
+        await Shot("mail-row-action-light");
+        var actionRows = window.FindControl<ListBox>("MessageList")!;
+        var busyRow = (Control)actionRows.ContainerFromIndex(0)!;
+        var idleRow = (Control)actionRows.ContainerFromIndex(1)!;
+        if (busyRow.GetVisualDescendants().OfType<Border>().Single(border => border.Classes.Contains("quickActions")).IsEnabled ||
+            !idleRow.GetVisualDescendants().OfType<Border>().Single(border => border.Classes.Contains("quickActions")).IsEnabled ||
+            !busyRow.GetVisualDescendants().OfType<ProgressBar>().Any(progress => progress.IsVisible))
+            throw new InvalidOperationException("Pending action did not disable only its own quick actions and show row progress.");
+        vm.BusyActions.Clear();
+        typeof(MainWindowViewModel).GetMethod("MailActionStateChanged", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(vm, null);
+        vm.SelectedMessage = null;
         var senderImages = window.FindControl<ListBox>("MessageList")!.GetVisualDescendants().OfType<AsyncImage>().ToArray();
         if (senderImages.Length == 0 || senderImages.Any(i => i.AllowLoading || i.IsVisible))
             throw new InvalidOperationException("Mail images must start hidden with loading disabled.");
@@ -98,7 +129,7 @@ internal static class Program
             new MailFolderItem(new("studio:alex@studio.example", "archive", "Archive", 0, 0), "Studio")
         }).ToArray();
         var move = new MailMoveWindow(moveFolders, previewMessages.Length,
-            folder => folder.MailboxId == mailbox.Id && folder.ProviderId != "inbox");
+            folder => folder.MailboxId == mailbox.Id);
         var moveResult = move.ChooseAsync(window);
         move.Position = new PixelPoint(0, 0);
         await Task.Delay(200);
@@ -109,7 +140,7 @@ internal static class Program
         var projectsNode = (TreeViewItem)inboxNode.Items[0]!;
         projectsNode.IsExpanded = true;
         tree.SelectedItem = inboxNode;
-        if (move.FindControl<Button>("MoveButton")!.IsEnabled) throw new InvalidOperationException("Move accepted current folder.");
+        if (!move.FindControl<Button>("MoveButton")!.IsEnabled) throw new InvalidOperationException("Move should allow the current folder and skip no-op messages.");
         tree.SelectedItem = projectsNode.Items[0];
         if (!move.FindControl<Button>("MoveButton")!.IsEnabled ||
             !move.FindControl<TextBlock>("DestinationPath")!.Text!.EndsWith("Inbox / Projects / Autumn launch"))
@@ -127,6 +158,25 @@ internal static class Program
         var headerImages = threadView.GetVisualDescendants().OfType<AsyncImage>().ToArray();
         if (!threadView.ShowSenderImages || headerImages.Length == 0 || headerImages.Any(i => !i.AllowLoading || !i.IsVisible))
             throw new InvalidOperationException("Conversation sender images did not follow the mail setting.");
+        var headerScroll = threadView.FindControl<ScrollViewer>("ThreadHeaderScroll")!;
+        var headerItems = Enumerable.Range(0, 8).Select(index => previewMessages[0] with { ProviderId = "header-" + index, ConversationId = "headers", Subject = "Review", ReceivedAt = PreviewProvider.Today.AddMinutes(index) }).ToArray();
+        vm.ConversationThread.Reconcile(headerItems, headerItems[4]);
+        await Task.Delay(300);
+        headerScroll.Offset = new Vector(0, 80);
+        var beforeOffset = headerScroll.Offset;
+        vm.ConversationThread.Reconcile(headerItems.Select(item => item with { IsRead = true }));
+        await Task.Delay(300);
+        if (vm.ConversationThread.SelectedMessage?.Message.ProviderId != "header-4" || Math.Abs(headerScroll.Offset.Y - beforeOffset.Y) > 1)
+            throw new InvalidOperationException("Background reconciliation changed thread position.");
+        var addressText = headerScroll.GetVisualDescendants().OfType<SelectableTextBlock>().First(block => block.Text == "hello@studio.example");
+        addressText.BringIntoView();
+        await Task.Delay(300);
+        var startText = addressText.PointToScreen(new Point(2, addressText.Bounds.Height / 2));
+        await Input("none", "drag", ((int)startText.X).ToString(), ((int)startText.Y).ToString(), ((int)startText.X + 95).ToString(), ((int)startText.Y).ToString());
+        if (addressText.SelectionStart == addressText.SelectionEnd) throw new InvalidOperationException("Could not select sender address text with the pointer.");
+        await Shot("thread-selectable-addresses-light");
+        Console.WriteLine("Native address selection and thread scroll/selection preservation checks passed.");
+        headerImages = threadView.GetVisualDescendants().OfType<AsyncImage>().ToArray();
         vm.MailSenderImagesEnabled = false;
         if (threadView.ShowSenderImages || headerImages.Any(i => i.AllowLoading || i.IsVisible))
             throw new InvalidOperationException("Conversation sender images remained enabled.");

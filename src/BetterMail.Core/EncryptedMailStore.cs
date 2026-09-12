@@ -381,8 +381,12 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
         {
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
             var actions = await ReadActionsAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
-            foreach (var message in page.Messages)
+            foreach (var incoming in page.Messages)
             {
+                var message = incoming;
+                var pendingStates = actions.Where(action => action.Kind == MailActionKind.UpdateState && MatchesMessage(action, message)).ToArray();
+                foreach (var state in pendingStates)
+                    message = message with { IsRead = state.ReadValue ?? message.IsRead, IsFlagged = state.FlagValue ?? message.IsFlagged, IsPinned = state.PinValue ?? message.IsPinned };
                 var moves = actions.Where(action => action.Kind == MailActionKind.Move && MatchesMessage(action, message)).ToArray();
                 if (moves.Length > 0)
                 {
@@ -393,7 +397,8 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
                     {
                         if (!message.IsDeleted)
                             await UpsertMessageAsync(connection, transaction, message with
-                            { FolderId = latest.DestinationId!, IsRead = true }, cancellationToken).ConfigureAwait(false);
+                            { FolderId = latest.Error is not null ? latest.SourceFolderId ?? latest.DestinationId! : latest.DestinationId!,
+                              IsRead = pendingStates.LastOrDefault(state => state.ReadValue is not null)?.ReadValue ?? true }, cancellationToken).ConfigureAwait(false);
                         continue;
                     }
                     if (message.IsDeleted ? page.SourceFolderId != latest.DestinationId : message.FolderId != latest.DestinationId)
@@ -754,7 +759,7 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
     public Task<IReadOnlyList<DiscoveredPerson>> GetDiscoveredPeopleAsync(
         string query = "",
         int limit = 500,
-        CancellationToken cancellationToken = default) =>
+        CancellationToken cancellationToken = default, IReadOnlyList<string>? mailboxIds = null) =>
         WithLockAsync<IReadOnlyList<DiscoveredPerson>>(async connection =>
         {
             var groups = new List<(string Email, string Name, string MailboxId, int Count, DateTimeOffset Last)>();
@@ -764,6 +769,7 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
                     SELECT email, display_name, mailbox_id, count(*), max(contacted_at)
                     FROM message_correspondents
                     WHERE instr(email, '@') > 1
+                      AND ($mailboxes IS NULL OR mailbox_id IN (SELECT value FROM json_each($mailboxes)))
                       AND ($query = '' OR email LIKE $pattern OR display_name LIKE $pattern)
                     GROUP BY email, display_name, mailbox_id
                     ORDER BY max(contacted_at) DESC;
@@ -783,10 +789,12 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
                     SELECT email, display_name, mailbox_id, count(*), max(contacted_at)
                     FROM correspondents
                     WHERE email <> '' AND instr(email, '@') > 1
+                      AND ($mailboxes IS NULL OR mailbox_id IN (SELECT value FROM json_each($mailboxes)))
                       AND ($query = '' OR email LIKE $pattern OR display_name LIKE $pattern)
                     GROUP BY email, display_name, mailbox_id
                     ORDER BY max(contacted_at) DESC;
                     """;
+            command.Parameters.AddWithValue("$mailboxes", mailboxIds is null ? DBNull.Value : JsonSerializer.Serialize(mailboxIds));
             command.Parameters.AddWithValue("$query", query.Trim());
             command.Parameters.AddWithValue("$pattern", $"%{query.Trim()}%");
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);

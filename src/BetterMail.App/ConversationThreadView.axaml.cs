@@ -11,6 +11,10 @@ public sealed partial class ConversationThreadView : UserControl
 {
     public static readonly StyledProperty<bool> ShowSenderImagesProperty = AvaloniaProperty.Register<ConversationThreadView, bool>(nameof(ShowSenderImages));
     public bool ShowSenderImages { get => GetValue(ShowSenderImagesProperty); set => SetValue(ShowSenderImagesProperty, value); }
+    public static readonly StyledProperty<MainWindowViewModel?> FeedbackOwnerProperty = AvaloniaProperty.Register<ConversationThreadView, MainWindowViewModel?>(nameof(FeedbackOwner));
+    public MainWindowViewModel? FeedbackOwner { get => GetValue(FeedbackOwnerProperty); set => SetValue(FeedbackOwnerProperty, value); }
+    private int _scrollInputVersion;
+    private (string? Thread, Vector Offset, int InputVersion)? _scrollSnapshot;
     private const int NavigateToStringLimitBytes = 2 * 1024 * 1024;
     private ConversationThreadViewModel? _viewModel;
     private ConversationMessageItem? _message;
@@ -24,6 +28,9 @@ public sealed partial class ConversationThreadView : UserControl
     {
         InitializeComponent();
         KeyDown += HandleKeyDown;
+        ThreadHeaderScroll.AddHandler(PointerWheelChangedEvent, (_, _) => _scrollInputVersion++, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        ThreadHeaderScroll.AddHandler(PointerPressedEvent, (_, _) => _scrollInputVersion++, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        ThreadHeaderScroll.AddHandler(KeyDownEvent, (_, _) => _scrollInputVersion++, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         DataContextChanged += (_, _) => BindViewModel(DataContext as ConversationThreadViewModel);
         AttachedToVisualTree += (_, _) =>
         {
@@ -60,14 +67,29 @@ public sealed partial class ConversationThreadView : UserControl
             if (_viewModel is not null)
             {
                 _viewModel.PropertyChanged -= ViewModelPropertyChanged;
+                _viewModel.Reconciling -= BeforeReconcile;
+                _viewModel.Reconciled -= AfterReconcile;
             }
             _viewModel = viewModel;
             if (_viewModel is not null)
             {
                 _viewModel.PropertyChanged += ViewModelPropertyChanged;
+                _viewModel.Reconciling += BeforeReconcile;
+                _viewModel.Reconciled += AfterReconcile;
             }
         }
         BindMessage(_viewModel?.SelectedMessage);
+    }
+
+    private void BeforeReconcile() => _scrollSnapshot = (_viewModel?.SelectedThread?.Identity, ThreadHeaderScroll.Offset, _scrollInputVersion);
+    private void AfterReconcile()
+    {
+        var snapshot = _scrollSnapshot;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (_attached && snapshot is { } saved && saved.Thread == _viewModel?.SelectedThread?.Identity && saved.InputVersion == _scrollInputVersion)
+                ThreadHeaderScroll.Offset = saved.Offset;
+        }, Avalonia.Threading.DispatcherPriority.Loaded);
     }
 
     private void ViewModelPropertyChanged(object? sender, PropertyChangedEventArgs args)
@@ -192,7 +214,7 @@ public sealed partial class ConversationThreadView : UserControl
     private void HandleKeyDown(object? sender, KeyEventArgs args)
     {
         if (DataContext is not ConversationThreadViewModel viewModel ||
-            args.Source is TextBox ||
+            args.Source is TextBox or SelectableTextBlock ||
             viewModel.SelectedThread is null)
         {
             return;
