@@ -63,6 +63,7 @@ public sealed partial class MainWindowViewModel
             return;
         }
 
+        StopContactPhotoSync();
         IsSyncing = true;
         Status = "Syncing mail...";
         Error = null;
@@ -166,9 +167,47 @@ public sealed partial class MainWindowViewModel
             {
                 _ = SyncAsync();
             }
+            else StartContactPhotoSync();
         }
     }
 
+    private CancellationTokenSource? _contactPhotoSyncCancellation;
+
+    private void StopContactPhotoSync() => _contactPhotoSyncCancellation?.Cancel();
+
+    private void StartContactPhotoSync()
+    {
+        if ((!ContactImagesEnabled && !MailSenderImagesEnabled) || _store is null || IsBusy ||
+            Volatile.Read(ref _syncRunning) != 0 || Volatile.Read(ref _workspaceSyncRunning) != 0 ||
+            _contactPhotoSyncCancellation is not null) return;
+        var store = _store;
+        var owners = ContactOwners.Select(owner => owner.CacheId).Distinct().ToArray();
+        var source = _contactPhotoSyncCancellation = new CancellationTokenSource();
+        _ = RunAsync();
+
+        async Task RunAsync()
+        {
+            try
+            {
+                await Task.Run(async () =>
+                {
+                    foreach (var owner in owners)
+                    {
+                        var contacts = await store.GetWorkspaceItemsAsync<ContactInfo>("contact", owner, "all", source.Token);
+                        await BackgroundImages.PrefetchAsync(contacts.SelectMany(contact => contact.EmailAddresses)
+                            .Where(email => !string.IsNullOrWhiteSpace(email)).Select(BackgroundImages.Contact), source.Token);
+                    }
+                }, source.Token);
+            }
+            catch (OperationCanceledException) when (source.IsCancellationRequested) { }
+            catch (Exception) { /* Photo enrichment is optional and must not change mail sync status. */ }
+            finally
+            {
+                if (ReferenceEquals(_contactPhotoSyncCancellation, source)) _contactPhotoSyncCancellation = null;
+                source.Dispose();
+            }
+        }
+    }
 
     private async Task RunStorageMaintenanceAsync()
     {
@@ -282,6 +321,7 @@ public sealed partial class MainWindowViewModel
             return;
         }
 
+        StopContactPhotoSync();
         _lastWorkspaceSyncAt = DateTimeOffset.UtcNow;
         var accounts = Accounts.ToArray();
         WorkspaceSyncStep.Running = true;
@@ -313,6 +353,7 @@ public sealed partial class MainWindowViewModel
         {
             WorkspaceSyncStep.Running = false;
             Interlocked.Exchange(ref _workspaceSyncRunning, 0);
+            StartContactPhotoSync();
         }
 
         async Task RefreshContactsAsync(MailAccount account)

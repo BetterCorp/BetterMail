@@ -170,6 +170,187 @@ public sealed class BackgroundImageTests
         Assert.Equal(new byte[] { 137, 80, 78, 71 }, result.Take(4));
     }
 
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ConcurrentImageCompletionPreservesPhotosAndCanUpgradeMisses(bool firstFound, bool laterFound)
+    {
+        var key = "contact:" + Guid.NewGuid();
+        var firstEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var laterEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseLater = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var first = BackgroundImages.GetAsync(new(key, async token =>
+        {
+            firstEntered.SetResult();
+            await releaseFirst.Task.WaitAsync(token);
+            return firstFound ? [1] : null;
+        }), cancellation.Token);
+        var later = BackgroundImages.GetAsync(new(key, async token =>
+        {
+            laterEntered.SetResult();
+            await releaseLater.Task.WaitAsync(token);
+            return laterFound ? [2] : null;
+        }), cancellation.Token, background: true);
+        try
+        {
+            await Task.WhenAll(firstEntered.Task, laterEntered.Task).WaitAsync(TimeSpan.FromSeconds(5), cancellation.Token);
+            releaseFirst.SetResult();
+            await first;
+            releaseLater.SetResult();
+            var expected = firstFound ? new byte[] { 1 } : new byte[] { 2 };
+            Assert.Equal(expected, await later);
+            Assert.Equal(expected, await BackgroundImages.GetAsync(new(key, _ =>
+                throw new InvalidOperationException("A cached photo must not be fetched again.")), cancellation.Token));
+        }
+        finally
+        {
+            cancellation.Cancel();
+            try { await Task.WhenAll(first, later); } catch (OperationCanceledException) { }
+        }
+    }
+
+    [Fact]
+    public async Task PrefetchDoesNotEvictWhenForegroundFillsCacheDuringDownload()
+    {
+        // Isolate the shared cache so the test can reproduce the exact 255 -> 256 race.
+        var flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+        var cache = (System.Collections.IDictionary)typeof(BackgroundImages).GetField("Cache", flags)!.GetValue(null)!;
+        var gate = typeof(BackgroundImages).GetField("Gate", flags)!.GetValue(null)!;
+        System.Collections.DictionaryEntry[] saved;
+        lock (gate)
+        {
+            saved = cache.Keys.Cast<object>().Select(key => new System.Collections.DictionaryEntry(key, cache[key])).ToArray();
+            cache.Clear();
+        }
+        var token = TestContext.Current.CancellationToken;
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<byte[]?>? background = null;
+        try
+        {
+            for (var i = 0; i < 255; i++)
+                await BackgroundImages.GetAsync(new("race-" + i, _ => Task.FromResult<byte[]?>([1])), token);
+            background = BackgroundImages.GetAsync(new("race-background", async ct =>
+            {
+                entered.SetResult();
+                await release.Task.WaitAsync(ct);
+                return [2];
+            }), token, background: true);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), token);
+            await BackgroundImages.GetAsync(new("race-final", _ => Task.FromResult<byte[]?>([3])), token);
+            release.SetResult();
+            await background;
+            lock (gate)
+            {
+                Assert.Equal(256, cache.Count);
+                Assert.True(cache.Contains("race-0"));
+                Assert.True(cache.Contains("race-final"));
+                Assert.False(cache.Contains("race-background"));
+            }
+        }
+        finally
+        {
+            release.TrySetResult();
+            if (background is not null) try { await background; } catch (OperationCanceledException) { }
+            lock (gate)
+            {
+                cache.Clear();
+                foreach (var entry in saved) cache.Add(entry.Key, entry.Value);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PhotoPassOnlyFetchesMissingImagesAndSharesResultsWithVisibleRows(bool found)
+    {
+        var calls = 0;
+        var request = new ImageRequest("contact:" + Guid.NewGuid(), _ =>
+        {
+            calls++;
+            return Task.FromResult<byte[]?>(found ? [1, 2, 3] : null);
+        });
+        var token = TestContext.Current.CancellationToken;
+        await BackgroundImages.PrefetchAsync([request, request], token);
+        await BackgroundImages.PrefetchAsync([request], token);
+        var visible = await BackgroundImages.GetAsync(request, token);
+        Assert.Equal(1, calls);
+        Assert.Equal(found ? new byte[] { 1, 2, 3 } : null, visible);
+    }
+
+    [Fact]
+    public async Task PhotoPassCancellationStopsActiveLookupAndRemainingQueue()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var nextCalls = 0;
+        var first = new ImageRequest("contact:" + Guid.NewGuid(), async token =>
+        {
+            entered.SetResult();
+            await Task.Delay(Timeout.Infinite, token);
+            return null;
+        });
+        var next = new ImageRequest("contact:" + Guid.NewGuid(), _ => { nextCalls++; return Task.FromResult<byte[]?>(null); });
+        var pass = BackgroundImages.PrefetchAsync([first, next], cancellation.Token);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pass);
+        Assert.Equal(0, nextCalls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PhotoPassRetriesBusyContactOrCancelsWhileWaiting(bool cancelPass)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var started = 0;
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var work = Enumerable.Range(0, 4).Select(_ => BackgroundImages.GetAsync(
+            new("foreground:" + Guid.NewGuid(), async token =>
+            {
+                if (Interlocked.Increment(ref started) == 4) entered.SetResult();
+                await Task.Delay(Timeout.Infinite, token);
+                return null;
+            }), cancellation.Token)).ToArray();
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            using var passCancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            var calls = new List<int>();
+            var pass = BackgroundImages.PrefetchAsync(Enumerable.Range(0, 2).Select(index =>
+                new ImageRequest("contact:" + Guid.NewGuid(), _ =>
+                {
+                    calls.Add(index);
+                    return Task.FromResult<byte[]?>(null);
+                })), passCancellation.Token);
+            await Task.Delay(250, TestContext.Current.CancellationToken);
+            Assert.False(pass.IsCompleted);
+            Assert.Empty(calls);
+            if (cancelPass)
+            {
+                passCancellation.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pass);
+                Assert.Empty(calls);
+            }
+            else
+            {
+                cancellation.Cancel();
+                await pass.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+                Assert.Equal(new[] { 0, 1 }, calls);
+            }
+        }
+        finally
+        {
+            cancellation.Cancel();
+            foreach (var task in work) await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+        }
+    }
+
     [Fact]
     public async Task CacheReusesArtworkAndNegativeResults()
     {

@@ -83,13 +83,21 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     public bool ContactImagesEnabled
     {
         get => _contactImagesEnabled;
-        set => SetProperty(ref _contactImagesEnabled, value);
+        set
+        {
+            if (SetProperty(ref _contactImagesEnabled, value) && !ContactImagesEnabled && !MailSenderImagesEnabled)
+                StopContactPhotoSync();
+        }
     }
     private bool _mailSenderImagesEnabled;
     public bool MailSenderImagesEnabled
     {
         get => _mailSenderImagesEnabled;
-        set => SetProperty(ref _mailSenderImagesEnabled, value);
+        set
+        {
+            if (SetProperty(ref _mailSenderImagesEnabled, value) && !ContactImagesEnabled && !MailSenderImagesEnabled)
+                StopContactPhotoSync();
+        }
     }
     private bool _autoSyncStarted;
     private int _syncFrame;
@@ -1691,6 +1699,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
+        StopContactPhotoSync();
         await RunBusyAsync("Removing account…", async () =>
         {
             if (_accountProviders.TryGetValue(account.ProviderId, out var accountProvider))
