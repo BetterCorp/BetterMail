@@ -63,6 +63,7 @@ public sealed partial class MainWindowViewModel
             return;
         }
 
+        StopContactPhotoSync();
         IsSyncing = true;
         Status = "Syncing mail...";
         Error = null;
@@ -115,7 +116,7 @@ public sealed partial class MainWindowViewModel
                     await LoadFoldersAsync();
                     if (IsMailModule && !IsGlobalSearchOpen && !IsSearchResultsView)
                     {
-                        await LoadMessagesAsync();
+                        await LoadMessagesAsync(showLoading: false);
                     }
                     if (IsMailModule && SelectedMessage is { } selected)
                     {
@@ -166,9 +167,47 @@ public sealed partial class MainWindowViewModel
             {
                 _ = SyncAsync();
             }
+            else StartContactPhotoSync();
         }
     }
 
+    private CancellationTokenSource? _contactPhotoSyncCancellation;
+
+    private void StopContactPhotoSync() => _contactPhotoSyncCancellation?.Cancel();
+
+    private void StartContactPhotoSync()
+    {
+        if ((!ContactImagesEnabled && !MailSenderImagesEnabled) || _store is null || IsBusy ||
+            Volatile.Read(ref _syncRunning) != 0 || Volatile.Read(ref _workspaceSyncRunning) != 0 ||
+            _contactPhotoSyncCancellation is not null) return;
+        var store = _store;
+        var owners = ContactOwners.Select(owner => owner.CacheId).Distinct().ToArray();
+        var source = _contactPhotoSyncCancellation = new CancellationTokenSource();
+        _ = RunAsync();
+
+        async Task RunAsync()
+        {
+            try
+            {
+                await Task.Run(async () =>
+                {
+                    foreach (var owner in owners)
+                    {
+                        var contacts = await store.GetWorkspaceItemsAsync<ContactInfo>("contact", owner, "all", source.Token);
+                        await BackgroundImages.PrefetchAsync(contacts.SelectMany(contact => contact.EmailAddresses)
+                            .Where(email => !string.IsNullOrWhiteSpace(email)).Select(BackgroundImages.Contact), source.Token);
+                    }
+                }, source.Token);
+            }
+            catch (OperationCanceledException) when (source.IsCancellationRequested) { }
+            catch (Exception) { /* Photo enrichment is optional and must not change mail sync status. */ }
+            finally
+            {
+                if (ReferenceEquals(_contactPhotoSyncCancellation, source)) _contactPhotoSyncCancellation = null;
+                source.Dispose();
+            }
+        }
+    }
 
     private async Task RunStorageMaintenanceAsync()
     {
@@ -282,6 +321,7 @@ public sealed partial class MainWindowViewModel
             return;
         }
 
+        StopContactPhotoSync();
         _lastWorkspaceSyncAt = DateTimeOffset.UtcNow;
         var accounts = Accounts.ToArray();
         WorkspaceSyncStep.Running = true;
@@ -313,6 +353,7 @@ public sealed partial class MainWindowViewModel
         {
             WorkspaceSyncStep.Running = false;
             Interlocked.Exchange(ref _workspaceSyncRunning, 0);
+            StartContactPhotoSync();
         }
 
         async Task RefreshContactsAsync(MailAccount account)
@@ -331,7 +372,7 @@ public sealed partial class MainWindowViewModel
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                issues.Enqueue($"{account.EmailAddress}: {exception.Message}");
+                issues.Enqueue($"{account.EmailAddress} · People: {WorkspaceErrors.Describe(exception)}");
             }
         }
 
@@ -360,7 +401,7 @@ public sealed partial class MainWindowViewModel
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                issues.Enqueue($"{account.EmailAddress}: {exception.Message}");
+                issues.Enqueue($"{account.EmailAddress} · Calendar: {WorkspaceErrors.Describe(exception)}");
             }
         }
 
@@ -388,7 +429,7 @@ public sealed partial class MainWindowViewModel
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                issues.Enqueue($"{account.EmailAddress}: {exception.Message}");
+                issues.Enqueue($"{account.EmailAddress} · To Do: {WorkspaceErrors.Describe(exception)}");
             }
         }
 
@@ -406,33 +447,42 @@ public sealed partial class MainWindowViewModel
                     static item => item.ProviderId,
                     static item => item.Name);
                 var notes = new List<NoteInfo>();
+                var complete = true;
                 foreach (var notebook in notebooks)
                 {
-                    var sections = await _workspaceProvider.GetSectionsAsync(account, notebook);
-                    await _store.ReplaceWorkspaceItemsAsync(
-                        "note-section", account.AccountId, notebook.ProviderId, sections,
-                        static item => item.ProviderId,
-                        static item => item.Name);
-                    foreach (var section in sections)
+                    try
                     {
-                        var pages = await _workspaceProvider.GetPagesAsync(account, section);
+                        var sections = await _workspaceProvider.GetSectionsAsync(account, notebook);
                         await _store.ReplaceWorkspaceItemsAsync(
-                            "note-page", account.AccountId, section.ProviderId, pages,
+                            "note-section", account.AccountId, notebook.ProviderId, sections,
                             static item => item.ProviderId,
-                            static item => item.Title);
-                        notes.AddRange(pages.Select(page => new NoteInfo(
-                            page.ProviderId, page.Title, page.ModifiedAt, page.WebUrl,
-                            page.AccountId, page.AccountProviderId, page.SectionProviderId)));
+                            static item => item.Name);
+                        foreach (var section in sections)
+                        {
+                            var pages = await _workspaceProvider.GetPagesAsync(account, section);
+                            await _store.ReplaceWorkspaceItemsAsync(
+                                "note-page", account.AccountId, section.ProviderId, pages,
+                                static item => item.ProviderId,
+                                static item => item.Title);
+                            notes.AddRange(pages.Select(page => new NoteInfo(
+                                page.ProviderId, page.Title, page.ModifiedAt, page.WebUrl,
+                                page.AccountId, page.AccountProviderId, page.SectionProviderId)));
+                        }
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        complete = false;
+                        issues.Enqueue($"{account.EmailAddress} · Notes · {notebook.Name}: {WorkspaceErrors.Describe(exception)}");
                     }
                 }
-                await _store.ReplaceWorkspaceItemsAsync(
+                if (complete) await _store.ReplaceWorkspaceItemsAsync(
                     "note", account.AccountId, "all", notes,
                     static item => item.ProviderId,
                     static item => item.Title);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                issues.Enqueue($"{account.EmailAddress}: {exception.Message}");
+                issues.Enqueue($"{account.EmailAddress} · Notes: {WorkspaceErrors.Describe(exception)}");
             }
         }
     }

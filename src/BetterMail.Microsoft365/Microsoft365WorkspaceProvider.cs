@@ -8,14 +8,14 @@ using BetterMail.Core;
 
 namespace BetterMail.Microsoft365;
 
-public sealed class Microsoft365WorkspaceProvider(
+public sealed partial class Microsoft365WorkspaceProvider(
     Microsoft365AuthService authentication,
     HttpClient? httpClient = null) :
     IWorkspaceProvider
 {
     internal const int DriveUploadChunkSizeBytes = 10 * 1024 * 1024;
     internal const int DriveUploadSessionThresholdBytes = 10 * 1024 * 1024;
-    private const string DriveItemSelect = "id,name,size,webUrl,parentReference,folder,file";
+    private const string DriveItemSelect = "id,name,size,webUrl,parentReference,folder,file,eTag";
     private const string NotePageSelect = "id,title,lastModifiedDateTime,order,level,links";
     private const string EventSelect =
         "id,calendar,subject,start,end,location,attendees,isReminderOn,reminderMinutesBeforeStart,recurrence,showAs," +
@@ -1221,7 +1221,7 @@ public sealed class Microsoft365WorkspaceProvider(
         var parentPath = parent is null
             ? "me/drive/root"
             : $"me/drive/items/{Uri.EscapeDataString(parent.ProviderId)}";
-        return $"{parentPath}:/{Uri.EscapeDataString(name.Trim())}:/{(createSession ? "createUploadSession" : "content")}";
+        return $"{parentPath}:/{Uri.EscapeDataString(name.Trim())}:/{(createSession ? "createUploadSession" : "content?@microsoft.graph.conflictBehavior=rename")}";
     }
 
     internal static CloudDriveItem MapDriveItem(JsonElement item, MailAccount account)
@@ -1240,7 +1240,8 @@ public sealed class Microsoft365WorkspaceProvider(
             account.AccountId,
             account.ProviderId,
             file.ValueKind == JsonValueKind.Object ? OptionalString(file, "mimeType") : null,
-            parent.ValueKind == JsonValueKind.Object ? OptionalString(parent, "path") : null);
+            parent.ValueKind == JsonValueKind.Object ? OptionalString(parent, "path") : null,
+            OptionalString(item, "eTag"));
     }
 
     private static void EnsureDriveOwned(MailAccount account, CloudDriveItem item)

@@ -5,6 +5,118 @@ namespace BetterMail.Tests;
 
 public sealed class ComposeWindowViewModelTests
 {
+    [Theory]
+    [InlineData(20971521, 0, true)]
+    [InlineData(2, 20971520, true)]
+    [InlineData(2, 0, false)]
+    public async Task DownloadedDriveFilesUseActualBytesAndCurrentTotalBudget(int downloadedBytes, int existingBytes, bool shouldShare)
+    {
+        var vm = new ComposeWindowViewModel([], [], new ComposeRequest(), (_, _, _) => Task.CompletedTask);
+        if (existingBytes > 0) vm.AddAttachment(new("existing", "application/octet-stream", new byte[existingBytes]));
+        var before = vm.Attachments.Count;
+        using var content = new MemoryStream();
+        content.SetLength(downloadedBytes);
+        var shared = false;
+        await vm.AttachDownloadedFileAsync("grew-after-listing.txt", "text/plain", content, () => { shared = true; return Task.CompletedTask; });
+        Assert.Equal(shouldShare, shared);
+        Assert.Equal(before + (shouldShare ? 0 : 1), vm.Attachments.Count);
+        if (!shouldShare) Assert.Equal(downloadedBytes, vm.Attachments[^1].Size);
+    }
+
+    [Fact]
+    public void SuccessfulFilesPreserveAllEarlierBatchErrorsUntilDismissed()
+    {
+        var vm = new ComposeWindowViewModel([], [], new ComposeRequest(), (_, _, _) => Task.CompletedTask);
+        Assert.True(vm.TryBeginFileAttachmentUpload(["large.bin", "small.txt"]));
+        vm.ReportError("large.bin uploaded to Attachments, but link creation failed");
+        vm.AddAttachment(new("small.txt", "text/plain", [1]));
+        vm.ReportError("another.bin could not be uploaded");
+        vm.AddAttachment(new("another-small.txt", "text/plain", [2]));
+        vm.IsUploadingAttachment = false;
+        Assert.Equal(2, vm.Attachments.Count);
+        Assert.Contains("large.bin uploaded to Attachments", vm.Error);
+        Assert.Contains("another.bin could not be uploaded", vm.Error);
+        Assert.True(vm.HasError);
+        vm.AddAttachment(new("later.txt", "text/plain", [3]));
+        Assert.True(vm.HasError);
+        vm.DismissError();
+        Assert.False(vm.HasError);
+    }
+
+    [Fact]
+    public async Task FailedLargeEditorDropRemainsVisibleAfterQueuedSmallFileSucceeds()
+    {
+        var vm = new ComposeWindowViewModel([], [], new ComposeRequest(), (_, _, _) => Task.CompletedTask);
+        var release = new TaskCompletionSource();
+        async Task Upload(DraftAttachment file)
+        {
+            await release.Task;
+            throw new InvalidOperationException("Upload failed");
+        }
+        var processing = vm.AttachDroppedAsync(new("large.bin", "application/octet-stream",
+            new byte[LargeAttachmentPolicy.DirectAttachmentBudgetBytes + 1]), Upload);
+        await vm.AttachDroppedAsync(new("small.txt", "text/plain", [1]), Upload);
+        release.SetResult();
+        await processing;
+        Assert.Equal("small.txt", Assert.Single(vm.Attachments).Name);
+        Assert.Contains("large.bin", vm.Error);
+        Assert.Contains("Upload failed", vm.Error);
+        Assert.False(vm.IsUploadingAttachment);
+    }
+
+    [Fact]
+    public void OsFileUploadsReportAllRejectedNamesAndKeepTheActiveUploadBusy()
+    {
+        var vm = new ComposeWindowViewModel([], [], new ComposeRequest(), (_, _, _) => Task.CompletedTask);
+        Assert.True(vm.TryBeginFileAttachmentUpload(["first.txt"]));
+        Assert.False(vm.CanChangeAttachments);
+        Assert.False(vm.TryBeginFileAttachmentUpload(["second.txt", "third.txt"]));
+        Assert.Contains("second.txt", vm.Error);
+        Assert.Contains("third.txt", vm.Error);
+        Assert.True(vm.IsUploadingAttachment);
+        Assert.Empty(vm.Attachments);
+    }
+
+    [Fact]
+    public async Task EditorDropQueuesLaterFilesAndKeepsSendingDisabledUntilAllFinish()
+    {
+        var account = new MailAccount("microsoft365", "account", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+        var vm = new ComposeWindowViewModel([account], [new(account.AccountId, account.EmailAddress, "Me")],
+            new ComposeRequest(), (_, _, _) => Task.CompletedTask);
+        vm.AddAttachment(new("existing", "application/octet-stream", new byte[LargeAttachmentPolicy.DirectAttachmentBudgetBytes]));
+        var release = new TaskCompletionSource();
+        var processed = new List<string>();
+        async Task Upload(DraftAttachment file)
+        {
+            Assert.True(vm.IsUploadingAttachment);
+            Assert.False(vm.SendCommand.CanExecute(null));
+            processed.Add(file.Name);
+            if (file.Name == "first") await release.Task;
+            if (file.Name == "second") throw new InvalidOperationException("Test failure");
+        }
+        var first = vm.AttachDroppedAsync(new("first", "text/plain", [1]), Upload);
+        await vm.AttachDroppedAsync(new("second", "text/plain", [2]), Upload);
+        await vm.AttachDroppedAsync(new("third", "text/plain", [3]), Upload);
+        Assert.Equal(["first"], processed);
+        release.SetResult();
+        await first;
+        Assert.Equal(["first", "second", "third"], processed);
+        Assert.Contains("second", vm.Error);
+        Assert.False(vm.IsUploadingAttachment);
+        Assert.True(vm.SendCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task EditorDropDuringAnotherUploadReportsTheRejectedFilename()
+    {
+        var vm = new ComposeWindowViewModel([], [], new ComposeRequest(), (_, _, _) => Task.CompletedTask);
+        vm.IsUploadingAttachment = true;
+        await vm.AttachDroppedAsync(new("retry.txt", "text/plain", [1]), _ => throw new Exception("Must not upload"));
+        Assert.Contains("retry.txt", vm.Error);
+        Assert.Empty(vm.Attachments);
+        Assert.True(vm.IsUploadingAttachment);
+    }
+
     [Fact]
     public async Task ReceiptOptionsAreIndependentAndFollowSenderSupport()
     {

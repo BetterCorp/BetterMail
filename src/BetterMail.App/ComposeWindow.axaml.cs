@@ -18,12 +18,14 @@ public sealed partial class ComposeWindow : Window
         DragDrop.SetAllowDrop(this, true);
         AddHandler(DragDrop.DragOverEvent, FilesDragOver);
         AddHandler(DragDrop.DropEvent, FilesDropped);
-        Composer.AttachmentDropped += attachment =>
+        Composer.AttachmentDropped += async attachment =>
         {
-            if (DataContext is ComposeWindowViewModel { IsSending: false } viewModel)
-            {
-                viewModel.AddAttachment(attachment);
-            }
+            if (DataContext is ComposeWindowViewModel viewModel)
+                await viewModel.AttachDroppedAsync(attachment, async file =>
+                {
+                    using var content = new MemoryStream(file.ContentBytes, writable: false);
+                    await AttachLargeFileAsync(viewModel, file.Name, content, content.Length);
+                });
         };
         Closing += SaveBeforeClosing;
         Opened += (_, _) => FocusToRecipient();
@@ -115,6 +117,11 @@ public sealed partial class ComposeWindow : Window
         }
 
         e.Cancel = true;
+        if (viewModel.IsUploadingAttachment)
+        {
+            viewModel.ReportError("Please wait for the attachment upload to finish before closing this draft.");
+            return;
+        }
         await CaptureEditorBodyAsync();
         await viewModel.FlushDraftAsync();
         _closeAfterSave = true;
@@ -172,14 +179,14 @@ public sealed partial class ComposeWindow : Window
         {
             return;
         }
-        e.DragEffects = DataContext is ComposeWindowViewModel { IsSending: false }
+        e.DragEffects = DataContext is ComposeWindowViewModel { CanChangeAttachments: true }
             ? DragDropEffects.Copy : DragDropEffects.None;
         e.Handled = true;
     }
 
     private async void FilesDropped(object? sender, DragEventArgs e)
     {
-        if (DataContext is not ComposeWindowViewModel { IsSending: false } viewModel ||
+        if (DataContext is not ComposeWindowViewModel viewModel ||
             e.DataTransfer.TryGetFiles() is not { } files)
         {
             return;
@@ -188,29 +195,63 @@ public sealed partial class ComposeWindow : Window
         await AttachFilesAsync(viewModel, files.OfType<IStorageFile>());
     }
 
-    private static async Task AttachFilesAsync(ComposeWindowViewModel viewModel, IEnumerable<IStorageFile> files)
+    private async Task AttachFilesAsync(ComposeWindowViewModel viewModel, IEnumerable<IStorageFile> files)
     {
-        foreach (var file in files)
+        if (!viewModel.TryBeginFileAttachmentUpload(files.Select(file => file.Name))) return;
+        try
         {
-            try
+            foreach (var file in files)
             {
-                await using var stream = await file.OpenReadAsync();
-                if (stream.CanSeek && !viewModel.ValidateAttachmentSize(file.Name, stream.Length))
+                try
                 {
-                    continue;
+                    await using var stream = await file.OpenReadAsync();
+                    if (stream.CanSeek && LargeAttachmentPolicy.UseDrive(stream.Length, viewModel.Attachments))
+                    {
+                        await AttachLargeFileAsync(viewModel, file.Name, stream, stream.Length);
+                        continue;
+                    }
+                    if (stream.CanSeek && !viewModel.ValidateAttachmentSize(file.Name, stream.Length))
+                    {
+                        continue;
+                    }
+                    await using var content = new LimitedMemoryStream(DraftAttachment.MaximumSizeBytes);
+                    await stream.CopyToAsync(content);
+                    if (LargeAttachmentPolicy.UseDrive(content.Length, viewModel.Attachments))
+                    {
+                        content.Position = 0;
+                        await AttachLargeFileAsync(viewModel, file.Name, content, content.Length);
+                    }
+                    else viewModel.AddAttachment(new DraftAttachment(file.Name, "application/octet-stream", content.ToArray()));
                 }
-                await using var content = new LimitedMemoryStream(DraftAttachment.MaximumSizeBytes);
-                await stream.CopyToAsync(content);
-                viewModel.AddAttachment(new DraftAttachment(file.Name, "application/octet-stream", content.ToArray()));
+                catch (Exception exception)
+                {
+                    viewModel.ReportError($"'{file.Name}' could not be attached: {exception.Message}");
+                }
             }
-            catch (InvalidOperationException)
-            {
-                viewModel.ValidateAttachmentSize(file.Name, DraftAttachment.MaximumSizeBytes + 1);
-            }
-            catch (Exception exception)
-            {
-                viewModel.ReportError($"'{file.Name}' could not be attached: {exception.Message}");
-            }
+        }
+        finally { viewModel.IsUploadingAttachment = false; }
+    }
+
+    private async Task AttachLargeFileAsync(ComposeWindowViewModel viewModel, string name, Stream content, long length)
+    {
+        var sender = viewModel.SelectedSender;
+        if (_filesProvider is null || sender?.Account.Capabilities.HasFlag(ProviderCapabilities.Files) != true)
+        {
+            viewModel.ReportError("Attachments above 20 MiB total need a sender with a connected Drive account. Select a OneDrive account or use a smaller file.");
+            return;
+        }
+        var folder = await LargeAttachmentPolicy.AttachmentsFolderAsync(_filesProvider, sender.Account);
+        var item = await _filesProvider.UploadFileAsync(sender.Account, folder, AttachmentDriveSaveViewModel.NormalizeFileName(name), content, length, "application/octet-stream");
+        try
+        {
+            var link = await _filesProvider.CreateReadOnlyLinkAsync(sender.Account, item, DateTimeOffset.UtcNow.AddYears(1), "anonymous", []);
+            if (viewModel.SelectedSender != sender) throw new InvalidOperationException("The sender changed. The uploaded file remains in the original account's Attachments folder.");
+            await CaptureEditorBodyAsync();
+            viewModel.Body += LargeAttachmentPolicy.LinkHtml(item.Name, link);
+        }
+        catch (Exception exception)
+        {
+            viewModel.ReportError($"'{item.Name}' was uploaded to Attachments, but its link could not be added: {exception.Message}");
         }
     }
 
@@ -239,24 +280,33 @@ public sealed partial class ComposeWindow : Window
         IFilesProvider provider,
         DriveProviderSelection? selection)
     {
-        if (!IsVisible || selection is null ||
-            !viewModel.ValidateAttachmentSize(selection.Item.Name, selection.Item.Size))
+        if (!IsVisible || selection is null)
         {
             return;
         }
 
+        if (!viewModel.TryBeginFileAttachmentUpload([selection.Item.Name])) return;
+        async Task ShareAsync()
+        {
+            var link = await provider.CreateReadOnlyLinkAsync(selection.Account, selection.Item, DateTimeOffset.UtcNow.AddYears(1), "anonymous", []);
+            await CaptureEditorBodyAsync();
+            viewModel.Body += LargeAttachmentPolicy.LinkHtml(selection.Item.Name, link);
+        }
         try
         {
+            if (LargeAttachmentPolicy.UseDrive(selection.Item.Size, viewModel.Attachments))
+            {
+                await ShareAsync();
+                return;
+            }
             await using var content = new LimitedMemoryStream(DraftAttachment.MaximumSizeBytes);
             await provider.DownloadFileAsync(selection.Account, selection.Item, content);
-            viewModel.AddAttachment(new DraftAttachment(
-                selection.Item.Name,
-                selection.Item.ContentType ?? "application/octet-stream",
-                content.ToArray()));
+            await viewModel.AttachDownloadedFileAsync(selection.Item.Name, selection.Item.ContentType, content, ShareAsync);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             viewModel.ReportError($"'{selection.Item.Name}' could not be attached: {exception.Message}");
         }
+        finally { viewModel.IsUploadingAttachment = false; }
     }
 }

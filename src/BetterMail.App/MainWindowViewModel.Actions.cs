@@ -70,6 +70,7 @@ public sealed partial class MainWindowViewModel
         if (_store is null) return;
         CollectionUpdates.Reconcile(BusyActions, await _store.GetMailActionsAsync(), static action => action.Id);
         RaiseDraftState();
+        MailActionStateChanged();
     }
 
     private async Task ProcessMailActionsAsync()
@@ -122,6 +123,12 @@ public sealed partial class MainWindowViewModel
                         if (local is not null) ApplyMessageUpdate(displayed, local);
                     }
                 }
+                else if (action.Kind == MailActionKind.UpdateState)
+                {
+                    if (action.ReadValue is { } read) await _provider.MarkReadAsync(account, mailbox, action.ProviderId!, read, timeout.Token);
+                    if (action.FlagValue is { } flagged) await _provider.SetFlaggedAsync(account, mailbox, action.ProviderId!, flagged, timeout.Token);
+                    await _store.CompleteMessageStateAsync(action, timeout.Token);
+                }
                 else
                 {
                     var mailboxLock = _draftSyncLocks.GetOrAdd(mailbox.Id, static _ => new SemaphoreSlim(1, 1));
@@ -131,7 +138,8 @@ public sealed partial class MainWindowViewModel
                         // A cloud draft creation already in flight can finish after local deletion was queued.
                         var draft = await _store.GetLocalDraftAsync(action.ItemId, timeout.Token);
                         var providerId = draft?.ProviderDraftId ?? action.ProviderId;
-                        if (providerId is not null && _provider.SupportsCloudDraftsFor(account))
+                        if (providerId is not null && _provider.SupportsCloudDraftsFor(account) &&
+                            !await _provider.IsDraftSentAsync(account, mailbox, providerId, timeout.Token))
                         {
                             try { await _provider.DeleteDraftAsync(account, mailbox, providerId, timeout.Token); }
                             catch (HttpRequestException exception) when (exception.StatusCode == HttpStatusCode.NotFound) { }
@@ -145,6 +153,26 @@ public sealed partial class MainWindowViewModel
             {
                 await _store.FailMailActionAsync(action.Id, exception.Message);
                 blocked.Add((action.MailboxId, action.ItemId));
+                if (action.Kind == MailActionKind.Move)
+                {
+                    var restored = await _store.GetMessageAsync(action.MailboxId, action.ProviderId!);
+                    var restoreToView = restored is not null &&
+                        (_selectedFolder?.ProviderId == restored.FolderId && _selectedFolder.MailboxId == restored.MailboxId ||
+                         IsPinnedView && restored.IsPinned || IsFlaggedView && restored.IsFlagged ||
+                         IsUnifiedInbox && Folders.Any(folder => folder.MailboxId == restored.MailboxId && folder.ProviderId == restored.FolderId && folder.WellKnownName == "inbox"));
+                    if (restored is not null && IsSearchResultsView && _displayedMailQuery is { } query)
+                    {
+                        var matching = await _store.SearchFilteredMailAsync(query, _displayedMailFolders, 500, default,
+                            _displayedMailAccount?.AccountId, _displayedMailAccount?.MailboxId, query["in"] is null,
+                            Folders.Select(folder => new MailFolderKey(folder.MailboxId, folder.ProviderId)).ToArray());
+                        restoreToView = matching.Any(message => SameMessage(message, restored));
+                    }
+                    if (restored is not null && restoreToView)
+                    {
+                        if (!Messages.Any(message => SameMessage(message, restored)))
+                            Messages.Insert(0, restored);
+                    }
+                }
             }
             await RefreshBusyActionsAsync();
         }

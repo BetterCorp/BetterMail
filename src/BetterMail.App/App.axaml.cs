@@ -131,6 +131,9 @@ public sealed partial class App : Application
         viewModel.MailSyncRange = preferences.MailSyncRange;
         viewModel.ConfigureMailQuickActions(preferences.MailQuickActions);
         viewModel.ConfigureAccountOrder(preferences.AccountOrder);
+        viewModel.ContactImagesEnabled = preferences.ContactImagesEnabled;
+        viewModel.MailSenderImagesEnabled = preferences.MailSenderImagesEnabled;
+        viewModel.PeopleCardView = preferences.PeopleCardView;
         viewModel.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName is nameof(MainWindowViewModel.SelectedThemeMode) or
@@ -141,7 +144,10 @@ public sealed partial class App : Application
                 nameof(MainWindowViewModel.MailSyncRange) or
                 nameof(MainWindowViewModel.MailQuickActionsVersion) or
                 nameof(MainWindowViewModel.SenderPreferencesVersion) or
-                nameof(MainWindowViewModel.AccountOrderVersion))
+                nameof(MainWindowViewModel.AccountOrderVersion) or
+                nameof(MainWindowViewModel.ContactImagesEnabled) or
+                nameof(MainWindowViewModel.MailSenderImagesEnabled) or
+                nameof(MainWindowViewModel.PeopleCardView))
             {
                 AppPreferencesStore.Save(dataDirectory, new AppPreferences(
                     ThemeMode: viewModel.SelectedThemeMode,
@@ -154,7 +160,10 @@ public sealed partial class App : Application
                     MailboxSignatures: viewModel.GetMailboxSignaturePreferences(),
                     MailQuickActions: viewModel.GetMailQuickActionPreferences(),
                     DefaultMailPromptShown: viewModel.DefaultMailPromptShown,
-                    AccountOrder: viewModel.GetAccountOrderPreferences()));
+                    AccountOrder: viewModel.GetAccountOrderPreferences(),
+                    ContactImagesEnabled: viewModel.ContactImagesEnabled,
+                    MailSenderImagesEnabled: viewModel.MailSenderImagesEnabled,
+                    PeopleCardView: viewModel.PeopleCardView));
             }
         };
         viewModel.ConfigureSenderPreferences(

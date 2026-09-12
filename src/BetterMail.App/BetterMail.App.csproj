@@ -37,6 +37,7 @@
     <PackageReference Include="Avalonia.Desktop" />
     <PackageReference Include="Avalonia.Fonts.Inter" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Svg.Skia" />
     <PackageReference Include="HtmlSanitizer" />
     <PackageReference Include="Velopack" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" />

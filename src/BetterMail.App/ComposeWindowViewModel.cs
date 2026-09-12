@@ -77,8 +77,8 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         {
             Attachments.Add(attachment);
         }
-        SendCommand = new AsyncCommand(SendAsync, () => SelectedSender is not null && !IsSending);
-        DeleteCommand = new AsyncCommand(DeleteSavedDraftAsync, () => _deleteDraft is not null && !IsSending);
+        SendCommand = new AsyncCommand(SendAsync, () => SelectedSender is not null && !IsSending && !IsUploadingAttachment);
+        DeleteCommand = new AsyncCommand(DeleteSavedDraftAsync, () => _deleteDraft is not null && !IsSending && !IsUploadingAttachment);
         RemoveAttachmentCommand = new AsyncCommand<DraftAttachment>(RemoveAttachmentAsync);
         if (HasContent())
         {
@@ -187,14 +187,77 @@ public sealed class ComposeWindowViewModel : ViewModelBase
             if (SetProperty(ref _isSending, value))
             {
                 ((AsyncCommand)SendCommand).Refresh();
+                ((AsyncCommand)DeleteCommand).Refresh();
+                RaisePropertyChanged(nameof(CanChangeAttachments));
             }
         }
     }
+
+    public bool CanChangeAttachments => !IsSending && !IsUploadingAttachment;
 
     public string DraftStatus
     {
         get => _draftStatus;
         private set => SetProperty(ref _draftStatus, value);
+    }
+
+    private bool _isUploadingAttachment;
+    public bool IsUploadingAttachment
+    {
+        get => _isUploadingAttachment;
+        set { if (SetProperty(ref _isUploadingAttachment, value)) { ((AsyncCommand)SendCommand).Refresh(); ((AsyncCommand)DeleteCommand).Refresh(); RaisePropertyChanged(nameof(CanChangeAttachments)); } }
+    }
+
+    internal bool TryBeginFileAttachmentUpload(IEnumerable<string> names)
+    {
+        if (!CanChangeAttachments)
+        {
+            ReportError($"Files were not attached: {string.Join(", ", names)}. Wait for the current operation to finish and try again.");
+            return false;
+        }
+        IsUploadingAttachment = true;
+        return true;
+    }
+
+    private readonly Queue<DraftAttachment> _droppedAttachments = new();
+    private bool _processingDroppedAttachments;
+
+    // Called on the UI thread; keep the busy state set while the entire drop queue drains.
+    internal async Task AttachDroppedAsync(DraftAttachment attachment, Func<DraftAttachment, Task> uploadLarge)
+    {
+        if (IsSending || IsUploadingAttachment && !_processingDroppedAttachments)
+        {
+            ReportError($"'{attachment.Name}' was not attached. Wait for the current operation to finish and drop it again.");
+            return;
+        }
+        _droppedAttachments.Enqueue(attachment);
+        if (_processingDroppedAttachments) return;
+        _processingDroppedAttachments = true;
+        IsUploadingAttachment = true;
+        try
+        {
+            while (_droppedAttachments.TryDequeue(out var file))
+            {
+                try
+                {
+                    if (LargeAttachmentPolicy.UseDrive(file.Size, Attachments)) await uploadLarge(file);
+                    else AddAttachment(file);
+                }
+                catch (Exception exception) { ReportError($"'{file.Name}' could not be attached: {exception.Message}"); }
+            }
+        }
+        finally
+        {
+            _processingDroppedAttachments = false;
+            IsUploadingAttachment = false;
+        }
+    }
+
+    internal async Task AttachDownloadedFileAsync(string name, string? contentType, MemoryStream content, Func<Task> share)
+    {
+        // Listed metadata may be stale: decide from the bytes actually downloaded.
+        if (LargeAttachmentPolicy.UseDrive(content.Length, Attachments)) await share();
+        else AddAttachment(new(name, contentType ?? "application/octet-stream", content.ToArray()));
     }
 
     public void AddAttachment(DraftAttachment attachment)
@@ -204,12 +267,12 @@ public sealed class ComposeWindowViewModel : ViewModelBase
             return;
         }
 
-        Error = null;
         Attachments.Add(attachment);
         ScheduleAutosave();
     }
 
-    public void ReportError(string error) => Error = error;
+    public void ReportError(string error) =>
+        Error = IsUploadingAttachment && HasError ? Error + Environment.NewLine + error : error;
 
     public void DismissError() => Error = null;
 
@@ -217,7 +280,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
     {
         if (size is < 0 or > DraftAttachment.MaximumSizeBytes)
         {
-            Error = $"'{name}' is larger than the 150 MB Microsoft Graph attachment limit.";
+            ReportError($"'{name}' is larger than the 150 MB Microsoft Graph attachment limit.");
             return false;
         }
         return true;
@@ -239,7 +302,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            Error = $"Draft could not be saved: {exception.Message}";
+            ReportError($"Draft could not be saved: {exception.Message}");
         }
     }
 
@@ -372,7 +435,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         }
         catch (Exception exception)
         {
-            Error = $"Draft could not be saved: {exception.Message}";
+            ReportError($"Draft could not be saved: {exception.Message}");
             DraftStatus = "Not saved";
         }
     }
