@@ -7,6 +7,37 @@ namespace BetterMail.Tests;
 public sealed class MainWindowViewModelTests
 {
     [Fact]
+    public async Task UncachedCalendarShowsProgressWhileProviderIsBlocked()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-empty-calendar-" + Guid.NewGuid());
+        var provider = new FakeWorkspaceProvider
+        {
+            CalendarGate = new(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "cached", "tenant", "me@example.test", "Me", ProviderCapabilities.Calendar);
+            var vm = new CalendarWorkspaceViewModel(provider, [account], store: store);
+            await vm.InitializeAsync(token).WaitAsync(TimeSpan.FromSeconds(5), token);
+            Assert.Empty(vm.CalendarGroups.SelectMany(group => group.Calendars));
+            Assert.True(vm.IsLoading);
+            Assert.False(vm.BackgroundRefresh.IsCompleted);
+            provider.CalendarGate.SetResult();
+            await vm.BackgroundRefresh.WaitAsync(TimeSpan.FromSeconds(5), token);
+            Assert.False(vm.IsLoading);
+            Assert.NotEmpty(vm.CalendarGroups.SelectMany(group => group.Calendars));
+        }
+        finally
+        {
+            provider.CalendarGate.TrySetResult();
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
     public async Task CachedPeopleAndCalendarOpenBeforeBlockedProviderCompletes()
     {
         var token = TestContext.Current.CancellationToken;
