@@ -16,6 +16,16 @@ public sealed class NotesWorkspaceViewModelTests
         ProviderCapabilities.Notes);
 
     [Fact]
+    public void LibraryLimitHasConciseRecoveryText()
+    {
+        var message = WorkspaceErrors.Describe(new HttpRequestException("Document library exceeds limit (10008)"));
+        Assert.Contains("Cached notes are kept", message);
+        Assert.Contains("OneNote", message);
+        Assert.DoesNotContain("https://", message);
+        Assert.Equal("Invalid request (invalidRequest)", WorkspaceErrors.Describe(new HttpRequestException("Invalid request (invalidRequest)")));
+    }
+
+    [Fact]
     public async Task UnchangedAccountsRetainLoadedNavigation()
     {
         var vm = new NotesWorkspaceViewModel(new FakeNotesProvider(), [Account]);

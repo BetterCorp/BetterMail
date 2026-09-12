@@ -493,6 +493,7 @@ public sealed record MailPage(
 
 public interface IDraftStore
 {
+    Task<bool> TryRemoveConfirmedSentDraftAsync(LocalDraft expected, CancellationToken cancellationToken = default) => Task.FromResult(false);
     Task<bool> IsDraftPendingDeletionAsync(string id, CancellationToken cancellationToken = default) => Task.FromResult(false);
     Task SaveLocalDraftAsync(LocalDraft draft, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<LocalDraft>> GetLocalDraftsAsync(CancellationToken cancellationToken = default);
