@@ -116,7 +116,7 @@ public sealed partial class MainWindowViewModel
                     await LoadFoldersAsync();
                     if (IsMailModule && !IsGlobalSearchOpen && !IsSearchResultsView)
                     {
-                        await LoadMessagesAsync();
+                        await LoadMessagesAsync(showLoading: false);
                     }
                     if (IsMailModule && SelectedMessage is { } selected)
                     {

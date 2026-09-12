@@ -1,7 +1,7 @@
 namespace BetterMail.Core;
 
 // Values are persisted in mail_actions.
-public enum MailActionKind { Move = 0, DeleteDraft = 1, Send = 2 }
+public enum MailActionKind { Move = 0, DeleteDraft = 1, Send = 2, UpdateState = 3 }
 
 public sealed record MailAction(
     string Id,
@@ -20,19 +20,23 @@ public sealed record MailAction(
     string[]? PreviousProviderIds = null,
     string? SourceFolderId = null,
     bool SourceWasUnread = false,
-    bool SendAttempted = false)
+    bool SendAttempted = false,
+    bool? ReadValue = null, bool? FlagValue = null, bool? PinValue = null,
+    bool? PreviousRead = null, bool? PreviousFlagged = null, bool? PreviousPinned = null)
 {
     public bool CanCancel => !Running && !Accepted && !SendAttempted;
     public bool NeedsSendReview => Kind == MailActionKind.Send && SendAttempted && !Running && !Accepted;
     public string DisplaySubject => string.IsNullOrWhiteSpace(Subject) ? "(no subject)" : Subject;
     public string ActionText => Kind switch
     {
+        MailActionKind.UpdateState => "Update message",
         MailActionKind.Send => "Send",
         MailActionKind.DeleteDraft => "Delete draft",
         _ => $"Move to {DestinationName}"
     };
     public string StatusText => NeedsSendReview ? "Delivery unconfirmed — check Sent" : Running ? Kind switch
     {
+        MailActionKind.UpdateState => "Updating…",
         MailActionKind.Send => "Sending…",
         MailActionKind.DeleteDraft => "Deleting…",
         _ => "Moving…"
