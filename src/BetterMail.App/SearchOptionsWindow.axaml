@@ -1,0 +1,24 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="BetterMail.App.SearchOptionsWindow" Title="Search options" Width="620" Height="760" MinWidth="380" MinHeight="450"
+        Icon="/Assets/BetterMail.ico">
+  <Grid Margin="20" RowDefinitions="Auto,*,Auto,Auto" RowSpacing="12">
+    <TextBlock Text="Build a search" FontSize="20" FontWeight="SemiBold" />
+    <ScrollViewer Grid.Row="1">
+      <StackPanel Spacing="12">
+        <TextBlock Text="The fields below update your search text. Use braces or quotes for values with spaces. All conditions must match." TextWrapping="Wrap" Opacity="0.7" />
+        <TextBlock Text="Query" FontWeight="SemiBold" />
+        <TextBox x:Name="QueryText" TextWrapping="Wrap" AcceptsReturn="True" MinHeight="60" AutomationProperties.Name="Search query" />
+        <Button Content="Read query into fields" Click="ReadClicked" />
+        <StackPanel x:Name="FieldsPanel" Spacing="10" />
+        <Expander Header="Available keys and syntax" IsExpanded="True">
+          <SelectableTextBlock x:Name="SyntaxHelp" TextWrapping="Wrap" FontSize="12" />
+        </Expander>
+      </StackPanel>
+    </ScrollViewer>
+    <TextBlock Grid.Row="2" x:Name="FormError" TextWrapping="Wrap" Foreground="{DynamicResource BetterMailAccentBrush}" />
+    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button Content="Cancel" Click="CancelClicked" />
+      <Button x:Name="ApplyButton" Classes="primary" Content="Search" Click="ApplyClicked" />
+    </StackPanel>
+  </Grid>
+</Window>

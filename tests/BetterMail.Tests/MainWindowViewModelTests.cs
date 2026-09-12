@@ -7,6 +7,40 @@ namespace BetterMail.Tests;
 public sealed class MainWindowViewModelTests
 {
     [Theory]
+    [InlineData("drive", "Drive")]
+    [InlineData("notes", "Notes")]
+    public async Task OpeningStructuredWorkspaceSearchUsesOnlyContentTerms(string type, string module)
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-open-search-" + Guid.NewGuid());
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "account", "tenant", "alex@example.test", "Alex", ProviderCapabilities.Files | ProviderCapabilities.Notes);
+            await store.SaveAccountAsync(account, token);
+            var vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, workspaceProvider: new FakeWorkspaceProvider());
+            vm.Accounts.Add(account);
+            vm.SearchText = $"Planning type:{type} account:{{alex@example.test}}";
+            await ((AsyncCommand)vm.SearchCommand).ExecuteAsync();
+            var result = Assert.Single(vm.GlobalSearchResults, item => item.Module == module);
+            await ((AsyncCommand<GlobalSearchResult>)vm.OpenGlobalSearchResultCommand).ExecuteAsync(result);
+            if (module == "Drive")
+            {
+                Assert.Equal("Planning", vm.DriveWorkspace!.SearchQuery);
+                await WaitUntilAsync(() => !vm.DriveWorkspace.IsBusy, token);
+                Assert.NotEmpty(vm.DriveWorkspace.SearchResults);
+            }
+            else
+            {
+                Assert.Equal("Planning", vm.NotesWorkspace!.SearchText);
+                Assert.NotEmpty(vm.NotesWorkspace.VisibleRoots);
+            }
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task MovePickerResolvesCurrentCachedMessageAfterSync(bool alreadyInDestination)
@@ -826,6 +860,46 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("Fwd: RE: Thread", request!.Subject);
     }
 
+    [Fact]
+    public async Task MoveFeedbackIsImmediateAndDoesNotResetANewerSelectionOrQueueSameFolder()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-move-selection-" + Guid.NewGuid());
+        var provider = new RecordingProvider { MoveRelease = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        MainWindowViewModel? vm = null;
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "account", "tenant", "alex@work.example", "Alex", ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, "Alex");
+            await store.SaveAccountAsync(account, token);
+            await store.SaveMailboxAsync(mailbox, token);
+            vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
+            vm.Accounts.Add(account); vm.Mailboxes.Add(mailbox);
+            var first = Message(mailbox.Id, "inbox", "First", "Body") with { ProviderId = "first", IsRead = true };
+            var second = first with { ProviderId = "second", Subject = "Second", FolderId = "archive" };
+            await store.ApplySyncPageAsync("seed", new([first, second], null, false), token);
+            vm.Messages.Add(first); vm.Messages.Add(second);
+            vm.SetSelectedMessages([first, second], first);
+            var folder = new MailFolderItem(new(mailbox.Id, "archive", "Archive", 0, 0), "Alex");
+            Assert.True(MainWindowViewModel.CanMoveMessagesToFolder([first, second], folder));
+            var moving = vm.MoveSelectionToFolderAsync(folder);
+            Assert.True(vm.IsMessageActionPending(first));
+            Assert.False(vm.IsMessageActionPending(second));
+            Assert.False(vm.IsMailActionRunning);
+            vm.SetSelectedMessages([second], second);
+            await moving;
+            Assert.Equal("second", vm.SelectedMessage?.ProviderId);
+            Assert.Equal("second", vm.ConversationThread.SelectedMessage?.Message.ProviderId);
+            Assert.Equal("first", Assert.Single(await store.GetMailActionsAsync(token)).ItemId);
+            Assert.Equal("second", Assert.Single(vm.Messages).ProviderId);
+            provider.MoveRelease.TrySetResult();
+            await WaitUntilAsync(() => !vm.IsSyncing, token);
+        }
+        finally { provider.MoveRelease.TrySetResult(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
     [Theory]
     [InlineData("archive")]
     [InlineData("deleteditems")]
@@ -985,9 +1059,7 @@ public sealed class MainWindowViewModelTests
             var sharedFilter = Assert.Single(viewModel.SearchAccountFilters, filter => filter.MailboxId == shared.Id);
             Assert.Contains(viewModel.ContactOwners, owner => owner.Mailbox.Id == shared.Id);
 
-            viewModel.SelectedSearchScope = "Mail";
-            viewModel.SelectedSearchAccountFilter = sharedFilter;
-            viewModel.SearchText = "Planning";
+            viewModel.SearchText = $"Planning type:mail account:{{{shared.Address}}}";
             viewModel.SearchCommand.Execute(null);
             await WaitUntilAsync(
                 () => !viewModel.IsGlobalSearchRunning && viewModel.GlobalSearchResults.Count > 0,
@@ -1724,13 +1796,12 @@ public sealed class MainWindowViewModelTests
             {
                 viewModel.Folders.Add(new MailFolderItem(folder, mailbox.DisplayName));
             }
-            viewModel.SelectedSearchScope = "Mail";
-            viewModel.SearchText = "Needle";
+            viewModel.SearchText = "Needle type:mail";
             viewModel.SearchCommand.Execute(null);
             await WaitUntilAsync(() => !viewModel.IsGlobalSearchRunning, cancellationToken);
 
             Assert.Single(viewModel.GlobalSearchResults);
-            viewModel.IncludeArchivedMailInSearch = true;
+            viewModel.SearchText = "Needle type:mail archives:true";
             await WaitUntilAsync(() => !viewModel.IsGlobalSearchRunning && viewModel.GlobalSearchResults.Count == 3, cancellationToken);
             Assert.Equal(3, viewModel.GlobalSearchResults.Count);
         }
@@ -2775,6 +2846,15 @@ public sealed class MainWindowViewModelTests
             DownloadCount++;
             await destination.WriteAsync("plan"u8.ToArray(), cancellationToken);
         }
+
+        public Task<IReadOnlyList<NoteNotebook>> GetNotebooksAsync(
+            MailAccount account, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<NoteNotebook>>(
+                [new("planning-notebook", "Planning", account.AccountId, account.ProviderId)]);
+
+        public Task<IReadOnlyList<NoteSection>> GetSectionsAsync(
+            MailAccount account, NoteNotebook notebook, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<NoteSection>>([]);
 
         public Task<IReadOnlyList<NoteInfo>> GetNotesAsync(
             MailAccount account, CancellationToken cancellationToken = default) =>

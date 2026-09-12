@@ -12,6 +12,8 @@
         WindowStartupLocation="CenterScreen">
   <Window.Resources>
     <app:AppInfo x:Key="AppInfo" />
+    <app:MailSearchLocationConverter x:Key="MailSearchLocation" />
+    <app:MailActionFeedbackConverter x:Key="MailActionFeedback" />
   </Window.Resources>
   <Window.Styles>
     <Style Selector="Button:focus-visible /template/ ContentPresenter">
@@ -44,7 +46,7 @@
           <TextBlock Text="BetterMail" Foreground="{DynamicResource BetterMailTextBrush}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
         </StackPanel>
 
-        <Grid x:Name="HeaderSearch" Grid.Column="1" MaxWidth="620" HorizontalAlignment="Stretch" ColumnDefinitions="*,Auto">
+        <Grid x:Name="HeaderSearch" Grid.Column="1" MaxWidth="620" HorizontalAlignment="Stretch" ColumnDefinitions="*,Auto,Auto">
           <TextBox x:Name="MailSearch" Classes="search"
                    PlaceholderText="Search everything"
                    Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
@@ -55,7 +57,9 @@
                    TabIndex="0"
                    VerticalAlignment="Center" />
           <Button Grid.Column="0"
-                  Content="&#x2715;"
+                  Content="×"
+                  MinWidth="0" MinHeight="0"
+                  HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                   Command="{Binding ClearGlobalSearchCommand}"
                   IsVisible="{Binding HasSearchText}"
                   HorizontalAlignment="Right"
@@ -76,8 +80,10 @@
                   AutomationProperties.Name="Run mail search"
                   TabIndex="1"
                   VerticalAlignment="Center" />
+          <Button Grid.Column="2" Classes="command" Content="⚙" Click="SearchOptionsClicked" VerticalAlignment="Center"
+                  ToolTip.Tip="Search options and syntax" AutomationProperties.Name="Search options and syntax" />
           <Popup x:Name="GlobalSearchPopup"
-                 Grid.ColumnSpan="2"
+                 Grid.ColumnSpan="3"
                  IsOpen="{Binding IsGlobalSearchOpen, Mode=TwoWay}"
                  PlacementTarget="{Binding #MailSearch}"
                  Placement="BottomEdgeAlignedLeft"
@@ -94,28 +100,18 @@
                 <Grid ColumnDefinitions="*,Auto" Margin="16,12,8,9">
                   <StackPanel Spacing="2" VerticalAlignment="Center">
                     <TextBlock Text="Search results" FontSize="16" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding SearchText, StringFormat='Across all accounts for “{0}”'}" FontSize="11" Opacity="0.62" />
+                    <TextBlock Text="{Binding SearchText}" TextWrapping="Wrap" FontSize="11" Opacity="0.62" />
                   </StackPanel>
                   <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <ProgressBar IsIndeterminate="True" Width="62" Height="3" IsVisible="{Binding IsGlobalSearchRunning}" />
                     <Button Classes="command" Content="×" Command="{Binding CloseGlobalSearchCommand}" AutomationProperties.Name="Close search results" />
                   </StackPanel>
                 </Grid>
-                <Grid Grid.Row="1" ColumnDefinitions="Auto,*,*,Auto" ColumnSpacing="8" Margin="16,0,12,8">
-                  <ComboBox Width="132" ItemsSource="{Binding SearchScopes}" SelectedItem="{Binding SelectedSearchScope}" AutomationProperties.Name="Search scope" />
-                  <ComboBox Grid.Column="1" ItemsSource="{Binding SearchAccountFilters}" SelectedItem="{Binding SelectedSearchAccountFilter}" AutomationProperties.Name="Search account">
-                    <ComboBox.ItemTemplate><DataTemplate x:DataType="app:SearchAccountFilter"><TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" /></DataTemplate></ComboBox.ItemTemplate>
-                  </ComboBox>
-                  <ComboBox Grid.Column="2" ItemsSource="{Binding SearchFolderFilters}" SelectedItem="{Binding SelectedSearchFolderFilter}" IsVisible="{Binding ShowSearchFolderFilter}" AutomationProperties.Name="Search mail folder">
-                    <ComboBox.ItemTemplate><DataTemplate x:DataType="app:SearchFolderFilter"><TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" /></DataTemplate></ComboBox.ItemTemplate>
-                  </ComboBox>
-                  <CheckBox Grid.Column="3"
-                            Content="Include archives"
-                            IsChecked="{Binding IncludeArchivedMailInSearch}"
-                            IsVisible="{Binding ShowMailSearchOptions}"
-                            VerticalAlignment="Center"
-                            AutomationProperties.Name="Include archived mail in search" />
-                </Grid>
+                <StackPanel Grid.Row="1" Spacing="5" Margin="16,0,12,8">
+                  <Button Classes="command" Content="Search options · keys and syntax" Click="SearchOptionsClicked" />
+                  <TextBlock Text="{Binding SearchError}" TextWrapping="Wrap" Foreground="{DynamicResource BetterMailAccentBrush}" />
+                  <TextBlock Text="{Binding SearchNotice}" TextWrapping="Wrap" FontSize="11" Opacity="0.7" />
+                </StackPanel>
                 <ListBox Grid.Row="2"
                          ItemsSource="{Binding GlobalSearchResults}"
                          MaxHeight="640"
@@ -488,21 +484,20 @@
             BorderThickness="0,0,1,0">
       <Grid RowDefinitions="Auto,*">
         <Border Padding="12,8" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1">
-          <Grid ColumnDefinitions="*,Auto">
-            <StackPanel Spacing="2">
-              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                <TextBlock Text="{Binding CurrentFolderName}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                <TextBlock Grid.Column="1" Text="{Binding CurrentItemCountText}" FontSize="11" Opacity="0.62" VerticalAlignment="Center" />
+          <StackPanel Spacing="4">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+              <TextBlock Text="{Binding CurrentFolderName}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+              <TextBlock Grid.Column="1" Text="{Binding CurrentItemCountText}" FontSize="11" Opacity="0.62" VerticalAlignment="Center" />
+            </Grid>
+            <TextBlock Text="{Binding MailSelectionText}" FontSize="11" IsVisible="{Binding HasMailSelection}" />
+            <Border IsVisible="{Binding IsSearchResultsView}" Background="{DynamicResource BetterMailSelectionBrush}" CornerRadius="3" Padding="8">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                <ScrollViewer MaxHeight="160"><SelectableTextBlock Text="{Binding SearchResultSummary}" FontSize="11" TextWrapping="Wrap" /></ScrollViewer>
+                <Button Grid.Column="1" Classes="command" Content="×" VerticalAlignment="Top" MinWidth="0" MinHeight="0" Padding="4,0"
+                        Command="{Binding ClearSearchResultsCommand}" AutomationProperties.Name="Clear mail search results" />
               </Grid>
-              <TextBlock Text="{Binding MailSelectionText}" FontSize="11" IsVisible="{Binding HasMailSelection}" />
-            </StackPanel>
-            <Border Grid.Column="1" IsVisible="{Binding IsSearchResultsView}" Background="{DynamicResource BetterMailSelectionBrush}" CornerRadius="3" Padding="7,3" VerticalAlignment="Center" Margin="8,0,0,0">
-              <StackPanel Orientation="Horizontal" Spacing="6">
-                <TextBlock Text="{Binding SearchResultSummary}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="190" />
-                <Button Classes="command" Content="×" Padding="2,0" Command="{Binding ClearSearchResultsCommand}" AutomationProperties.Name="Clear mail search results" />
-              </StackPanel>
             </Border>
-          </Grid>
+          </StackPanel>
         </Border>
 
         <Grid Grid.Row="1">
@@ -595,7 +590,7 @@
                   </Border.ContextMenu>
                   <Grid ClipToBounds="True">
                     <Border Width="4" Background="{DynamicResource BetterMailAccentBrush}" IsVisible="{Binding IsUnread}" HorizontalAlignment="Left" />
-                    <Grid Margin="{ReflectionBinding $parent[Window].DataContext.MessageRowMargin}" ColumnDefinitions="Auto,*,Auto" RowDefinitions="18,18,18" RowSpacing="1">
+                    <Grid Margin="{ReflectionBinding $parent[Window].DataContext.MessageRowMargin}" ColumnDefinitions="Auto,*,Auto" RowDefinitions="18,18,18,Auto" RowSpacing="1">
 
                     <app:AsyncImage Grid.RowSpan="3" Width="28" Height="28" Margin="0,0,8,0"
                                     EmailAddress="{Binding From.Address}" IsHitTestVisible="False"
@@ -630,12 +625,27 @@
                         <ItemsControl.ItemTemplate><DataTemplate><Border Background="{DynamicResource BetterMailSelectionBrush}" CornerRadius="2" Padding="5,1" Margin="2,0"><TextBlock Text="{Binding}" FontSize="10" Foreground="{DynamicResource BetterMailAccentBrush}" /></Border></DataTemplate></ItemsControl.ItemTemplate>
                       </ItemsControl>
                     </Grid>
+                    <TextBlock Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" FontSize="10" Opacity="0.75"
+                               TextTrimming="CharacterEllipsis" IsVisible="{ReflectionBinding $parent[Window].DataContext.IsSearchResultsView}"
+                               ToolTip.Tip="{Binding $self.Text}">
+                      <TextBlock.Text><MultiBinding Converter="{StaticResource MailSearchLocation}">
+                        <Binding /><ReflectionBinding Path="DataContext" RelativeSource="{RelativeSource AncestorType={x:Type Window}}" />
+                      </MultiBinding></TextBlock.Text>
+                    </TextBlock>
                     </Grid>
+                    <ProgressBar Height="2" IsIndeterminate="True" VerticalAlignment="Bottom" IsHitTestVisible="False" ZIndex="3">
+                      <ProgressBar.IsVisible><MultiBinding Converter="{StaticResource MailActionFeedback}">
+                        <Binding /><ReflectionBinding Path="DataContext" RelativeSource="{RelativeSource AncestorType={x:Type Window}}" /><ReflectionBinding Path="DataContext.MailActionVersion" RelativeSource="{RelativeSource AncestorType={x:Type Window}}" />
+                      </MultiBinding></ProgressBar.IsVisible>
+                    </ProgressBar>
                     <Border Classes="quickActions"
                             IsVisible="{ReflectionBinding $parent[Window].DataContext.HasMailQuickActions}"
                             HorizontalAlignment="Right"
                             VerticalAlignment="Stretch"
                             ZIndex="2">
+                      <Border.IsEnabled><MultiBinding Converter="{StaticResource MailActionFeedback}" ConverterParameter="enabled">
+                        <Binding /><ReflectionBinding Path="DataContext" RelativeSource="{RelativeSource AncestorType={x:Type Window}}" /><ReflectionBinding Path="DataContext.MailActionVersion" RelativeSource="{RelativeSource AncestorType={x:Type Window}}" />
+                      </MultiBinding></Border.IsEnabled>
                       <Border.Transitions>
                         <Transitions>
                           <DoubleTransition Property="Opacity" Duration="0:0:0.18" />
@@ -834,6 +844,7 @@
 
       <app:ConversationThreadView Grid.Row="1"
                                   DataContext="{Binding ConversationThread}"
+                                  FeedbackOwner="{Binding $parent[Window].DataContext}"
                                   ShowSenderImages="{Binding $parent[Window].DataContext.MailSenderImagesEnabled}"
                                   IsVisible="{Binding $parent[Window].DataContext.ShowMessageBody}" />
       <StackPanel Grid.Row="1"
