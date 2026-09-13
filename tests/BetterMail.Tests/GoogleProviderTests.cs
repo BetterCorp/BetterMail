@@ -1,3 +1,4 @@
+using BetterMail.App;
 using System.Text;
 using System.Text.Json;
 using BetterMail.Core;
@@ -7,6 +8,23 @@ namespace BetterMail.Tests;
 
 public sealed class GoogleProviderTests
 {
+    [Fact]
+    public async Task ForwardedEmbeddedImageProducesOnlyOneMimePartAndKeepsFiles()
+    {
+        var files = new MailAttachment[] {
+            new("inline", "logo.png", "image/png", 3, true, "logo", [1, 2, 3]),
+            new("file", "report.zip", "application/zip", 3, false, null, null) };
+        var copied = await GoogleGmailProvider.CopyForwardAttachmentsAsync(files, attachment =>
+        {
+            Assert.Equal("file", attachment.ProviderId);
+            return Task.FromResult<MailAttachment?>(attachment with { ContentBytes = [4, 5, 6] });
+        });
+        var outgoing = new MailContentRenderer().PrepareOutgoingHtml("<img src='data:image/png;base64,AQID'>", copied);
+        Assert.Single(outgoing.Attachments, attachment => attachment.IsInline);
+        Assert.Equal(new byte[] { 4, 5, 6 }, Assert.Single(outgoing.Attachments, attachment => !attachment.IsInline).ContentBytes);
+        Assert.Equal(2, outgoing.Attachments.Count);
+    }
+
     [Fact]
     public void GmailDraftAttachmentUpdateRetainsReplyHeadersAndThread()
     {

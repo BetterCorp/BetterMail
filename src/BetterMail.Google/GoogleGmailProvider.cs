@@ -317,6 +317,20 @@ public sealed class GoogleGmailProvider(
         return await MapDraftAsync(account, mailbox, document.RootElement, cancellationToken).ConfigureAwait(false);
     }
 
+    internal static async Task<IReadOnlyList<DraftAttachment>> CopyForwardAttachmentsAsync(
+        IReadOnlyList<MailAttachment> attachments, Func<MailAttachment, Task<MailAttachment?>> hydrate)
+    {
+        var copied = new List<DraftAttachment>();
+        // The quoted HTML already embeds CID images. Outgoing rendering creates their MIME parts.
+        foreach (var attachment in attachments.Where(attachment => !attachment.IsInline))
+        {
+            var hydrated = attachment.ContentBytes is not null ? attachment : await hydrate(attachment).ConfigureAwait(false);
+            copied.Add(new(attachment.Name, attachment.ContentType,
+                hydrated?.ContentBytes ?? throw new InvalidOperationException("Forward attachment content unavailable.")));
+        }
+        return copied;
+    }
+
     public async Task<CloudDraft> CreateResponseDraftAsync(MailAccount account, Mailbox mailbox, string messageId,
         MailResponseKind kind, DraftMessage draft, CancellationToken cancellationToken = default)
     {
@@ -331,15 +345,8 @@ public sealed class GoogleGmailProvider(
         if (kind == MailResponseKind.Forward)
         {
             var attachments = await GetAttachmentsAsync(account, mailbox, messageId, cancellationToken).ConfigureAwait(false);
-            var copied = new List<DraftAttachment>();
-            foreach (var attachment in attachments)
-            {
-                var hydrated = attachment.ContentBytes is not null ? attachment
-                    : await GetAttachmentAsync(account, mailbox, messageId, attachment.ProviderId, cancellationToken).ConfigureAwait(false);
-                copied.Add(new(attachment.Name, attachment.ContentType,
-                    hydrated?.ContentBytes ?? throw new InvalidOperationException("Forward attachment content unavailable."), attachment.IsInline, attachment.ContentId));
-            }
-            draft = draft with { Attachments = copied };
+            draft = draft with { Attachments = await CopyForwardAttachmentsAsync(attachments,
+                attachment => GetAttachmentAsync(account, mailbox, messageId, attachment.ProviderId, cancellationToken)).ConfigureAwait(false) };
         }
         var raw = BuildMime(mailbox, draft, kind == MailResponseKind.Forward ? null : replyId,
             kind == MailResponseKind.Forward ? null : (references + " " + replyId).Trim());

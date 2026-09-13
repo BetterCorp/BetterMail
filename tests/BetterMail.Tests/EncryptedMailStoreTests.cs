@@ -51,6 +51,37 @@ public sealed class EncryptedMailStoreTests
         };
     }
 
+    [Theory]
+    [InlineData("read")]
+    [InlineData("flag")]
+    [InlineData("pin")]
+    public async Task ChangedPausedStateAuthorizesOneAttemptButDuplicateDoesNot(string field)
+    {
+        await WithStoreAsync(async (store, token) =>
+        {
+            var account = new MailAccount("microsoft365", "account", "tenant", "alex@example.test", "Alex", ProviderCapabilities.Mail);
+            var message = Message("account:alex@example.test", "message", "Subject", "Body");
+            await store.ApplySyncPageAsync("seed", new([message], null, false), token);
+            Task<MailAction> Queue(bool value) => store.QueueMessageStateAsync(account, message,
+                isRead: field == "read" ? value : null, isFlagged: field == "flag" ? value : null,
+                isPinned: field == "pin" ? value : null, cancellationToken: token);
+            var action = await Queue(true);
+            for (var i = 0; i < 3; i++)
+            {
+                Assert.NotNull(await store.StartMailActionAsync(action.Id, token));
+                await store.FailMailActionAsync(action.Id, "Offline", token);
+            }
+            Assert.True((await Queue(true)).IsRetryPaused);
+            Assert.Null(await store.StartMailActionAsync(action.Id, token));
+            var changed = await Queue(false);
+            Assert.Equal(action.Id, changed.Id);
+            Assert.Equal(3, changed.FailureCount);
+            Assert.NotNull(await store.StartMailActionAsync(action.Id, token));
+            await store.FailMailActionAsync(action.Id, "Offline again", token);
+            Assert.Null(await store.StartMailActionAsync(action.Id, token));
+        });
+    }
+
     [Fact]
     public async Task PausedMoveLivesInDestinationAcrossSyncRestartAndCancellation()
     {
