@@ -34,6 +34,37 @@ public sealed class WorkspaceInteractionTests
         Assert.Equal(0, vm.SyncSeverity);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void UnrelatedSyncWarningsDoNotColourNewBusyActions(bool workspace)
+    {
+        var vm = new MainWindowViewModel(null, Path.GetTempPath(), _ => { }, _ => { }, null);
+        vm.RecordSyncOutcome(true, workspace);
+        Assert.Equal(1, vm.SyncSeverity);
+        Assert.Equal(0, vm.BusySeverity);
+        var action = new MailAction("new", "account", "mailbox", "message", MailActionKind.Move, "Example", DateTimeOffset.UtcNow);
+        vm.BusyActions.Add(action);
+        Assert.Equal(0, vm.BusySeverity);
+        vm.BeginSyncOutcome();
+        Assert.True(vm.SyncIsInformation);
+        vm.RecordSyncOutcome(true, workspace); // An unrelated failure while clean work is queued.
+        Assert.Equal(1, vm.SyncSeverity);
+        Assert.Equal(0, vm.BusySeverity);
+        vm.BusyActions[0] = action with { Error = "Move failed", FailureCount = 1 };
+        vm.RecordSyncOutcome(false);
+        Assert.Equal(1, vm.BusySeverity);
+        vm.BeginSyncOutcome();
+        vm.RecordSyncOutcome(false);
+        Assert.Equal(2, vm.BusySeverity);
+        vm.RecordSyncOutcome(false, workspace: true);
+        Assert.Equal(2, vm.BusySeverity); // Workspace recovery cannot clear stuck Busy work.
+        vm.BusyActions.Clear();
+        vm.RecordSyncOutcome(true);
+        Assert.Equal(0, vm.BusySeverity);
+        Assert.Equal(1, vm.SyncSeverity);
+    }
+
     [Fact]
     public async Task DefaultContactAccountAppliesToNewAndDiscoveredContactsWithoutChangingSavedOwnership()
     {

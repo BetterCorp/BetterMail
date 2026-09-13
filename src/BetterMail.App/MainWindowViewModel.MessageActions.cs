@@ -46,17 +46,17 @@ public sealed partial class MainWindowViewModel
         var failed = actions.Where(action => action.Error is not null || action.IsRetryPaused || action.NeedsSendReview).ToArray();
         if (failed.Length == 0) return;
         _failedBusyAtPreviousEnd = failed.Select(action => action.Id).ToHashSet();
-        _completedSyncSeverity = failed.Any(action => action.IsRetryPaused || action.NeedsSendReview) ? 2 : 1;
-        _syncSeverity = _completedSyncSeverity;
+        _completedBusySeverity = failed.Any(action => action.IsRetryPaused || action.NeedsSendReview) ? 2 : 1;
+        _syncSeverity = _completedBusySeverity;
         MailActionStateChanged();
     }
 
     private int _syncSeverity;
-    private int _completedSyncSeverity;
+    private int _completedBusySeverity;
     private bool _workspaceWarning;
     private HashSet<string> _failedBusyAtPreviousEnd = [];
     public int SyncSeverity => Math.Max(_syncSeverity, _workspaceWarning ? 1 : 0);
-    public int BusySeverity => _completedSyncSeverity;
+    public int BusySeverity => _completedBusySeverity;
     public bool SyncIsWarning => SyncSeverity == 1;
     public bool SyncNeedsAttention => SyncSeverity == 2;
     public bool SyncIsInformation => SyncSeverity == 0 && HasOutbox;
@@ -67,7 +67,7 @@ public sealed partial class MainWindowViewModel
     {
         _workspaceWarning = false;
         // Red is latched until a completed sync empties Busy. Orange survives the retry run.
-        _syncSeverity = _completedSyncSeverity == 2 ? 2 : HasOutbox ? _completedSyncSeverity : 0;
+        _syncSeverity = _completedBusySeverity == 2 ? 2 : HasOutbox ? _completedBusySeverity : 0;
         MailActionStateChanged();
     }
 
@@ -77,17 +77,16 @@ public sealed partial class MainWindowViewModel
         {
             // Background workspace failures warn, but do not turn normal syncing red.
             _workspaceWarning = failed;
-            if (!IsSyncing) _completedSyncSeverity = Math.Max(_syncSeverity, failed ? 1 : 0);
         }
         else
         {
             var failedBusy = BusyActions.Where(action => action.Error is not null || action.IsRetryPaused || action.NeedsSendReview)
                 .Select(action => action.Id).ToHashSet();
             var stillStuck = failedBusy.Overlaps(_failedBusyAtPreviousEnd);
-            _completedSyncSeverity = HasOutbox && (_completedSyncSeverity == 2 || stillStuck) ? 2
-                : failed || failedBusy.Count > 0 || _workspaceWarning ? 1 : 0;
+            _completedBusySeverity = HasOutbox && (_completedBusySeverity == 2 || stillStuck) ? 2
+                : failedBusy.Count > 0 ? 1 : 0;
             _failedBusyAtPreviousEnd = failedBusy;
-            _syncSeverity = _completedSyncSeverity;
+            _syncSeverity = Math.Max(_completedBusySeverity, failed || _workspaceWarning ? 1 : 0);
         }
         MailActionStateChanged();
     }
