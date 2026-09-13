@@ -95,7 +95,7 @@ public sealed class NotesWorkspaceViewModel : ViewModelBase
     public bool HasPartialErrors => AccountRoots.Any(static root => root.HasError);
     public string PartialErrorText => string.Join(
         Environment.NewLine,
-        AccountRoots.SelectMany(static root => root.Errors()));
+        AccountRoots.SelectMany(static root => root.Errors()).Distinct());
     public bool IsLoadingPage { get => _isLoadingPage; private set => SetProperty(ref _isLoadingPage, value); }
     public Uri? PageBodyUri { get => _pageBodyUri; private set => SetProperty(ref _pageBodyUri, value); }
     public bool HasSelectedPage => SelectedPage is not null;
@@ -571,14 +571,7 @@ public sealed class NotesWorkspaceViewModel : ViewModelBase
 
     private void ApplyFilter(string query)
     {
-        VisibleRoots.Clear();
-        foreach (var root in AccountRoots)
-        {
-            if (root.ApplyFilter(query))
-            {
-                VisibleRoots.Add(root);
-            }
-        }
+        CollectionUpdates.Reconcile(VisibleRoots, AccountRoots.Where(root => root.ApplyFilter(query)).ToArray(), root => root.Account.AccountId);
     }
 
     internal static string PlainTextToNoteHtml(string text)
@@ -673,9 +666,11 @@ public sealed class NoteTreeNode : ViewModelBase
             if (SetProperty(ref _error, value))
             {
                 RaisePropertyChanged(nameof(HasError));
+                RaisePropertyChanged(nameof(ErrorSummary));
             }
         }
     }
+    public string ErrorSummary => string.IsNullOrWhiteSpace(Error) ? "" : Error.Contains("10008", StringComparison.Ordinal) ? "Library limit · cached notes only" : "Could not sync · see details";
     public bool HasError => !string.IsNullOrWhiteSpace(Error) ||
                             AllChildren.Any(static child => child.HasError);
 
@@ -704,21 +699,9 @@ public sealed class NoteTreeNode : ViewModelBase
 
     public bool ApplyFilter(string query)
     {
-        Children.Clear();
-        var selfMatches = query.Length == 0 ||
-                          DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                          SecondaryText.Contains(query, StringComparison.OrdinalIgnoreCase);
-        foreach (var child in AllChildren)
-        {
-            if (child.Kind != NoteNodeKind.Placeholder && child.ApplyFilter(query))
-            {
-                Children.Add(child);
-            }
-            else if (query.Length == 0 && child.Kind == NoteNodeKind.Placeholder)
-            {
-                Children.Add(child);
-            }
-        }
+        var selfMatches = query.Length == 0 || DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) || SecondaryText.Contains(query, StringComparison.OrdinalIgnoreCase);
+        var visible = AllChildren.Where(child => child.Kind == NoteNodeKind.Placeholder ? query.Length == 0 : child.ApplyFilter(query)).ToArray();
+        CollectionUpdates.Reconcile(Children, visible, child => child);
         if (query.Length > 0 && Children.Count > 0)
         {
             IsExpanded = true;
@@ -791,7 +774,7 @@ public sealed class NoteTreeNode : ViewModelBase
         new(
             NoteNodeKind.Placeholder,
             account,
-            "Expand to load",
+            "Loading…",
             "",
             parent,
             null,

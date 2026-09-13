@@ -43,8 +43,7 @@
       <Grid>
         <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
           <StackPanel Orientation="Horizontal" Spacing="4">
-            <Button Classes="command" Content="Reply all" Command="{Binding ReplyAllCommand}" />
-            <Button Classes="command" Content="Reply" Command="{Binding ReplyCommand}" />
+            <Button Classes="command" Content="{Binding DefaultReplyLabel}" Command="{Binding DefaultReplyCommand}" />
             <Button Classes="command" Content="Forward" Command="{Binding ForwardCommand}" />
             <Button Classes="command" Content="Archive" Command="{Binding ArchiveCommand}" />
             <Button Classes="command" Content="Delete" Command="{Binding DeleteCommand}" />
@@ -53,6 +52,9 @@
               <Button.Flyout>
                 <Flyout>
                   <StackPanel MinWidth="190">
+                    <Button Classes="command" Content="Create event" Command="{Binding CreateEventCommand}" />
+                    <Button Classes="command" Content="Reply to sender" Command="{Binding ReplyCommand}" />
+                    <Button Classes="command" Content="Reply all" Command="{Binding ReplyAllCommand}" />
                     <Button Classes="command" Content="Junk" HorizontalContentAlignment="Left" Command="{Binding JunkCommand}" />
                     <Button Classes="command" Content="Not junk" HorizontalContentAlignment="Left" Command="{Binding NotJunkCommand}" />
                     <Button Classes="command" Content="{Binding ToggleFlagText}" HorizontalContentAlignment="Left" Command="{Binding ToggleFlagCommand}" />
@@ -153,13 +155,13 @@
                                FontSize="11"
                                Foreground="{DynamicResource BetterMailAccentBrush}"
                                TextWrapping="Wrap" />
-                    <ProgressBar Grid.ColumnSpan="2" Height="2" IsIndeterminate="True" VerticalAlignment="Bottom" IsHitTestVisible="False">
+                  </Grid>
+                </Border>
+                <ProgressBar Height="2" IsIndeterminate="True" VerticalAlignment="Bottom" IsHitTestVisible="False">
                   <ProgressBar.IsVisible><MultiBinding Converter="{StaticResource MailActionFeedback}">
                     <Binding /><ReflectionBinding Path="FeedbackOwner" RelativeSource="{RelativeSource AncestorType={x:Type app:ConversationThreadView}}" /><ReflectionBinding Path="FeedbackOwner.MailActionVersion" RelativeSource="{RelativeSource AncestorType={x:Type app:ConversationThreadView}}" />
                   </MultiBinding></ProgressBar.IsVisible>
                 </ProgressBar>
-              </Grid>
-                </Border>
               </Grid>
             </Border>
           </DataTemplate>

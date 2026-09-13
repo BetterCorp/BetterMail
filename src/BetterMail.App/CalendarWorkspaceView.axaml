@@ -226,6 +226,11 @@
                       DisplayMemberBinding="{Binding DisplayName}" AutomationProperties.Name="Event calendar" TabIndex="141" />
             <TextBlock Text="Subject" FontWeight="SemiBold" />
             <TextBox Text="{Binding EditorSubject}" AutomationProperties.Name="Event subject" TabIndex="142" />
+            <TextBlock Text="Description" FontWeight="SemiBold" />
+            <TextBox Text="{Binding EditorDescription}" AcceptsReturn="True" TextWrapping="Wrap"
+                     MinHeight="140" MaxHeight="260" AutomationProperties.Name="Event description" />
+            <TextBlock Text="Editing the description saves it as plain text. Unchanged formatting is preserved."
+                       TextWrapping="Wrap" FontSize="11" Opacity="0.65" />
             <TextBlock Text="Location" FontWeight="SemiBold" />
             <TextBox Text="{Binding EditorLocation}" AutomationProperties.Name="Event location" TabIndex="143" />
             <TextBlock Text="{Binding EditorAvailabilityText, StringFormat='Availability: {0}'}"

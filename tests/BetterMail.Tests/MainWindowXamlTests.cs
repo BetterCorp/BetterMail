@@ -27,13 +27,13 @@ public sealed class MainWindowXamlTests
     }
 
     [Fact]
-    public void BetterMailWindowsAreIndependentExceptTheMoveDestinationPicker()
+    public void BetterMailWindowsAreIndependentExceptFolderPickers()
     {
         var appDirectory = Path.Combine(FindRepositoryRoot(), "src", "BetterMail.App");
         var windows = string.Join('\n', Directory.EnumerateFiles(appDirectory)
             .Where(path => Path.GetExtension(path) is ".cs" or ".axaml")
-            // The destination picker is deliberately modal; editors and workspace windows stay independent.
-            .Where(path => Path.GetFileName(path) != "MailMoveWindow.axaml.cs")
+            // Folder pickers are modal within their owning window; editors and workspace windows stay independent.
+            .Where(path => Path.GetFileName(path) is not ("MailMoveWindow.axaml.cs" or "SearchOptionsWindow.axaml.cs"))
             .Select(File.ReadAllText));
 
         Assert.DoesNotContain("ShowDialog", windows);
@@ -70,9 +70,8 @@ public sealed class MainWindowXamlTests
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding SettingsTabs}" + (char)34, settings);
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding SignatureTemplates}" + (char)34, settings);
         Assert.Contains("SelectedItem=" + (char)34 + "{Binding SelectedSignatureTemplate}" + (char)34, settings);
-        Assert.Contains("Source=" + (char)34 + "{Binding SelectedSignatureTemplatePreviewUri}" + (char)34, settings);
-        Assert.Contains("Selected signature template preview", settings);
-        Assert.Contains("<app:RichHtmlEditor", settings);
+        Assert.DoesNotContain("<NativeWebView", settings);
+        Assert.Contains("EditSignatureClicked", settings);
         Assert.Contains("content:attr(data-placeholder)", richEditorSource);
         Assert.DoesNotContain("content:{{JsonSerializer.Serialize(Placeholder)}}", richEditorSource);
         Assert.Contains("ClipToBounds=" + (char)34 + "True" + (char)34, settings);
@@ -172,7 +171,7 @@ public sealed class MainWindowXamlTests
         {
             Assert.Contains("Gesture=" + (char)34 + gesture + (char)34, xaml);
         }
-        Assert.Equal(1, ButtonCommandCount(xaml, "ReplyAllCommand"));
+        Assert.Equal(1, ButtonCommandCount(xaml, "DefaultReplyCommand"));
         Assert.DoesNotContain("HorizontalScrollBarVisibility", commandBar);
         Assert.Contains("x:Name=" + (char)34 + "InlineMailActions" + (char)34, commandBar);
         Assert.Contains("AutomationProperties.Name=" + (char)34 + "More mail actions" + (char)34, commandBar);

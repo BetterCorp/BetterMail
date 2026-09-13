@@ -17,6 +17,14 @@ public sealed partial class NotesWorkspaceView : UserControl
     public NotesWorkspaceView()
     {
         InitializeComponent();
+        NotesTree.AddHandler(TreeViewItem.ExpandedEvent, async (_, args) =>
+        {
+            if (args.Source is TreeViewItem { DataContext: NoteTreeNode node } && DataContext is NotesWorkspaceViewModel vm)
+            {
+                node.IsExpanded = true;
+                await vm.LoadChildrenAsync(node);
+            }
+        });
         DataContextChanged += (_, _) =>
         {
             if (_viewModel is not null)

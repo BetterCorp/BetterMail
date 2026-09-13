@@ -30,6 +30,10 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
     private bool _isEditorOpen;
     private string? _error;
     private string? _editorError;
+    private string _editorDescription = "";
+    private string _originalDescription = "";
+    private string _originalBody = "";
+    private bool _originalBodyIsHtml;
     private string _editorSubject = "";
     private string _editorLocation = "";
     private string _editorAttendees = "";
@@ -189,6 +193,7 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
         }
     }
     public string EditorSubject { get => _editorSubject; set => SetProperty(ref _editorSubject, value); }
+    public string EditorDescription { get => _editorDescription; set => SetProperty(ref _editorDescription, value); }
     public string EditorLocation { get => _editorLocation; set => SetProperty(ref _editorLocation, value); }
     public string EditorAttendees { get => _editorAttendees; set => SetProperty(ref _editorAttendees, value); }
     public DateTime? EditorStartDate { get => _editorStartDate; set => SetProperty(ref _editorStartDate, value); }
@@ -590,6 +595,7 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
         var start = SelectedDate.Date == _now().Date ? _now().AddMinutes(30) : StartOfDay(SelectedDate).AddHours(9);
         start = new DateTimeOffset(start.Year, start.Month, start.Day, start.Hour, start.Minute / 30 * 30, 0, start.Offset);
         EditorSubject = "";
+        SetEditorBody(null, false);
         EditorLocation = "";
         EditorAttendees = "";
         SetEditorTimes(start, start.AddHours(1));
@@ -612,6 +618,7 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
             option.Account.AccountId == item.Source.Account.AccountId &&
             option.Calendar.Info.ProviderId == item.Source.Calendar.Info.ProviderId);
         EditorSubject = item.Source.Event.Subject;
+        SetEditorBody(item.Source.Event.Body, item.Source.Event.BodyIsHtml);
         EditorLocation = item.Source.Event.Location ?? "";
         EditorAttendees = string.Join("; ", (item.Source.Event.Attendees ?? []).Select(attendee => attendee.Address.Address));
         SetEditorTimes(item.Source.Event.StartsAt, item.Source.Event.EndsAt);
@@ -625,6 +632,32 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
         RaisePropertyChanged(nameof(EditorAvailabilityText));
         ((AsyncCommand)DeleteEventCommand).Refresh();
         return Task.CompletedTask;
+    }
+
+    internal async Task OpenFromEmailAsync(MailMessage message, string? accountId)
+    {
+        if (message.Body is null) throw new InvalidOperationException("The full email content is not available yet. Try again after it has loaded.");
+        await OpenNewEventAsync();
+        SelectedEditorCalendar = EditableCalendars.FirstOrDefault(option => option.Account.AccountId == accountId)
+            ?? EditableCalendars.FirstOrDefault();
+        EditorSubject = message.Subject;
+        SetEditorBody(message.Body, message.IsHtml);
+    }
+
+    private void SetEditorBody(string? body, bool isHtml)
+    {
+        _originalBody = body ?? "";
+        _originalBodyIsHtml = isHtml;
+        if (isHtml)
+        {
+            var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(_originalBody);
+            foreach (var element in document.QuerySelectorAll("script, style, head")) element.Remove();
+            foreach (var element in document.QuerySelectorAll("p, div, br, li, tr, h1, h2, h3"))
+                element.AppendChild(document.CreateTextNode("\n"));
+            _originalDescription = document.Body?.TextContent.Trim() ?? "";
+        }
+        else _originalDescription = _originalBody;
+        EditorDescription = _originalDescription;
     }
 
     private void SetEditorTimes(DateTimeOffset start, DateTimeOffset end)
@@ -716,7 +749,9 @@ public sealed class CalendarWorkspaceViewModel : ViewModelBase
             attendees,
             EditorReminderOn,
             EditorReminderMinutes,
-            EditorRecurs ? BuildRecurrence(DateOnly.FromDateTime(start.Date)) : null);
+            EditorRecurs ? BuildRecurrence(DateOnly.FromDateTime(start.Date)) : null,
+            EditorDescription == _originalDescription ? _originalBody : EditorDescription,
+            EditorDescription == _originalDescription && _originalBodyIsHtml);
     }
 
     private CalendarRecurrence BuildRecurrence(DateOnly startDate)

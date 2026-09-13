@@ -88,7 +88,7 @@ public sealed partial class MainWindow : Window
         _ => ResponsiveLayoutMode.Wide
     };
 
-    internal static bool UsesInlineMailActions(double width) => width >= 840;
+    internal static bool UsesInlineMailActions(double width) => width >= 1000;
 
     internal static ShellKeyAction ShellActionFor(
         Key key,
@@ -192,8 +192,6 @@ public sealed partial class MainWindow : Window
         ReadingSplitter.IsVisible = showMail && !phone;
 
         SetColumns(ModuleHeader, phone ? 1 : 1, GridLength.Auto);
-        Grid.SetRow(ModuleRefresh, 0);
-        Grid.SetColumn(ModuleRefresh, 1);
 
 
         UpdateMailPanes();
@@ -560,7 +558,11 @@ public sealed partial class MainWindow : Window
         args.Handled = true;
     }
 
-    internal void FocusGlobalSearch() { MailSearch.Focus(); MailSearch.SelectAll(); }
+    internal void FocusGlobalSearch()
+    {
+        if (_viewModel is not null) _viewModel.IsSearchEditing = true;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => { MailSearch.Focus(); MailSearch.SelectAll(); });
+    }
 
     private readonly Avalonia.Threading.DispatcherTimer _agendaClock = new() { Interval = TimeSpan.FromMinutes(1) };
     private async void DayAgendaClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
@@ -582,11 +584,27 @@ public sealed partial class MainWindow : Window
 
     private void GlobalSearchFocused(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
     {
-        if (_viewModel?.HasSearchText == true) _viewModel.SearchCommand.Execute(null);
+        _viewModel?.OpenSearchInput();
+    }
+
+    private void GlobalSearchLostFocus(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (_viewModel is not null) _viewModel.IsSearchEditing = false;
+    }
+    private void SearchBadgesFocused(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (_viewModel is not null) _viewModel.IsSearchEditing = true;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => MailSearch.Focus());
     }
 
     private void GlobalSearchKeyDown(object? sender, KeyEventArgs args)
     {
+        if (args.Key == Key.Enter && _viewModel is { HasSearchText: false })
+        {
+            _viewModel.OpenSearchInput();
+            args.Handled = true;
+            return;
+        }
         if (args.Key == Key.Enter && _viewModel?.SearchCommand.CanExecute(null) == true)
         {
             _viewModel.SearchCommand.Execute(null);
@@ -793,7 +811,10 @@ public sealed partial class MainWindow : Window
         var previewViewModel = new ConversationThreadViewModel(
             loadMessage: message => viewModel.GetCachedMessageAsync(message),
             openDraft: viewModel.OpenLocalDraftAsync,
-            action: viewModel.HandlePreviewActionAsync,
+            action: request => viewModel.HandlePreviewActionAsync(request with
+            {
+                Accepted = () => { if (request.Action == ConversationAction.CreateEvent) Activate(); if (viewModel.ShouldClosePreview(request.Action)) window?.Close(); }
+            }),
             moveFolders: viewModel.MoveFoldersFor,
             showActions: true,
             loadAttachments: message => viewModel.GetAttachmentsAsync(message),
@@ -810,6 +831,12 @@ public sealed partial class MainWindow : Window
                         viewModel.FilesProvider, viewModel.Accounts.ToArray()));
                 }
             });
+        previewViewModel.DefaultReplyAll = viewModel.DefaultReplyAll;
+        void ReplyPreferenceChanged(object? _, PropertyChangedEventArgs change)
+        {
+            if (change.PropertyName == nameof(MainWindowViewModel.DefaultReplyAll)) previewViewModel.DefaultReplyAll = viewModel.DefaultReplyAll;
+        }
+        viewModel.PropertyChanged += ReplyPreferenceChanged;
         previewViewModel.Reconcile(preview.Messages, preview.Selected);
         previewViewModel.ReconcileDrafts(preview.Drafts);
         window = new Window
@@ -833,7 +860,7 @@ public sealed partial class MainWindow : Window
                 SaveWindowSessions();
             }
         };
-        window.Closed += (_, _) => _previewWindows.Remove(session);
+        window.Closed += (_, _) => { viewModel.PropertyChanged -= ReplyPreferenceChanged; _previewWindows.Remove(session); };
         IndependentWindow.Show(window);
         SaveWindowSessions();
     }
@@ -842,6 +869,10 @@ public sealed partial class MainWindow : Window
         Execute(_viewModel?.ReplyCommand);
     private void MessageReplyAllClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
         Execute(_viewModel?.ReplyAllCommand);
+    private async void MessageCreateEventClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (_viewModel?.SelectedMessage is { } message) await _viewModel.CreateEventFromEmailAsync(message);
+    }
     private void MessageForwardClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
         Execute(_viewModel?.ForwardCommand);
     private void MessageArchiveClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
@@ -877,7 +908,7 @@ public sealed partial class MainWindow : Window
         {
             viewModel.SearchText = query;
             viewModel.SearchCommand.Execute(null);
-        }));
+        }, viewModel));
     }
 
     private async void MoveMessagesClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
@@ -1056,11 +1087,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void FocusMailSearch()
-    {
-        MailSearch.Focus();
-        MailSearch.SelectAll();
-    }
+    private void FocusMailSearch() => FocusGlobalSearch();
 
     private void OpenCompose(ComposeRequest request)
     {

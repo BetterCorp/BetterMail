@@ -8,10 +8,10 @@
   </UserControl.Resources>
   <Grid RowDefinitions="Auto,Auto,Auto,*" Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
     <Border Padding="24,14" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1">
-      <Grid ColumnDefinitions="*,Auto">
-        <TextBlock Text="Settings" FontSize="24" FontWeight="SemiBold" />
-        <Button Grid.Column="1" Classes="command" Content="Close" Command="{Binding CloseSettingsCommand}"
+      <Grid ColumnDefinitions="Auto,*" ColumnSpacing="16">
+        <Button Classes="command" Content="Close" Command="{Binding CloseSettingsCommand}"
                 AutomationProperties.Name="Close settings" />
+        <TextBlock Grid.Column="1" Text="Settings" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center" />
       </Grid>
     </Border>
 
@@ -143,6 +143,11 @@
       <ScrollViewer IsVisible="{Binding ShowMailSettings}">
         <StackPanel MaxWidth="920" HorizontalAlignment="Stretch" Spacing="18">
           <TextBlock Text="Mail &amp; notifications" FontSize="22" FontWeight="SemiBold" />
+          <Border Classes="settingsCard"><StackPanel Spacing="8">
+            <TextBlock Text="Default reply" FontSize="18" FontWeight="SemiBold" />
+            <ToggleSwitch Content="Reply all by default" IsChecked="{Binding DefaultReplyAll}" />
+            <TextBlock Text="Turn off to reply only to the sender. Both options remain available in the mail menu." TextWrapping="Wrap" Opacity="0.65" />
+          </StackPanel></Border>
           <Border Classes="settingsCard">
             <StackPanel Spacing="9">
               <TextBlock Text="Notifications" FontSize="18" FontWeight="SemiBold" />
@@ -175,6 +180,24 @@
                         AutomationProperties.Name="Mail sync history" />
               <TextBlock Text="Changing this starts a background sync. Older local copies are removed; cloud mail is never deleted."
                          Opacity="0.62" TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+          <Border Classes="settingsCard">
+            <StackPanel Spacing="9">
+              <TextBlock Text="Separate mail windows" FontSize="18" FontWeight="SemiBold" />
+              <TextBlock Text="Choose what happens to a separate mail window after each action. Closing does not wait for sync; pending actions remain visible in the main window."
+                         Opacity="0.62" TextWrapping="Wrap" />
+              <ItemsControl ItemsSource="{Binding PreviewActionSettings}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="app:PreviewActionSetting">
+                    <Grid ColumnDefinitions="*,150" ColumnSpacing="12" Margin="0,3">
+                      <TextBlock Text="{Binding Label}" VerticalAlignment="Center" />
+                      <ComboBox Grid.Column="1" ItemsSource="{Binding Behaviors}" SelectedItem="{Binding Behavior}"
+                                HorizontalAlignment="Stretch" AutomationProperties.Name="{Binding Label, StringFormat='Mail window after {0}'}" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
             </StackPanel>
           </Border>
           <Border Classes="settingsCard">
@@ -305,9 +328,7 @@
                             BorderBrush="{DynamicResource BetterMailDividerBrush}"
                             BorderThickness="1"
                             Background="White">
-                      <NativeWebView Source="{Binding SelectedSignatureTemplatePreviewUri}"
-                                     NavigationStarted="SignaturePreviewNavigationStarted"
-                                     AutomationProperties.Name="Selected signature template preview" />
+                      <Button Content="Preview template" Click="PreviewSignatureClicked" HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="10">
                       <TextBlock Text="{Binding SelectedSignatureTemplate.Description}"
@@ -355,9 +376,8 @@
                   <TextBlock Grid.Column="1" Text="Read only" VerticalAlignment="Center" Opacity="0.62"
                              IsVisible="{Binding !CanEditSelectedSignature}" />
                 </Grid>
-                <app:RichHtmlEditor x:Name="SignatureHtmlEditor" Height="330" ClipToBounds="True" Html="{Binding SignatureEditorHtml, Mode=TwoWay}"
-                                    IsReadOnly="{Binding !CanEditSelectedSignature}"
-                                    Placeholder="Create your signature…" />
+                <Button Classes="command" Content="Open signature editor" Click="EditSignatureClicked" HorizontalAlignment="Left" />
+                <TextBlock Text="Edit and preview in a separate window. Save changes here when you are ready." TextWrapping="Wrap" Opacity="0.65" />
                 <TextBlock Text="{Binding SignatureEditorError}" Foreground="#D9493D" TextWrapping="Wrap"
                            IsVisible="{Binding HasSignatureEditorError}" />
                 <WrapPanel Orientation="Horizontal">

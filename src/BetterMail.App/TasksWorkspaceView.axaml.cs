@@ -154,8 +154,6 @@ public sealed partial class TasksWorkspaceView : UserControl
             Grid.SetColumnSpan(WorkspaceTitle, 2);
             Grid.SetRow(NewTaskButton, 1);
             Grid.SetColumn(NewTaskButton, 0);
-            Grid.SetRow(RefreshButton, 1);
-            Grid.SetColumn(RefreshButton, 2);
             return;
         }
         ToolbarLayout.ColumnDefinitions.Add(new(GridLength.Star));
@@ -168,8 +166,23 @@ public sealed partial class TasksWorkspaceView : UserControl
         Grid.SetColumnSpan(WorkspaceTitle, 1);
         Grid.SetRow(NewTaskButton, 0);
         Grid.SetColumn(NewTaskButton, 2);
-        Grid.SetRow(RefreshButton, 0);
-        Grid.SetColumn(RefreshButton, 3);
+    }
+
+    private void TaskDoubleTapped(object? sender, TappedEventArgs args)
+    {
+        var control = args.Source as Avalonia.Visual;
+        TaskWorkspaceItem? item = null;
+        while (control is not null && control != TaskList)
+        {
+            if (control is Button) return;
+            if (control is ListBoxItem { DataContext: TaskWorkspaceItem row }) item = row;
+            control = Avalonia.VisualTree.VisualExtensions.GetVisualParent(control);
+        }
+        if (item is not null && DataContext is TasksWorkspaceViewModel vm)
+        {
+            vm.EditTaskCommand.Execute(item);
+            args.Handled = true;
+        }
     }
 
     private void HandleKeyDown(object? sender, KeyEventArgs args)
@@ -190,15 +203,16 @@ public sealed partial class TasksWorkspaceView : UserControl
         }
         var command = args.Key switch
         {
-            Key.N when args.KeyModifiers.HasFlag(KeyModifiers.Control) => viewModel.NewTaskCommand,
             Key.F5 => viewModel.RefreshCommand,
+            Key.N when args.KeyModifiers.HasFlag(KeyModifiers.Control) => viewModel.NewTaskCommand,
+            Key.Enter when viewModel.SelectedTask is not null && !viewModel.IsEditorOpen => viewModel.EditTaskCommand,
             Key.Delete => viewModel.RequestDeleteCommand,
             Key.Space when viewModel.SelectedTask is not null => viewModel.ToggleCompleteCommand,
             Key.Escape when viewModel.IsDeleteConfirmationOpen => viewModel.CancelDeleteCommand,
             Key.Escape when viewModel.IsEditorOpen => viewModel.CloseEditorCommand,
             _ => null
         };
-        var parameter = args.Key == Key.Space ? viewModel.SelectedTask : null;
+        var parameter = args.Key is Key.Space or Key.Enter ? viewModel.SelectedTask : null;
         if (command?.CanExecute(parameter) == true)
         {
             command.Execute(parameter);

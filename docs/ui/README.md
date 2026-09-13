@@ -92,7 +92,7 @@ People opens from the local contact cache and mail history, then refreshes in th
 
 ## Mail navigation, search and mailbox layout
 
-Search uses a labelled Filters button, a compact results header, and rows that stretch across the results panel. Opening the filter form preserves plain terms such as `bob`; focusing a nonempty search field or pressing Enter reruns the search, even while an older provider search is pending. References reviewed in Mobbin: [Front advanced search](https://mobbin.com/screens/43b2e9ff-ac6c-4240-9d4a-201fc24fd597), [Skiff search](https://mobbin.com/screens/cce393ee-75b8-48b4-934d-346f1b1583ab), and [Notion Mail filters](https://mobbin.com/screens/37573e33-3175-4605-9082-f0fc04d436be).
+Search uses a compact results header with an Advanced filter text button, a full-width loading line above the results, and rows that stretch across the results panel. The main search input has no separate Search/Filters buttons; results dismiss on outside click. Opening the filter form preserves plain terms such as `bob`; focusing a nonempty search field or pressing Enter reruns the search, even while an older provider search is pending. References reviewed in Mobbin: [Front advanced search](https://mobbin.com/screens/43b2e9ff-ac6c-4240-9d4a-201fc24fd597), [Skiff search](https://mobbin.com/screens/cce393ee-75b8-48b4-934d-346f1b1583ab), and [Notion Mail filters](https://mobbin.com/screens/37573e33-3175-4605-9082-f0fc04d436be).
 
 Double-click opens the clicked message immediately and hydrates its cached conversation afterward. Thread headers retain selectable text without an extra down-arrow button. Mail-list refreshes restore selected row identities and preserve scroll unless the user navigates or scrolls meanwhile. Sync-issue drafts have a direct × delete action with per-row progress; deleting another issue does not wait for the previous network deletion.
 
@@ -123,3 +123,70 @@ The next-event chip opens today's cached agenda with a live Now marker, past/cur
 | Event preview | [Light](screenshots/event-details-light.png) · [Dark](screenshots/event-details-dark.png) |
 
 All examples use fictional data from the offline native preview. Regression tests cover persisted retry counts, badge recovery, default contact ownership, safe partial updates, richer contact search, cached agenda boundaries, selection-dependent updates and keyboard-accessible thread headers.
+
+### Separate mail window actions
+
+**Settings → Mail & notifications → Separate mail windows** provides independent **Stay open** / **Close** choices for Reply, Reply all, Forward, Archive, Delete, Move, junk status, read status, flag and pin. Existing profiles default to Stay open. Close happens after a move/state action is durably queued, before the main-window feedback animation or provider sync finishes. Reply/forward closes the source preview after the composer opens. Cancelling a folder picker or rejecting an action keeps the preview open. Pending work and retry failures remain available in the main window.
+
+The pending-action line is anchored to the bottom of the entire conversation header in both the reading pane and separate previews.
+
+| Change | Preview |
+| --- | --- |
+| Window action settings (light) | [Screenshot](screenshots/preview-action-settings-light.png) |
+| Window action settings (dark) | [Screenshot](screenshots/preview-action-settings-dark.png) |
+| Thread header pending action | [Screenshot](screenshots/thread-action-bottom-light.png) |
+
+
+### Advanced search and smart badges
+
+The unfocused global search input renders structured filters as green badges when valid and red badges for invalid syntax or unresolved account/mail-folder references. For example, `type:Mails` is invalid while `type:mail` is valid. Focusing the input restores the exact query text. Settings now places Close to the left of its title.
+
+Advanced filter automatically generates the query from grouped controls. Types, accounts/shared mailboxes, included/excluded folders, states and categories support multiple choices. Date conditions use date/time pickers and comparison operators; Attachments offers Yes, No and Not set. Mail-specific controls are hidden and omitted from the query when Mail is not among the selected types. Hidden values remain available if Mail is selected again. The editable source is the main search box; the form's generated-query preview is read-only.
+
+Repeat `type:`, `account:`, `in:` or `category:` for alternatives. Repeated `is:` conditions are combined (unread and flagged, for example); read plus unread is rejected. `notin:` excludes a folder and its descendants. The folder browser is filtered by selected accounts, supports multiple checked folders, and retains removable selected-path entries. Picker-qualified `ownerID::path` values avoid matching the same path in another mailbox/account. Unqualified paths match across selected accounts.
+
+With **Drive as the only selected type**, the path browser loads Drive folders on expansion. Drive folder searches include descendants and filter the synced file index before applying the result limit; the results panel explicitly identifies this cached scope. This does not add a new Drive provider. Other mail-only filters affect the Mail portion of multi-type searches.
+
+| Search UI | Preview |
+| --- | --- |
+| Smart filters (light / dark) | [Light](screenshots/search-badges-light.png) · [Dark](screenshots/search-badges-dark.png) |
+| Advanced filter | [Light](screenshots/search-options-light.png) · [Dark](screenshots/search-options-dark.png) |
+| Multi-select types | [Screenshot](screenshots/search-type-multiselect-light.png) |
+| Date/time conditions | [Light](screenshots/search-date-filters-light.png) · [Dark](screenshots/search-date-filters-dark.png) |
+| Folder exclusions | [Screenshot](screenshots/search-folder-exclusions-dark.png) |
+| Drive folder browser | [Screenshot](screenshots/search-drive-folders-dark.png) |
+
+Native checks exercise badge/text focus transitions, outside-click dismissal, full-width progress, mail-group visibility, form submission, folder browsing and the left Settings close button. All screenshots use fictional offline data.
+
+
+### Workspace follow-up (PR #20)
+
+People opens cached contacts immediately and starts background loading, including when the mailbox tree is not populated yet. New contact and Table/Cards live in one toolbar, with no Refresh action. The table uses aligned Name, Email, Company / role and Actions columns; cards separate identity, contact details and actions.
+
+To Do uses the same account/folder styles as mail and calendar. Double-click or Enter opens the selected task. The due-date picker binds to a local `DateTime` adapter while provider dates remain `DateTimeOffset`; editing a saved due date no longer produces a cast error. Due date and time have separate labels. Refresh is handled by synchronization rather than a toolbar button.
+
+Notes expansion preserves tree containers and handles the native expand event. Errors use a short per-node summary with full details in a flyout; cached notes remain available. Microsoft's OneNote library limit (10008) still applies; this change does not bypass it. See [Microsoft's error documentation](https://learn.microsoft.com/en-us/graph/onenote-error-codes).
+
+Settings → Mail & notifications now defaults the primary reply action to Reply all; turning the setting off chooses Reply to sender. Explicit choices remain in the menu, and open previews follow preference changes. Signature editing and template previews open in independent windows, keeping native browser surfaces out of the scrolling settings page. The next-event header is opaque and mail actions collapse into More earlier on narrow windows.
+
+Mobbin references reviewed: [Qatalog cards](https://mobbin.com/screens/e22383a1-0ec8-44c0-92a6-43a4a756dd7c), [Pipedrive contacts table](https://mobbin.com/screens/2eb73474-8d4d-431f-9a7c-3d5e8c6d5921), [Asana task details](https://mobbin.com/screens/e7810f1e-ed82-419f-9041-bae74f62d627).
+
+Run `dotnet run --project tools/BetterMail.UiPreview -c Release -- /tmp/bettermail-workspaces --workspaces` under Xvfb to verify first-load contacts, task double-click/date binding, Notes expansion and signature surface separation. Screenshots use fictional offline data only.
+
+![Contact cards](screenshots/people-cards-light.png)
+![Contact table](screenshots/people-table-dark.png)
+![Task editor](screenshots/task-editor-dark.png)
+![Narrow mail header](screenshots/mail-header-narrow-dark.png)
+![Notes status](screenshots/notes-limit-dark.png)
+![Signature settings](screenshots/signature-settings-dark.png)
+![Default reply](screenshots/default-reply-settings-dark.png)
+
+
+Task refresh follow-up: F5 remains available for an explicit refresh. On workspace sync completion, To Do reads the updated local cache and reconciles rows without clearing navigation or changing editor fields. Reopening the module with unchanged accounts also consumes the cache. Regression coverage verifies remote additions, updates and removals while preserving selection and unsaved edits.
+
+
+Reading-pane performance: full-body and thread queries now use a dedicated, persistent encrypted read-only WAL connection, separate from both sync writes and folder navigation. Thread membership is selected through the thread index before message lookup. The regression holds the writer gate, an uncommitted write transaction and the folder-reader gate while checking that the full compressed body renders in the reading pane. It also checks committed-snapshot isolation and cancellation of a superseded read.
+
+Event descriptions are now editable. Unchanged HTML is preserved; edited descriptions save as plain text. Mail menus and thread More menus offer Create event, opening an unsaved calendar event populated from the full cached email body and subject. The account's editable calendar is preferred, and an existing open editor is protected. Older API callers that omit a body leave existing descriptions untouched. Regression coverage exercises description edits, clearing, HTML preservation, and missing email bodies. The offline native preview exercises email-to-event creation with fictional data.
+
+![Event created from fictional email](screenshots/event-from-email-dark.png)

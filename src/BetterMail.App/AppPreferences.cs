@@ -20,7 +20,7 @@ public sealed record AppPreferences(
     bool MailSenderImagesEnabled = false,
     bool PeopleCardView = false,
     List<string>? MailboxOrder = null,
-    List<string>? CollapsedMailboxes = null, string? DefaultContactOwnerId = null);
+    List<string>? CollapsedMailboxes = null, string? DefaultContactOwnerId = null, List<string>? ClosePreviewAfterActions = null, bool DefaultReplyAll = true);
 
 public static class AppPreferencesStore
 {

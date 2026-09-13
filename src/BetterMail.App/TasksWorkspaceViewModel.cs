@@ -135,7 +135,16 @@ public sealed class TasksWorkspaceViewModel : ViewModelBase
     public string EditorHeading => IsEditing ? "Edit task" : "New task";
     public string EditorTitle { get => _editorTitle; set => SetProperty(ref _editorTitle, value); }
     public bool EditorHasDueDate { get => _editorHasDueDate; set => SetProperty(ref _editorHasDueDate, value); }
-    public DateTimeOffset? EditorDueDate { get => _editorDueDate; set => SetProperty(ref _editorDueDate, value); }
+    public DateTimeOffset? EditorDueDate
+    {
+        get => _editorDueDate;
+        set { if (SetProperty(ref _editorDueDate, value)) RaisePropertyChanged(nameof(EditorCalendarDate)); }
+    }
+    public DateTime? EditorCalendarDate
+    {
+        get => EditorDueDate?.LocalDateTime.Date;
+        set => EditorDueDate = value is { } date ? new DateTimeOffset(DateTime.SpecifyKind(date.Date, DateTimeKind.Local)) : null;
+    }
     public TimeSpan? EditorDueTime { get => _editorDueTime; set => SetProperty(ref _editorDueTime, value); }
     public string? EditorError
     {
@@ -198,7 +207,11 @@ public sealed class TasksWorkspaceViewModel : ViewModelBase
         IReadOnlyList<MailAccount> accounts,
         CancellationToken cancellationToken = default)
     {
-        if (_accountsLoaded && _accounts.SequenceEqual(accounts)) return;
+        if (_accountsLoaded && _accounts.SequenceEqual(accounts))
+        {
+            await ReloadFromCacheAsync(cancellationToken);
+            return;
+        }
         if (_accountsLoaded && WorkspaceAccountOrder.TryApply(AccountGroups, accounts, static item => item.Account))
         {
             _accounts = accounts.ToArray();
@@ -207,6 +220,49 @@ public sealed class TasksWorkspaceViewModel : ViewModelBase
         _accounts = accounts.ToArray();
         await InitializeAsync(cancellationToken);
         _accountsLoaded = true;
+    }
+
+    internal async Task ReloadFromCacheAsync(CancellationToken cancellationToken = default)
+    {
+        if (_store is null || IsLoading) return;
+        var accounts = _accounts.ToArray();
+        var snapshots = await Task.WhenAll(accounts.Select(async account =>
+        {
+            var lists = await _store.GetWorkspaceItemsAsync<TaskListInfo>("task-list", account.AccountId, "all", cancellationToken);
+            var contents = await Task.WhenAll(lists.Where(list => list.AccountId == account.AccountId).Select(async list =>
+                (List: list, Tasks: await _store.GetWorkspaceItemsAsync<TaskInfo>("task", account.AccountId, list.ProviderId, cancellationToken))));
+            return (Account: account, Contents: contents);
+        }));
+        // Account changes and provider operations may have started while the cache was read.
+        if (IsLoading || !_accounts.SequenceEqual(accounts)) return;
+        var selectedList = SelectedList;
+        var selectedTask = SelectedTask;
+        var groups = new List<TaskAccountGroup>();
+        foreach (var snapshot in snapshots)
+        {
+            var group = AccountGroups.FirstOrDefault(item => item.Account == snapshot.Account) ?? new TaskAccountGroup(snapshot.Account);
+            var lists = new List<TaskListChoice>();
+            foreach (var content in snapshot.Contents)
+            {
+                var list = group.Lists.FirstOrDefault(item => item.Info == content.List) ?? new TaskListChoice(group, content.List);
+                var items = content.Tasks.Where(task => task.AccountId == snapshot.Account.AccountId && task.ListId == list.Info.ProviderId)
+                    .Select(task => list.Tasks.FirstOrDefault(item => item.Info == task) ?? new TaskWorkspaceItem(list, task)).ToArray();
+                CollectionUpdates.Reconcile(list.Tasks, items, item => item.Info.ProviderId);
+                lists.Add(list);
+            }
+            CollectionUpdates.Reconcile(group.Lists, lists, item => item.Info.ProviderId);
+            groups.Add(group);
+        }
+        CollectionUpdates.Reconcile(AccountGroups, groups, item => item.Account.AccountId);
+        SelectedList = selectedList is null ? null : groups
+            .Where(group => group.Account.AccountId == selectedList.Group.Account.AccountId)
+            .SelectMany(group => group.Lists).FirstOrDefault(list => list.Info.ProviderId == selectedList.Info.ProviderId);
+        RebuildVisibleTasks();
+        SelectedTask = selectedTask is null ? null : VisibleTasks.FirstOrDefault(item =>
+            item.List.Group.Account.AccountId == selectedTask.List.Group.Account.AccountId &&
+            item.Info.ListId == selectedTask.Info.ListId && item.Info.ProviderId == selectedTask.Info.ProviderId);
+        // Editor fields and its original task snapshot remain untouched until Save or Cancel.
+        RaisePartialErrors();
     }
 
     private async Task<TaskAccountGroup> LoadAccountAsync(
@@ -505,11 +561,8 @@ public sealed class TasksWorkspaceViewModel : ViewModelBase
             .ThenBy(static task => task.Info.DueAt)
             .ThenBy(static task => task.Info.Title, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        VisibleTasks.Clear();
-        foreach (var task in tasks)
-        {
-            VisibleTasks.Add(task);
-        }
+        CollectionUpdates.Reconcile(VisibleTasks, tasks,
+            task => (task.List.Group.Account.AccountId, task.Info.ListId, task.Info.ProviderId));
         RaisePropertyChanged(nameof(HasTasks));
         RaisePropertyChanged(nameof(HasNoTasks));
         RaisePropertyChanged(nameof(OpenCount));

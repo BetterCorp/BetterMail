@@ -65,6 +65,48 @@ public sealed partial class SettingsView : UserControl
         }
     }
 
+    private Window? _signatureWindow;
+    private void EditSignatureClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (_signatureWindow is { } existing) { existing.Activate(); return; }
+        if (DataContext is not MainWindowViewModel vm) return;
+        var editor = new RichHtmlEditor { Html = vm.SignatureEditorHtml, IsReadOnly = !vm.CanEditSelectedSignature };
+        var title = new TextBlock { Text = vm.SignatureEditorName, FontSize = 20, FontWeight = Avalonia.Media.FontWeight.SemiBold };
+        var done = new Button { Content = "Done", HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
+        var grid = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto"), RowSpacing = 12, Margin = new Thickness(16) };
+        Grid.SetRow(editor, 1); Grid.SetRow(done, 2);
+        grid.Children.Add(title); grid.Children.Add(editor); grid.Children.Add(done);
+        var window = new Window { Title = "Signature editor", Width = 760, Height = 560, MinWidth = 400, MinHeight = 360, Content = grid };
+        // Bind to the selected signature only while that signature is still active.
+        var signature = vm.SelectedSignature;
+        editor.PropertyChanged += (_, change) =>
+        {
+            if (change.Property == RichHtmlEditor.HtmlProperty && ReferenceEquals(signature, vm.SelectedSignature)) vm.SignatureEditorHtml = editor.Html;
+        };
+        done.Click += async (_, _) => { await editor.CaptureAsync(); window.Close(); };
+        void SelectionChanged(object? _, System.ComponentModel.PropertyChangedEventArgs change)
+        {
+            if (change.PropertyName == nameof(vm.SelectedSignature) && !ReferenceEquals(signature, vm.SelectedSignature)) window.Close();
+            else if (ReferenceEquals(signature, vm.SelectedSignature))
+            {
+                if (change.PropertyName == nameof(vm.SignatureEditorHtml)) editor.Html = vm.SignatureEditorHtml;
+                if (change.PropertyName == nameof(vm.SignatureEditorName)) title.Text = vm.SignatureEditorName;
+            }
+        }
+        vm.PropertyChanged += SelectionChanged;
+        window.Closed += (_, _) => { vm.PropertyChanged -= SelectionChanged; _signatureWindow = null; };
+        _signatureWindow = window;
+        IndependentWindow.Show(window);
+    }
+
+    private void PreviewSignatureClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel vm) return;
+        var preview = new NativeWebView { Source = vm.SelectedSignatureTemplatePreviewUri };
+        preview.NavigationStarted += SignaturePreviewNavigationStarted;
+        IndependentWindow.Show(new Window { Title = "Signature template preview", Width = 640, Height = 420, Content = preview });
+    }
+
     private void SignaturePreviewNavigationStarted(
         object? sender,
         WebViewNavigationStartingEventArgs e)
