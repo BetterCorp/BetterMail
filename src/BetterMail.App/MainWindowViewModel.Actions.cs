@@ -5,6 +5,41 @@ namespace BetterMail.App;
 
 public sealed partial class MainWindowViewModel
 {
+    private readonly Dictionary<string, string> _busyChecks = [];
+    public AsyncCommand<MailAction> RetryBusyActionCommand { get; }
+    public AsyncCommand<MailAction> CheckBusyActionCommand { get; }
+
+    private async Task RetryBusyActionAsync(MailAction action)
+    {
+        if (_store is null) return;
+        try
+        {
+            Status = await _store.RetryMailActionAsync(action.Id)
+                ? "Retry queued. Previous failure history is kept."
+                : "Cannot retry yet. Resolve any earlier action for this message first.";
+            await RefreshBusyActionsAsync();
+            _ = SyncAsync();
+        }
+        catch (Exception error) { Error = error.Message; }
+    }
+
+    private async Task CheckBusyActionAsync(MailAction action)
+    {
+        if (_store is null || _provider is null) return;
+        _busyChecks[action.Id] = "Checking server status…";
+        await RefreshBusyActionsAsync();
+        try
+        {
+            var account = Accounts.Single(account => account.AccountId == action.AccountId);
+            var mailbox = Mailboxes.Single(mailbox => mailbox.Id == action.MailboxId);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var result = await new MailActionDiagnostics(_store, _provider).CheckAsync(account, mailbox, action.Id, timeout.Token);
+            _busyChecks[action.Id] = result;
+        }
+        catch (Exception error) { _busyChecks[action.Id] = "Status check failed: " + error.Message; }
+        await RefreshBusyActionsAsync();
+    }
+
     public AsyncCommand<MailAction> CancelBusyActionCommand { get; }
     public AsyncCommand<MailAction> ReturnUnconfirmedSendCommand { get; }
     public AsyncCommand<MailAction> ConfirmSentCommand { get; }
@@ -68,7 +103,9 @@ public sealed partial class MainWindowViewModel
     private async Task RefreshBusyActionsAsync()
     {
         if (_store is null) return;
-        CollectionUpdates.Reconcile(BusyActions, await _store.GetMailActionsAsync(), static action => action.Id);
+        var actions = await _store.GetMailActionsAsync();
+        foreach (var id in _busyChecks.Keys.Except(actions.Select(action => action.Id)).ToArray()) _busyChecks.Remove(id);
+        CollectionUpdates.Reconcile(BusyActions, actions.Select(action => action with { StatusCheckDetails = _busyChecks.GetValueOrDefault(action.Id) }).ToArray(), static action => action.Id);
         RaiseDraftState();
         MailActionStateChanged();
     }

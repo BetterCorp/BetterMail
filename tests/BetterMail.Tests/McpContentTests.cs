@@ -10,6 +10,31 @@ namespace BetterMail.Tests;
 public sealed class McpContentTests
 {
     [Fact]
+    public async Task BusyRetryRequiresMailboxWriteAccessAndPreservesPauseHistory()
+    {
+        await WithTools(async (store, tools, fake, account, mailbox, setSettings) =>
+        {
+            var message = new MailMessage(mailbox.Id, "source", "thread", "<source@example.test>", "inbox", "Subject",
+                new("Sender", "sender@example.test"), [], DateTimeOffset.UtcNow, "", "Body", false, true, false, MailImportance.Normal, [], null);
+            await store.ApplySyncPageAsync("seed", new([message], null, false));
+            var action = await store.QueueMoveAsync(account, message, new(mailbox.Id, "archive", "Archive", 0, 0));
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                await store.StartMailActionAsync(action.Id);
+                await store.FailMailActionAsync(action.Id, "Missing");
+            }
+            await Assert.ThrowsAsync<McpException>(() => tools.RetryMailAction(mailbox.Id, action.Id));
+            setSettings(new(Enabled: true, AllowWrites: true, MailboxIds: [mailbox.Id]));
+            await Assert.ThrowsAsync<McpException>(() => tools.RetryMailAction("other", action.Id));
+            Assert.True(await tools.RetryMailAction(mailbox.Id, action.Id));
+            var pending = (await store.GetMailActionAsync(action.Id))!;
+            Assert.Equal(3, pending.FailureCount);
+            Assert.False(pending.IsRetryPaused);
+            Assert.Empty(fake.Calls);
+        });
+    }
+
+    [Fact]
     public async Task WorkspaceAccessIsIndependentAndContentOperationsUseScopedAccounts()
     {
         await WithTools(async (store, tools, fake, account, mailbox, setSettings) =>

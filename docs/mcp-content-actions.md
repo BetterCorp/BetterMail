@@ -33,3 +33,15 @@ Microsoft 365 uses [provider response drafts](https://learn.microsoft.com/en-us/
 Cross-account mail moves, Google Drive, and creating/deleting OneNote notebooks or sections are not supported by the current app/provider. OneNote's document-library limits still apply. A registered tool is not a guarantee that every account supports that action.
 
 Provider-backed workspace calls need connectivity. Mutations request normal background sync so the UI cache catches up; a stale cache is not proof a remote write failed. Read state before destructive or replacement updates. Notes have a best-effort modified-time guard; workspace provider writes generally do not offer atomic version checks. Paging uses offset/limit and should restart after collection changes. Do not blindly retry an uncertain remote mutation.
+
+### Stuck Busy actions
+
+`list_busy` and `get_action` expose the provider error, failure count, last attempt/failure timestamps,
+retry pause state and recovery guidance. Three failures pause automatic attempts; existing high-count
+items pause too. `check_mail_action` performs read-only server checks, including a bounded search
+that requires the exact Internet Message-ID within the same mailbox. A missing or ambiguous result
+is not evidence of deletion or delivery. `retry_mail_action` explicitly authorizes another attempt
+without erasing history; a subsequent failure pauses again. Fix the reported cause first. Unconfirmed
+sends cannot be retried through this tool. Earlier pending actions for the same message must be resolved
+first. A changed server ID is reported, not automatically rebound; verify and perform the intended
+operation in the provider before cancelling the obsolete local action.

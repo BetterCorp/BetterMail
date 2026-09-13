@@ -126,7 +126,7 @@ internal sealed partial class McpMailTools(
         return new { draft.Id, draft.UpdatedAt };
     }
 
-    [McpServerTool(Name = "move_mail", Destructive = true, Idempotent = true), Description("Queue moving a message to a folder in the same mailbox. Use the archive, deleteditems, or junkemail folder IDs from list_folders to archive, trash, or mark junk. The local move is immediate; cloud failures retry on the next sync.")]
+    [McpServerTool(Name = "move_mail", Destructive = true, Idempotent = true), Description("Queue moving a message to a folder in the same mailbox. Use the archive, deleteditems, or junkemail folder IDs from list_folders to archive, trash, or mark junk. The local move is immediate; cloud failures retry on sync until three failures pause the action.")]
     public async Task<object> MoveMail(string mailboxId, string messageId, string destinationFolderId)
     {
         var sender = await SenderAsync(mailboxId, write: true);
@@ -140,7 +140,7 @@ internal sealed partial class McpMailTools(
         return new { actionId = action.Id };
     }
 
-    [McpServerTool(Name = "delete_draft", Destructive = true, Idempotent = true), Description("Queue deletion of a saved draft. Requires edit permission. Returns the durable Busy action ID; failures retry on the next sync.")]
+    [McpServerTool(Name = "delete_draft", Destructive = true, Idempotent = true), Description("Queue deletion of a saved draft. Requires edit permission. Returns the durable Busy action ID; failures retry on sync until three failures pause the action.")]
     public async Task<object> DeleteDraft(string mailboxId, string draftId)
     {
         Authorize(mailboxId, write: true);
@@ -172,7 +172,7 @@ internal sealed partial class McpMailTools(
         return new { actionId = "send:" + draftId };
     }
 
-    [McpServerTool(Name = "list_busy", ReadOnly = true), Description("List pending Busy actions in an allowed mailbox. Failed attempts remain queued for the next sync.")]
+    [McpServerTool(Name = "list_busy", ReadOnly = true), Description("List pending Busy actions in an allowed mailbox. Includes error, failure count, timestamps, pause status and recovery guidance. Three failures pause automatic retries. Use check_mail_action to investigate and retry_mail_action after fixing the cause.")]
     public async Task<IReadOnlyList<MailAction>> ListBusy(string mailboxId)
     {
         Authorize(mailboxId);

@@ -215,6 +215,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         ShowPinnedCommand = new AsyncCommand(() => ShowUnifiedFilterAsync(MailMessageFilter.Pinned));
         ShowFlaggedCommand = new AsyncCommand(() => ShowUnifiedFilterAsync(MailMessageFilter.Flagged));
         ShowDraftsCommand = new AsyncCommand(ShowDraftsAsync);
+        RetryBusyActionCommand = new AsyncCommand<MailAction>(RetryBusyActionAsync, static action => action.CanRetry);
+        CheckBusyActionCommand = new AsyncCommand<MailAction>(CheckBusyActionAsync, static action => !action.Running);
         CancelBusyActionCommand = new AsyncCommand<MailAction>(CancelBusyActionAsync, static action => action.CanCancel);
         ReturnUnconfirmedSendCommand = new AsyncCommand<MailAction>(ReturnUnconfirmedSendAsync, static action => action.NeedsSendReview);
         ConfirmSentCommand = new AsyncCommand<MailAction>(ConfirmSentAsync, static action => action.NeedsSendReview);

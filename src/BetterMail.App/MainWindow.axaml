@@ -829,18 +829,28 @@
                 <Border Padding="14,7,9,7" HorizontalAlignment="Stretch" Background="Transparent"
                         BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1"
                         ToolTip.Tip="{Binding Error}">
-                  <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="3">
+                  <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="3">
                     <TextBlock Text="{Binding ActionText}" Foreground="{DynamicResource BetterMailAccentBrush}"
                                FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                     <TextBlock Grid.Column="1" Text="{Binding LocalCreatedAt, StringFormat='{}{0:MMM d, HH:mm}'}" FontSize="11" Opacity="0.62" />
                     <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding DisplaySubject}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                     <TextBlock Grid.Row="2" Text="{Binding MailboxAddress}" FontSize="11" Opacity="0.62" TextTrimming="CharacterEllipsis" />
                     <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding StatusText}" FontSize="11" Opacity="0.62" Margin="8,0,0,0" />
-                    <Button Grid.Row="3" Grid.Column="1" Content="Cancel" HorizontalAlignment="Right"
+                    <StackPanel Grid.Row="3" Grid.ColumnSpan="2" Spacing="4">
+                      <TextBlock Text="{Binding RetryHistory}" IsVisible="{Binding HasFailure}" FontSize="11" Opacity="0.7" TextWrapping="Wrap" />
+                      <SelectableTextBlock Text="{Binding FailureDetails}" TextWrapping="Wrap" FontSize="12" />
+                      <TextBlock Text="{Binding RecoveryGuidance}" IsVisible="{Binding HasFailure}" TextWrapping="Wrap" FontSize="12" />
+                      <SelectableTextBlock Text="{Binding StatusCheckDetails}" IsVisible="{Binding HasStatusCheck}" TextWrapping="Wrap" FontSize="12" FontWeight="SemiBold" />
+                    </StackPanel>
+                    <WrapPanel Grid.Row="4" Grid.ColumnSpan="2">
+                      <Button Content="Check status" Margin="0,0,8,0" Command="{Binding $parent[Window].DataContext.CheckBusyActionCommand}" CommandParameter="{Binding}" />
+                      <Button Content="Retry" Margin="0,0,8,0" IsEnabled="{Binding CanRetry}" Command="{Binding $parent[Window].DataContext.RetryBusyActionCommand}" CommandParameter="{Binding}" />
+                    <Button Content="Cancel" HorizontalAlignment="Right"
                             Command="{Binding $parent[Window].DataContext.CancelBusyActionCommand}"
                             CommandParameter="{Binding}" IsEnabled="{Binding CanCancel}"
                             ToolTip.Tip="Cancel a waiting action. Actions already executing cannot be recalled." />
-                    <StackPanel Grid.Row="4" Grid.ColumnSpan="2" Spacing="6" IsVisible="{Binding NeedsSendReview}">
+                    </WrapPanel>
+                    <StackPanel Grid.Row="5" Grid.ColumnSpan="2" Spacing="6" IsVisible="{Binding NeedsSendReview}">
                       <TextBlock Text="Check Sent in your provider before retrying. This message will not be sent again automatically." TextWrapping="Wrap" FontSize="12" />
                       <WrapPanel>
                         <Button Content="I found it in Sent" Margin="0,0,8,0" Command="{Binding $parent[Window].DataContext.ConfirmSentCommand}" CommandParameter="{Binding}" />

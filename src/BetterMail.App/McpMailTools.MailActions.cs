@@ -108,4 +108,29 @@ internal sealed partial class McpMailTools
         await refreshAndSync();
         return cancelled;
     }
+    [McpServerTool(Name = "check_mail_action", ReadOnly = true), Description("Investigate a stuck Busy action without retrying, cancelling or sending. Checks saved server IDs and bounded exact-identity search. Read list_busy/get_action for error, history and pause status. A missing result never proves deletion or delivery.")]
+    public async Task<string> CheckMailAction(string mailboxId, string actionId)
+    {
+        var sender = await SenderAsync(mailboxId);
+        var provider = mailProvider?.Invoke() ?? throw new McpException("Mail provider unavailable.");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var result = await new MailActionDiagnostics(store, provider).CheckAsync(sender.Account, sender.Mailbox, actionId, timeout.Token);
+        Authorize(mailboxId);
+        return result;
+    }
+
+    [McpServerTool(Name = "retry_mail_action", Destructive = true), Description("Authorize a retry of a failed Busy action after checking its error and fixing the cause. Preserves failure history; repeated failures pause after three failures. Cannot retry unconfirmed sends or bypass an earlier pending action. Requires sending permission for send actions.")]
+    public async Task<bool> RetryMailAction(string mailboxId, string actionId)
+    {
+        Authorize(mailboxId, true);
+        var action = await store.GetMailActionAsync(actionId);
+        if (action?.MailboxId != mailboxId) throw new McpException("Action unavailable.");
+        if (action.Kind == MailActionKind.Send && !EnabledConfiguration().AllowSending)
+            throw new McpException("Sending permission is required.");
+        Authorize(mailboxId, true);
+        var queued = await store.RetryMailActionAsync(actionId);
+        await refreshAndSync();
+        return queued;
+    }
+
 }
