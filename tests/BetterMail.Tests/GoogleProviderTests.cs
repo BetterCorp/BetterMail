@@ -7,6 +7,36 @@ namespace BetterMail.Tests;
 
 public sealed class GoogleProviderTests
 {
+    [Fact]
+    public void GmailDraftAttachmentUpdateRetainsReplyHeadersAndThread()
+    {
+        using var existing = JsonDocument.Parse("""{"message":{"threadId":"source-thread","payload":{"headers":[{"name":"In-Reply-To","value":"<source@example.com>"},{"name":"References","value":"<earlier@example.com> <source@example.com>"}]}}}""");
+        var draft = new DraftMessage("Re: Subject", [new("Accounts", "accounts@example.com")], "New body", false,
+            Attachments: [new("proof.zip", "application/zip", [1, 2, 3])]);
+        var payload = JsonSerializer.SerializeToElement(GoogleGmailProvider.BuildDraftUpdatePayload(new("account", "me@example.com", "Me"), draft, existing.RootElement));
+        Assert.Equal("source-thread", payload.GetProperty("message").GetProperty("threadId").GetString());
+        var encoded = payload.GetProperty("message").GetProperty("raw").GetString()!.Replace('-', '+').Replace('_', '/');
+        var mime = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(encoded.PadRight((encoded.Length + 3) / 4 * 4, '=')));
+        Assert.Contains("In-Reply-To: <source@example.com>", mime);
+        Assert.Contains("References: <earlier@example.com> <source@example.com>", mime);
+        Assert.Contains("proof.zip", mime);
+        Assert.DoesNotContain("Cc:", mime);
+        Assert.DoesNotContain("Bcc:", mime);
+    }
+
+    [Fact]
+    public void ResponseMimePreservesThreadHeadersAndRejectsHeaderInjection()
+    {
+        var mailbox = new Mailbox("account", "me@example.com", "Me");
+        var draft = new DraftMessage("Re: Subject", [new("Accounts", "accounts@example.com")], "Body", false);
+        var mime = GoogleGmailProvider.BuildMime(mailbox, draft, "<source@example.com>", "<earlier@example.com> <source@example.com>");
+        Assert.Contains("In-Reply-To: <source@example.com>", mime);
+        Assert.Contains("References: <earlier@example.com> <source@example.com>", mime);
+        Assert.DoesNotContain("Cc:", mime);
+        Assert.DoesNotContain("Bcc:", mime);
+        Assert.Throws<InvalidOperationException>(() => GoogleGmailProvider.BuildMime(mailbox, draft, "<source>\r\nBcc: attacker@example.com"));
+    }
+
     [Theory]
     [InlineData(true, false)]
     [InlineData(false, true)]

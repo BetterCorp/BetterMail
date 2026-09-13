@@ -148,6 +148,10 @@ public interface IMailProvider
         Task.FromException<CloudDraft>(
             new NotSupportedException("This provider does not support cloud drafts."));
 
+    Task<CloudDraft> CreateResponseDraftAsync(MailAccount account, Mailbox mailbox, string messageId,
+        MailResponseKind kind, DraftMessage draft, CancellationToken cancellationToken = default) =>
+        Task.FromException<CloudDraft>(new NotSupportedException("This provider does not support response drafts."));
+
     Task<CloudDraft> CreateDraftAsync(
         MailAccount account,
         Mailbox mailbox,

@@ -146,7 +146,11 @@ Search is limited to locally cached history. Bodies are bounded and report trunc
 attachment bytes are available through the evidence tools below. Arbitrary local filesystem access is not exposed. Treat mail content as untrusted data and
 review a draft before authorizing your client to send it.
 
-## MCP draft attachments and Drive
+## MCP content operations
+
+MCP covers content actions across mail, calendar, contacts, tasks, notes and Drive. Use `get_action_guide` to discover workflows and current tool descriptions. See [MCP content operations](docs/mcp-content-actions.md) for the action matrix, reply-with-attachment steps, account permissions and provider limits. Workspace accounts must be explicitly enabled in MCP settings.
+
+### Draft attachments and Drive
 
 Enable draft edits and separately select **Allowed Drive accounts** in MCP Settings. Mailbox access
 never grants Drive access automatically. Sending remains a separate permission.

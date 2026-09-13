@@ -317,6 +317,38 @@ public sealed class GoogleGmailProvider(
         return await MapDraftAsync(account, mailbox, document.RootElement, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<CloudDraft> CreateResponseDraftAsync(MailAccount account, Mailbox mailbox, string messageId,
+        MailResponseKind kind, DraftMessage draft, CancellationToken cancellationToken = default)
+    {
+        Validate(account, mailbox);
+        if (!Enum.IsDefined(kind)) throw new ArgumentOutOfRangeException(nameof(kind));
+        using var source = await GetJsonAsync(account, $"/messages/{Escape(messageId)}?format=full", cancellationToken).ConfigureAwait(false);
+        var sourceHeaders = Headers(source.RootElement.GetProperty("payload"));
+        var replyId = Header(sourceHeaders, "Message-ID");
+        var references = Header(sourceHeaders, "References");
+        if (kind != MailResponseKind.Forward && string.IsNullOrWhiteSpace(replyId))
+            throw new InvalidOperationException("The source email has no Message-ID for a threaded reply.");
+        if (kind == MailResponseKind.Forward)
+        {
+            var attachments = await GetAttachmentsAsync(account, mailbox, messageId, cancellationToken).ConfigureAwait(false);
+            var copied = new List<DraftAttachment>();
+            foreach (var attachment in attachments)
+            {
+                var hydrated = attachment.ContentBytes is not null ? attachment
+                    : await GetAttachmentAsync(account, mailbox, messageId, attachment.ProviderId, cancellationToken).ConfigureAwait(false);
+                copied.Add(new(attachment.Name, attachment.ContentType,
+                    hydrated?.ContentBytes ?? throw new InvalidOperationException("Forward attachment content unavailable."), attachment.IsInline, attachment.ContentId));
+            }
+            draft = draft with { Attachments = copied };
+        }
+        var raw = BuildMime(mailbox, draft, kind == MailResponseKind.Forward ? null : replyId,
+            kind == MailResponseKind.Forward ? null : (references + " " + replyId).Trim());
+        using var response = await SendJsonAsync(account, HttpMethod.Post, "/drafts",
+            new { message = new { raw = Encode(raw), threadId = kind == MailResponseKind.Forward ? null : OptionalString(source.RootElement, "threadId") } }, cancellationToken).ConfigureAwait(false);
+        using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false), cancellationToken: cancellationToken).ConfigureAwait(false);
+        return await GetDraftAsync(account, mailbox, RequiredString(document.RootElement, "id"), cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<CloudDraft> CreateDraftAsync(
         MailAccount account,
         Mailbox mailbox,
@@ -344,13 +376,25 @@ public sealed class GoogleGmailProvider(
         CancellationToken cancellationToken = default)
     {
         Validate(account, mailbox);
+        // Gmail replaces MIME on draft edits. Carry response headers and thread ID
+        // forward from the existing draft so attachment edits cannot detach a reply.
+        using var existing = await GetJsonAsync(account, $"/drafts/{Escape(draftId)}?format=full", cancellationToken).ConfigureAwait(false);
+        var payload = BuildDraftUpdatePayload(mailbox, draft, existing.RootElement);
         using var response = await SendJsonAsync(
             account,
             HttpMethod.Put,
             $"/drafts/{Escape(draftId)}",
-            new { message = new { raw = Encode(BuildMime(mailbox, draft)) } },
+            payload,
             cancellationToken).ConfigureAwait(false);
         return await GetDraftAsync(account, mailbox, draftId, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static object BuildDraftUpdatePayload(Mailbox mailbox, DraftMessage draft, JsonElement existingDraft)
+    {
+        var message = existingDraft.GetProperty("message");
+        var headers = Headers(message.GetProperty("payload"));
+        var raw = BuildMime(mailbox, draft, Header(headers, "In-Reply-To"), Header(headers, "References"));
+        return new { message = new { raw = Encode(raw), threadId = OptionalString(message, "threadId") } };
     }
 
     public async Task DeleteDraftAsync(
@@ -415,7 +459,7 @@ public sealed class GoogleGmailProvider(
             ParseAddresses(Header(headers, "Cc")));
     }
 
-    internal static string BuildMime(Mailbox mailbox, DraftMessage draft)
+    internal static string BuildMime(Mailbox mailbox, DraftMessage draft, string? inReplyTo = null, string? references = null)
     {
         if (draft.RequestReadReceipt || draft.RequestDeliveryReceipt)
             throw new NotSupportedException("Receipt requests are not supported by BetterMail for Gmail accounts.");
@@ -436,6 +480,13 @@ public sealed class GoogleGmailProvider(
         HeaderLine(builder, "X-Priority", draft.Importance switch { MailImportance.High => "1", MailImportance.Low => "5", _ => "3" });
         HeaderLine(builder, "Date", DateTimeOffset.Now.ToString("r", CultureInfo.InvariantCulture));
         HeaderLine(builder, "MIME-Version", "1.0");
+        foreach (var (name, value) in new[] { ("In-Reply-To", inReplyTo), ("References", references) })
+        {
+            if (string.IsNullOrWhiteSpace(value)) continue;
+            if (value.Length > 16000 || value.Any(character => char.IsControl(character)))
+                throw new InvalidOperationException("Invalid response header.");
+            HeaderLine(builder, name, value);
+        }
 
         if (draft.Attachments?.Count > 0)
         {

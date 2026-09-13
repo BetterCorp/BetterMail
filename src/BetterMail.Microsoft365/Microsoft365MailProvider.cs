@@ -401,6 +401,19 @@ public sealed class Microsoft365MailProvider(
         return MapDraft(account, mailbox, document.RootElement, attachments);
     }
 
+    public async Task<CloudDraft> CreateResponseDraftAsync(MailAccount account, Mailbox mailbox, string messageId,
+        MailResponseKind kind, DraftMessage draft, CancellationToken cancellationToken = default)
+    {
+        ValidateDraft(draft);
+        var operation = kind switch { MailResponseKind.Reply => "createReply", MailResponseKind.ReplyAll => "createReplyAll",
+            MailResponseKind.Forward => "createForward", _ => throw new ArgumentOutOfRangeException(nameof(kind)) };
+        using var document = await SendJsonForResponseAsync(account, HttpMethod.Post,
+            $"{MailboxPath(account, mailbox)}/messages/{Uri.EscapeDataString(messageId)}/{operation}",
+            new { message = BuildMessagePayload(mailbox, draft) }, cancellationToken).ConfigureAwait(false);
+        var id = RequiredString(document.RootElement, "id");
+        return await GetDraftAsync(account, mailbox, id, cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<CloudDraft> CreateDraftAsync(
         MailAccount account,
         Mailbox mailbox,

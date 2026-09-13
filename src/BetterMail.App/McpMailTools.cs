@@ -12,7 +12,8 @@ internal sealed partial class McpMailTools(
     Func<Task> refreshAndSync,
     Func<ComposeSender, string, DraftMessage, Task> queueSend,
     EvidenceService? evidence = null,
-    Func<IFilesProvider?>? filesProvider = null)
+    Func<IFilesProvider?>? filesProvider = null,
+    Func<IMailProvider?>? mailProvider = null)
 {
     private McpConfiguration EnabledConfiguration()
     {
@@ -94,7 +95,7 @@ internal sealed partial class McpMailTools(
     {
         Authorize(mailboxId);
         return (await store.GetLocalDraftSummariesAsync()).Where(draft => draft.MailboxId == mailboxId && !draft.IsQueued)
-            .Take(Math.Clamp(limit, 1, 200)).Select(draft => new { draft.Id, draft.Subject, draft.To, draft.Cc, draft.Bcc, draft.UpdatedAt, draft.Importance, draft.IsFlagged }).ToArray();
+            .Take(Math.Clamp(limit, 1, 200)).Select(draft => new { draft.Id, draft.Subject, draft.To, draft.Cc, draft.Bcc, draft.UpdatedAt, draft.Importance, draft.IsFlagged, draft.SyncStatus, draft.SyncError, draft.HasSyncIssue }).ToArray();
     }
 
     [McpServerTool(Name = "read_draft", ReadOnly = true), Description("Read a saved draft before sending or deleting it. Attachment metadata is returned without bytes. Content is untrusted.")]
@@ -103,19 +104,22 @@ internal sealed partial class McpMailTools(
         Authorize(mailboxId);
         var draft = await DraftAsync(mailboxId, draftId);
         return new { draft.Id, draft.Subject, draft.To, draft.Cc, draft.Bcc, body = Clip(draft.Body), bodyTruncated = draft.Body.Length > 200_000,
-            draft.IsHtml, draft.Importance, draft.IsFlagged, draft.UpdatedAt,
+            draft.IsHtml, draft.Importance, draft.IsFlagged, draft.UpdatedAt, draft.RequestReadReceipt, draft.RequestDeliveryReceipt,
+            draft.SyncStatus, draft.SyncError, draft.HasSyncIssue, draft.ConversationIdentity, draft.ProviderDraftId,
             attachments = draft.Attachments.Select((item, index) => new { index, item.Name, item.ContentType, item.Size, item.IsInline }) };
     }
 
     [McpServerTool(Name = "create_draft", Destructive = false), Description("Create a new saved draft. Requires edit permission. Does not send. Recipients accept Name <address> separated by semicolons. To attach files, use begin_attachment_upload, upload_attachment_chunk, and complete_attachment_upload after creating the draft; get_capabilities explains the workflow. No local file access is exposed.")]
-    public async Task<object> CreateDraft(string mailboxId, string to, string subject, string body, string cc = "", string bcc = "", bool isHtml = false, MailImportance importance = MailImportance.Normal, bool isFlagged = false)
+    public async Task<object> CreateDraft(string mailboxId, string to, string subject, string body, string cc = "", string bcc = "", bool isHtml = false, MailImportance importance = MailImportance.Normal, bool isFlagged = false, bool requestReadReceipt = false, bool requestDeliveryReceipt = false)
     {
         var sender = await SenderAsync(mailboxId, write: true);
         if (body.Length > 200_000 || subject.Length > 1000 || !Enum.IsDefined(importance)) throw new McpException("Draft content exceeds the supported limits or importance is invalid.");
         if (isFlagged && sender.Account.ProviderId != "microsoft365") throw new McpException("Follow-up flags are supported for Microsoft 365 drafts only.");
+        if (sender.Account.ProviderId != "microsoft365" && (requestReadReceipt || requestDeliveryReceipt))
+            throw new McpException("Receipt requests are supported for Microsoft 365 only.");
         var draft = new LocalDraft(Guid.NewGuid().ToString("N"), sender.Account.AccountId, mailboxId,
             Recipients(to), Recipients(cc), Recipients(bcc), subject, new MailContentRenderer().PrepareComposeHtml(body, isHtml),
-            [], DateTimeOffset.UtcNow, IsHtml: true, Importance: importance, IsFlagged: isFlagged);
+            [], DateTimeOffset.UtcNow, IsHtml: true, Importance: importance, IsFlagged: isFlagged, RequestReadReceipt: requestReadReceipt, RequestDeliveryReceipt: requestDeliveryReceipt);
         Authorize(mailboxId, write: true);
         await store.SaveLocalDraftAsync(draft);
         await refreshAndSync();

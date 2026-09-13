@@ -8,13 +8,14 @@ namespace BetterMail.App;
 
 internal sealed partial class McpMailTools
 {
-    [McpServerTool(Name = "get_capabilities", ReadOnly = true), Description("Start here: returns permissions, limits, server tool names, and step-by-step instructions for creating mail with attachments and uploading to Drive. create_draft has no attachment parameter: use the separate attachment upload tools. Includes recovery guidance when client discovery is missing tools. Sending requires separate user authorization.")]
+    [McpServerTool(Name = "get_capabilities", ReadOnly = true), Description("Start here: returns permissions, limits, server tool names, and workflows across mail, calendar, contacts, tasks, notes and Drive. Use get_action_guide(topic) for tool descriptions. create_draft has no attachment parameter: use the separate attachment upload tools. Includes recovery guidance when client discovery is missing tools. Sending requires separate user authorization.")]
     public object GetCapabilities()
     {
         var settings = EnabledConfiguration();
-        return new { settings.AllowWrites, settings.AllowSending, mailboxIds = settings.MailboxIds ?? [],
+        return new { documentationVersion = 2, serverVersion = new AppInfo().Version, settings.AllowWrites, settings.AllowSending, mailboxIds = settings.MailboxIds ?? [],
             directAttachmentBudgetBytes = LargeAttachmentPolicy.DirectAttachmentBudgetBytes,
             allowedDriveAccounts = settings.DriveAccountIds ?? [],
+            allowedWorkspaceAccounts = settings.WorkspaceAccountIds ?? [],
             maxAttachmentBytes = DraftAttachment.MaximumSizeBytes, maxChunkBytes = EncryptedMailStore.McpUploadChunkBytes,
             maxConcurrentUploads = 4, uploadLifetimeMinutes = 60,
             registeredTools = RegisteredToolNames(), usage = CapabilityUsage };
@@ -22,12 +23,19 @@ internal sealed partial class McpMailTools
 
     [McpServerTool(Name = "update_draft", Destructive = true), Description("Edit a saved draft without sending. Supply expectedUpdatedAt from read_draft to reject concurrent edits. Omitted fields are preserved; empty strings clear fields. bodyIsHtml describes a supplied body. Queued/deleted drafts cannot be edited.")]
     public async Task<object> UpdateDraft(string mailboxId, string draftId, DateTimeOffset expectedUpdatedAt,
-        string? to = null, string? cc = null, string? bcc = null, string? subject = null, string? body = null, bool bodyIsHtml = false)
+        string? to = null, string? cc = null, string? bcc = null, string? subject = null, string? body = null, bool bodyIsHtml = false,
+        MailImportance? importance = null, bool? isFlagged = null, bool? requestReadReceipt = null, bool? requestDeliveryReceipt = null)
     {
         Authorize(mailboxId, write: true);
         var draft = await DraftAsync(mailboxId, draftId);
         if (subject?.Length > 1000 || body?.Length > 200_000) throw new McpException("Draft content exceeds supported limits.");
-        var updated = draft with { To = to is null ? draft.To : Recipients(to), Cc = cc is null ? draft.Cc : Recipients(cc),
+        if (importance is { } priority && !Enum.IsDefined(priority)) throw new McpException("Invalid importance.");
+        var sender = await SenderAsync(mailboxId, true);
+        if (sender.Account.ProviderId != "microsoft365" && (isFlagged == true || requestReadReceipt == true || requestDeliveryReceipt == true))
+            throw new McpException("Draft flags and receipt requests require Microsoft 365.");
+        var updated = draft with { Importance = importance ?? draft.Importance, IsFlagged = isFlagged ?? draft.IsFlagged,
+            RequestReadReceipt = requestReadReceipt ?? draft.RequestReadReceipt, RequestDeliveryReceipt = requestDeliveryReceipt ?? draft.RequestDeliveryReceipt,
+            To = to is null ? draft.To : Recipients(to), Cc = cc is null ? draft.Cc : Recipients(cc),
             Bcc = bcc is null ? draft.Bcc : Recipients(bcc), Subject = subject ?? draft.Subject,
             Body = body is null ? draft.Body : new MailContentRenderer().PrepareComposeHtml(body, bodyIsHtml),
             IsHtml = body is null ? draft.IsHtml : true, UpdatedAt = NextDraftVersion(draft) };

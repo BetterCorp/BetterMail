@@ -27,7 +27,7 @@ internal sealed partial class McpMailTools
     {
         Authorize(mailboxId);
         var drafts = (await store.GetLocalDraftSummariesAsync()).Where(draft => draft.MailboxId == mailboxId && !draft.IsQueued)
-            .Select(draft => new { draft.Id, draft.Subject, draft.To, draft.Cc, draft.Bcc, draft.UpdatedAt, draft.Importance, draft.IsFlagged }).ToArray();
+            .Select(draft => new { draft.Id, draft.Subject, draft.To, draft.Cc, draft.Bcc, draft.UpdatedAt, draft.Importance, draft.IsFlagged, draft.SyncStatus, draft.SyncError, draft.HasSyncIssue }).ToArray();
         Authorize(mailboxId);
         return CachedPage(drafts, draft => draft.Id, "drafts:" + mailboxId, cursor, pageSize);
     });

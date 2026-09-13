@@ -317,7 +317,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         var evidence = _store is null ? null : new EvidenceService(_store, () => _provider, new AttachmentTextExtractor(EvidenceOcr.RecognizeAsync));
         Mcp = new(_store,
             async () => await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(RefreshMcpChangesAsync),
-            async (sender, id, message) => await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => QueueSendAsync(sender, id, message)), evidence, () => _workspaceProvider);
+            async (sender, id, message) => await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => QueueSendAsync(sender, id, message)), evidence, () => _workspaceProvider, () => _provider);
         _selectedSettingsTab = SettingsTabs[0];
         Drafts.CollectionChanged += (_, _) => RaiseDraftState();
         BusyActions.CollectionChanged += (_, _) => { RaiseDraftState(); MailActionStateChanged(); };
