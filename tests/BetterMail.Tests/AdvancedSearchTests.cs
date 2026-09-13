@@ -6,6 +6,50 @@ namespace BetterMail.Tests;
 public sealed class AdvancedSearchTests
 {
     [Fact]
+    public async Task PeopleSearchRanksAllAccountsBeforeLimitingProviderAndCachedResults()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-people-ranking-" + Guid.NewGuid());
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), new string('F', 64));
+            await store.InitializeAsync(token);
+            var provider = System.Reflection.DispatchProxy.Create<IWorkspaceProvider, PeopleSearchProvider>();
+            var vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, workspaceProvider: provider);
+            foreach (var id in new[] { "a", "b", "c" })
+            {
+                var account = new MailAccount("microsoft365", id, "tenant", id + "@example.test", id, ProviderCapabilities.Contacts);
+                vm.Accounts.Add(account);
+                vm.Mailboxes.Add(new(id, account.EmailAddress, id));
+            }
+            vm.SearchText = "person type:people account:a account:b";
+            await ((AsyncCommand)vm.SearchCommand).ExecuteAsync();
+            Assert.Null(vm.SearchError);
+            Assert.Equal(30, vm.GlobalSearchResults.Count);
+            Assert.Contains(vm.GlobalSearchResults, result => result.Value is ContactInfo { AccountId: "b" });
+            Assert.DoesNotContain(vm.GlobalSearchResults, result => result.Value is ContactInfo { AccountId: "c" });
+            var selected = vm.GlobalSearchResults.Select(result => ((ContactInfo)result.Value!).ProviderId).Order().ToArray();
+            vm.Accounts.Move(1, 0);
+            await ((AsyncCommand)vm.SearchCommand).ExecuteAsync();
+            Assert.Equal(selected, vm.GlobalSearchResults.Select(result => ((ContactInfo)result.Value!).ProviderId).Order().ToArray());
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    public class PeopleSearchProvider : System.Reflection.DispatchProxy
+    {
+        protected override object? Invoke(System.Reflection.MethodInfo? method, object?[]? args)
+        {
+            if (method?.Name != "SearchContactsAsync") throw new NotSupportedException(method?.Name);
+            var account = (MailAccount)args![0]!;
+            IReadOnlyList<ContactInfo> contacts = Enumerable.Range(0, account.AccountId == "a" ? 40 : 1)
+                .Select(index => new ContactInfo(account.AccountId + index, (account.AccountId == "a" ? "Z person " : "A person ") + index,
+                    [account.AccountId + index + "@example.test"], account.AccountId)).ToArray();
+            return Task.FromResult(contacts);
+        }
+    }
+
+    [Fact]
     public async Task WorkspaceSearchIncludesSharedParentAndLimitsAcrossAllAccounts()
     {
         var token = TestContext.Current.CancellationToken;

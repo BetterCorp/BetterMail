@@ -2380,6 +2380,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 "People", contact.DisplayName, contact.EmailText, "People", contact))
             .Concat(discoveredTask.Result.Select(person => new GlobalSearchResult(
                 "People", person.DisplayName, person.EmailAddress, "People", person)))
+            .OrderBy(result => result.Title, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(result => result.Subtitle, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(result => (result.Value as ContactInfo)?.AccountId, StringComparer.Ordinal)
+            .ThenBy(result => (result.Value as ContactInfo)?.ProviderId, StringComparer.Ordinal)
             .Take(30)
             .ToArray();
     }
