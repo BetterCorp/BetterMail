@@ -36,8 +36,32 @@ public sealed partial class MainWindowViewModel
         BusyActions.Any(action => action.Kind is MailActionKind.Move or MailActionKind.UpdateState && ActionMatches(action, message));
     private static bool ActionMatches(MailAction action, MailMessage message) => action.MailboxId == message.MailboxId &&
         (action.ProviderId == message.ProviderId || action.ItemId == message.ProviderId || (action.PreviousProviderIds ?? []).Contains(message.ProviderId));
+    private int _mailSyncFailureStreak;
+    private int _workspaceFailureStreak;
+    public int SyncSeverity => Math.Max(BusySeverity, Math.Min(2, Math.Max(_mailSyncFailureStreak, _workspaceFailureStreak)));
+    private static string BadgeBackground(int severity) => severity switch { 2 => "#24D13438", 1 => "#24D98200", _ => "#208A9AA9" };
+    private static string BadgeForeground(int severity) => severity switch { 2 => "#E45155", 1 => "#D98200", _ => "#8297AD" };
+    public string SyncBadgeBackground => BadgeBackground(SyncSeverity);
+    public string SyncBadgeForeground => BadgeForeground(SyncSeverity);
+    internal void RecordSyncOutcome(bool failed, bool workspace = false)
+    {
+        if (workspace) _workspaceFailureStreak = failed ? Math.Min(2, _workspaceFailureStreak + 1) : 0;
+        else _mailSyncFailureStreak = failed ? Math.Min(2, _mailSyncFailureStreak + 1) : 0;
+        MailActionStateChanged();
+    }
+    public bool HasSyncIssues => SyncIssueCount > 0;
+    public int BusySeverity => BusyActions.Any(action => action.FailureCount >= 2 || action.NeedsSendReview) ? 2
+        : BusyActions.Any(action => action.FailureCount > 0 || action.Error is not null) ? 1 : 0;
+    public string BusyBadgeBackground => BusySeverity switch { 2 => "#24D13438", 1 => "#24D98200", _ => "#208A9AA9" };
+    public string BusyBadgeForeground => BusySeverity switch { 2 => "#E45155", 1 => "#D98200", _ => "#8297AD" };
     private void MailActionStateChanged()
     {
+        RaisePropertyChanged(nameof(SyncSeverity));
+        RaisePropertyChanged(nameof(SyncBadgeBackground));
+        RaisePropertyChanged(nameof(SyncBadgeForeground));
+        RaisePropertyChanged(nameof(BusySeverity));
+        RaisePropertyChanged(nameof(BusyBadgeBackground));
+        RaisePropertyChanged(nameof(BusyBadgeForeground));
         _mailActionVersion++;
         RaisePropertyChanged(nameof(MailActionVersion));
     }

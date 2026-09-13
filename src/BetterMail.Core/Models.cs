@@ -341,16 +341,30 @@ public sealed record ContactInfo(
     string DisplayName,
     IReadOnlyList<string> EmailAddresses,
     string? AccountId = null,
-    string? OwnerAddress = null)
+    string? OwnerAddress = null, ContactDetails? Details = null)
 {
     public string EmailText => string.Join(", ", EmailAddresses);
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string SearchText => string.Join(' ', new[] { DisplayName, EmailText, Details?.GivenName, Details?.Surname,
+        Details?.MobilePhone, Details?.CompanyName, Details?.JobTitle, Details?.OfficeLocation, Details?.PersonalNotes,
+        string.Join(' ', Details?.BusinessPhones ?? []), string.Join(' ', Details?.HomePhones ?? []) });
 }
 
 public sealed record ContactDraft(
     string AccountId,
     string DisplayName,
     IReadOnlyList<string> EmailAddresses,
-    string? OwnerAddress = null);
+    string? OwnerAddress = null, ContactDetails? Details = null);
+
+public sealed record ContactDetails(
+    string? GivenName = null,
+    string? Surname = null,
+    string? MobilePhone = null,
+    string? CompanyName = null,
+    string? JobTitle = null,
+    string? OfficeLocation = null,
+    string? PersonalNotes = null,
+    IReadOnlyList<string>? BusinessPhones = null, IReadOnlyList<string>? HomePhones = null);
 
 public sealed record DiscoveredPerson(
     string EmailAddress,

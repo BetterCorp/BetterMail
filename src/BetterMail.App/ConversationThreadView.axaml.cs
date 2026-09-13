@@ -46,6 +46,15 @@ public sealed partial class ConversationThreadView : UserControl
         };
     }
 
+    private void ThreadHeaderKeyDown(object? sender, KeyEventArgs args)
+    {
+        if (ReferenceEquals(args.Source, sender) && args.Key is Key.Enter or Key.Space && sender is Border { DataContext: ConversationMessageItem item })
+        {
+            _viewModel?.SelectMessageCommand.Execute(item);
+            args.Handled = true;
+        }
+    }
+
     private void ThreadHeaderTapped(object? sender, TappedEventArgs args)
     {
         if (sender is Border { DataContext: ConversationMessageItem item })

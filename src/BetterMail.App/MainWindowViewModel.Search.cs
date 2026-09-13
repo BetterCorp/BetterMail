@@ -4,6 +4,8 @@ namespace BetterMail.App;
 
 public sealed partial class MainWindowViewModel
 {
+    public string GlobalSearchPlaceholder => $"Search { (ActiveModule == "Files" ? "Drive" : ActiveModule) } first, then all workspaces";
+
     private SearchAccountFilter? _latestMailAccount;
     private SearchAccountFilter? _displayedMailAccount;
     private SearchQuery? _latestMailQuery;

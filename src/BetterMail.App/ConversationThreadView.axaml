@@ -5,6 +5,8 @@
              x:Class="BetterMail.App.ConversationThreadView">
   <UserControl.Resources><app:MailActionFeedbackConverter x:Key="MailActionFeedback" /></UserControl.Resources>
   <UserControl.Styles>
+    <Style Selector="Border.threadHeader"><Setter Property="BorderThickness" Value="1" /><Setter Property="BorderBrush" Value="Transparent" /></Style>
+    <Style Selector="Border.threadHeader:focus-visible"><Setter Property="BorderBrush" Value="{DynamicResource BetterMailAccentBrush}" /></Style>
     <Style Selector="Border.threadMessage">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderBrush" Value="{DynamicResource BetterMailDividerBrush}" />
@@ -116,7 +118,7 @@
             <Border Classes="threadMessage"
                     Classes.selected="{Binding IsSelected}">
               <Grid>
-                <Border Padding="12,8" Tapped="ThreadHeaderTapped">
+                <Border Classes="threadHeader" Padding="12,8" Tapped="ThreadHeaderTapped" Focusable="True" KeyDown="ThreadHeaderKeyDown" AutomationProperties.Name="{Binding Sender, StringFormat='Open message from {0}'}">
                   <Grid ColumnDefinitions="*,Auto"
                         RowDefinitions="Auto,Auto,Auto"
                         ColumnSpacing="10">

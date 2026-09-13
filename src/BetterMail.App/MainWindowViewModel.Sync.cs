@@ -158,6 +158,7 @@ public sealed partial class MainWindowViewModel
         }
         finally
         {
+            RecordSyncOutcome(!mailFailures.IsEmpty || SyncSteps.Any(step => step.Detail.StartsWith("Failed:", StringComparison.Ordinal)));
             foreach (var step in SyncSteps.Where(step => step.Running)) { step.Running = false; step.Detail = "Stopped"; }
             Interlocked.Exchange(ref _syncRunning, 0);
             IsSyncing = false;
@@ -351,6 +352,7 @@ public sealed partial class MainWindowViewModel
         catch (Exception error) { WorkspaceSyncStep.Detail = "Failed: " + error.Message; }
         finally
         {
+            RecordSyncOutcome(WorkspaceSyncStep.Detail != "Complete", workspace: true);
             WorkspaceSyncStep.Running = false;
             Interlocked.Exchange(ref _workspaceSyncRunning, 0);
             StartContactPhotoSync();
@@ -368,7 +370,7 @@ public sealed partial class MainWindowViewModel
                 await _store.ReplaceWorkspaceItemsAsync(
                     "contact", account.AccountId, "all", contacts,
                     static item => item.ProviderId,
-                    static item => $"{item.DisplayName} {string.Join(' ', item.EmailAddresses)}");
+                    static item => item.SearchText);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {

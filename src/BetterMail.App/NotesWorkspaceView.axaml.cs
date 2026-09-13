@@ -157,11 +157,9 @@ public sealed partial class NotesWorkspaceView : UserControl
             ToolbarLayout.ColumnDefinitions.Add(new(GridLength.Star));
             ToolbarLayout.ColumnDefinitions.Add(new(GridLength.Auto));
             ToolbarLayout.ColumnDefinitions.Add(new(GridLength.Auto));
-            Grid.SetRow(SearchBox, 0);
-            Grid.SetColumn(SearchBox, 0);
-            Grid.SetColumnSpan(SearchBox, 2);
-            Grid.SetRow(SearchButton, 0);
-            Grid.SetColumn(SearchButton, 2);
+            Grid.SetRow(WorkspaceTitle, 0);
+            Grid.SetColumn(WorkspaceTitle, 0);
+            Grid.SetColumnSpan(WorkspaceTitle, 2);
             Grid.SetRow(NewPageButton, 1);
             Grid.SetColumn(NewPageButton, 0);
             Grid.SetRow(EditPageButton, 1);
@@ -176,11 +174,9 @@ public sealed partial class NotesWorkspaceView : UserControl
         {
             ToolbarLayout.ColumnDefinitions.Add(new(GridLength.Auto));
         }
-        Grid.SetRow(SearchBox, 0);
-        Grid.SetColumn(SearchBox, 0);
-        Grid.SetColumnSpan(SearchBox, 1);
-        Grid.SetRow(SearchButton, 0);
-        Grid.SetColumn(SearchButton, 1);
+        Grid.SetRow(WorkspaceTitle, 0);
+        Grid.SetColumn(WorkspaceTitle, 0);
+        Grid.SetColumnSpan(WorkspaceTitle, 1);
         Grid.SetRow(NewPageButton, 0);
         Grid.SetColumn(NewPageButton, 2);
         Grid.SetRow(EditPageButton, 0);
@@ -197,8 +193,7 @@ public sealed partial class NotesWorkspaceView : UserControl
         }
         if (args.Key == Key.F && args.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
-            SearchBox.Focus();
-            SearchBox.SelectAll();
+            (TopLevel.GetTopLevel(this) as MainWindow)?.FocusGlobalSearch();
             args.Handled = true;
             return;
         }

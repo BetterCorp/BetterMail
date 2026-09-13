@@ -138,13 +138,13 @@ public sealed partial class Microsoft365WorkspaceProvider(
     {
         var contacts = await GetPagedAsync(
             account,
-            $"{ContactEndpoint(account, account.AccountId, ownerAddress: ownerAddress)}?$select=id,displayName,emailAddresses&$top=250",
+            $"{ContactEndpoint(account, account.AccountId, ownerAddress: ownerAddress)}?$select=id,displayName,emailAddresses,givenName,surname,mobilePhone,companyName,jobTitle,officeLocation,personalNotes,businessPhones,homePhones&$top=250",
             ContactScopes,
             item => MapContact(item, account.AccountId, ownerAddress),
             cancellationToken);
         return contacts
             .Where(contact => string.IsNullOrWhiteSpace(query) ||
-                              contact.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                              contact.SearchText.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                               contact.EmailAddresses.Any(address => address.Contains(query, StringComparison.OrdinalIgnoreCase)))
             .ToArray();
     }
@@ -758,13 +758,26 @@ public sealed partial class Microsoft365WorkspaceProvider(
             throw new ArgumentException("Every contact email address must be valid.", nameof(draft));
         }
 
-        return new
+        var payload = new Dictionary<string, object?>
         {
-            displayName = draft.DisplayName.Trim(),
-            emailAddresses = draft.EmailAddresses
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Select(address => new { name = draft.DisplayName.Trim(), address })
+            ["displayName"] = draft.DisplayName.Trim(),
+            ["emailAddresses"] = draft.EmailAddresses.Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(address => new { name = draft.DisplayName.Trim(), address }).ToArray()
         };
+        // Null means unchanged/unknown; only explicitly supplied details are patched.
+        if (draft.Details is { } details)
+        {
+            if (details.GivenName is not null) payload["givenName"] = details.GivenName;
+            if (details.Surname is not null) payload["surname"] = details.Surname;
+            if (details.MobilePhone is not null) payload["mobilePhone"] = details.MobilePhone;
+            if (details.CompanyName is not null) payload["companyName"] = details.CompanyName;
+            if (details.JobTitle is not null) payload["jobTitle"] = details.JobTitle;
+            if (details.OfficeLocation is not null) payload["officeLocation"] = details.OfficeLocation;
+            if (details.PersonalNotes is not null) payload["personalNotes"] = details.PersonalNotes;
+            if (details.BusinessPhones is not null) payload["businessPhones"] = details.BusinessPhones;
+            if (details.HomePhones is not null) payload["homePhones"] = details.HomePhones;
+        }
+        return payload;
     }
 
     internal static ContactInfo MapContact(JsonElement item, string accountId, string? ownerAddress = null) => new(
@@ -774,8 +787,20 @@ public sealed partial class Microsoft365WorkspaceProvider(
             ? addresses.EnumerateArray().Select(address => OptionalString(address, "address") ?? "")
                 .Where(static address => address.Length > 0).ToArray()
             : [],
-        accountId,
-        ownerAddress);
+        accountId, ownerAddress,
+        new ContactDetails(
+            GivenName: OptionalString(item, "givenName"),
+            Surname: OptionalString(item, "surname"),
+            MobilePhone: OptionalString(item, "mobilePhone"),
+            CompanyName: OptionalString(item, "companyName"),
+            JobTitle: OptionalString(item, "jobTitle"),
+            OfficeLocation: OptionalString(item, "officeLocation"),
+            PersonalNotes: OptionalString(item, "personalNotes"),
+            BusinessPhones: ContactStrings(item, "businessPhones"), HomePhones: ContactStrings(item, "homePhones")));
+
+    private static string[]? ContactStrings(JsonElement item, string name) =>
+        item.TryGetProperty(name, out var values) && values.ValueKind == JsonValueKind.Array
+            ? values.EnumerateArray().Select(value => value.GetString() ?? "").ToArray() : null;
 
     internal static string TaskEndpoint(
         MailAccount account,

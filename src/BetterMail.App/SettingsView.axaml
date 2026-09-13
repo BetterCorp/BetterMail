@@ -488,6 +488,12 @@
               </ItemsControl>
             </StackPanel>
           </Border>
+          <StackPanel Spacing="8">
+            <TextBlock Text="Default account for new contacts" FontWeight="SemiBold" />
+            <ComboBox ItemsSource="{Binding ContactOwners}" SelectedItem="{Binding DefaultContactOwner}" HorizontalAlignment="Stretch" AutomationProperties.Name="Default contact account">
+              <ComboBox.ItemTemplate><DataTemplate x:DataType="app:ContactOwnerOption"><TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" /></DataTemplate></ComboBox.ItemTemplate>
+            </ComboBox>
+          </StackPanel>
           <TextBlock Text="{Binding MailSyncRange, StringFormat='Requested cached history: {0}. Search covers locally cached mail.'}" TextWrapping="Wrap" />
           <ItemsControl ItemsSource="{Binding SyncHealth}">
             <ItemsControl.ItemTemplate>

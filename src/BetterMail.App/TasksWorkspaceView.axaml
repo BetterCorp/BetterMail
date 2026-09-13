@@ -13,18 +13,8 @@
             RowDefinitions="Auto"
             ColumnSpacing="6"
             RowSpacing="6">
-        <TextBox Classes="moduleSearch" x:Name="SearchBox"
-                 Text="{Binding SearchText}"
-                 PlaceholderText="Search tasks, lists, and accounts"
-                 AutomationProperties.Name="Search tasks across linked accounts"
-                 TabIndex="300" />
-        <Button x:Name="SearchButton"
-                Grid.Column="1"
-                Classes="command"
-                Content="Search"
-                Command="{Binding SearchCommand}"
-                AutomationProperties.Name="Search tasks"
-                TabIndex="301" />
+        <TextBlock x:Name="WorkspaceTitle" Text="To Do" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center" />
+
         <Button x:Name="NewTaskButton"
                 Grid.Column="2"
                 Classes="primary"

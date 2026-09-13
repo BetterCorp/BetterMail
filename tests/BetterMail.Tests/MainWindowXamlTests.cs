@@ -184,7 +184,7 @@ public sealed class MainWindowXamlTests
         Assert.Contains("MessageReplyAllClicked", xaml);
         Assert.DoesNotContain("MessageRowPointerPressed", xaml);
         Assert.Contains("x:Name=" + (char)34 + "MailSearch" + (char)34, xaml);
-        Assert.Contains("PlaceholderText=" + (char)34 + "Search everything" + (char)34, xaml);
+        Assert.Contains("PlaceholderText=" + (char)34 + "{Binding GlobalSearchPlaceholder}" + (char)34, xaml);
         Assert.Contains("Command=" + (char)34 + "{Binding ClearGlobalSearchCommand}" + (char)34, xaml);
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding GlobalSearchResults}" + (char)34, xaml);
         Assert.Contains("KeyDown=" + (char)34 + "GlobalSearchKeyDown" + (char)34, xaml);
@@ -259,7 +259,7 @@ public sealed class MainWindowXamlTests
         Assert.Contains("x:Name=" + (char)34 + "PeopleCards" + (char)34, xaml);
         Assert.Contains("ItemsSource=" + (char)34 + "{Binding ContactOwners}" + (char)34, xaml);
         Assert.Contains("Click=" + (char)34 + "CopyContactTextClicked" + (char)34, xaml);
-        Assert.Contains("Click=" + (char)34 + "ViewContactMailClicked" + (char)34, xaml);
+        Assert.Contains("Click=" + (char)34 + "ContactDetailsHistoryClicked" + (char)34, xaml);
         Assert.DoesNotContain("CopyContactEmailClicked", xaml);
         Assert.Contains("AutomationProperties.Name=" + (char)34 + "Copy error" + (char)34, xaml);
         Assert.Contains("AutomationProperties.Name=" + (char)34 + "Close error" + (char)34, xaml);

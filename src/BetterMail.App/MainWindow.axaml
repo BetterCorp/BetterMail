@@ -49,7 +49,7 @@
 
         <Grid x:Name="HeaderSearch" Grid.Column="1" MaxWidth="900" HorizontalAlignment="Stretch" ColumnDefinitions="*,Auto,Auto">
           <TextBox x:Name="MailSearch" Classes="search"
-                   PlaceholderText="Search everything"
+                   PlaceholderText="{Binding GlobalSearchPlaceholder}"
                    Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                    Padding="12,6,36,6"
                    KeyDown="GlobalSearchKeyDown" GotFocus="GlobalSearchFocused"
@@ -200,8 +200,8 @@
         </Grid>
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
-          <Button x:Name="SyncStatusButton" Content="{Binding SyncIcon}" Click="SyncStatusClicked" Background="Transparent"
-                  Foreground="{DynamicResource BetterMailTextBrush}" FontSize="17" ToolTip.Tip="Sync status (F9 to sync)"
+          <Button x:Name="SyncStatusButton" Content="{Binding SyncIcon}" Click="SyncStatusClicked" Background="{Binding SyncBadgeBackground}" CornerRadius="12"
+                  Foreground="{Binding SyncBadgeForeground}" FontSize="17" ToolTip.Tip="Sync status (F9 to sync)"
                   AutomationProperties.Name="Sync mail and view progress" TabIndex="2">
             <Button.Flyout>
               <Flyout Placement="BottomEdgeAlignedRight">
@@ -324,8 +324,39 @@
                 CornerRadius="0"
                 HorizontalContentAlignment="Stretch"
                 IsVisible="{Binding HasNextCalendarEvent}"
-                Command="{Binding OpenNextCalendarEventCommand}"
+                x:Name="AgendaButton" Click="DayAgendaClicked"
                 AutomationProperties.Name="{Binding NextCalendarEventSubject, StringFormat='Open next event: {0}'}">
+          <Button.Flyout>
+            <Flyout Placement="BottomEdgeAlignedRight">
+              <StackPanel Width="360" MaxWidth="360" Spacing="10">
+                <TextBlock Text="Today" FontSize="18" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding AgendaDate}" Opacity="0.65" />
+                <TextBlock Text="{Binding AgendaNotice}" TextWrapping="Wrap" IsVisible="{Binding AgendaNotice, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}" />
+                <ScrollViewer MaxHeight="440">
+                  <ItemsControl ItemsSource="{Binding DayAgenda}">
+                    <ItemsControl.ItemTemplate><DataTemplate x:DataType="app:DayAgendaItem">
+                      <StackPanel>
+                        <Grid IsVisible="{Binding IsNow}" ColumnDefinitions="Auto,*" ColumnSpacing="10" Margin="0,10">
+                          <TextBlock Text="{Binding Title}" Foreground="{DynamicResource BetterMailAccentBrush}" FontWeight="SemiBold" />
+                          <Border Grid.Column="1" Height="1" Background="{DynamicResource BetterMailAccentBrush}" VerticalAlignment="Center" />
+                        </Grid>
+                        <Button IsVisible="{Binding IsEvent}" Classes="command" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                Padding="8,10" Click="AgendaEventClicked" Opacity="{Binding Opacity}">
+                          <Grid ColumnDefinitions="90,*" ColumnSpacing="10">
+                            <TextBlock Text="{Binding Time}" FontSize="12" />
+                            <StackPanel Grid.Column="1" Spacing="4">
+                              <TextBlock Text="{Binding Title}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                              <TextBlock Text="{Binding Detail}" TextTrimming="CharacterEllipsis" FontSize="11" Opacity="0.65" />
+                            </StackPanel>
+                          </Grid>
+                        </Button>
+                      </StackPanel>
+                    </DataTemplate></ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+              </StackPanel>
+            </Flyout>
+          </Button.Flyout>
           <Grid ColumnDefinitions="3,*,Auto">
             <Border Background="{Binding NextCalendarEventColor}" />
             <TextBlock Grid.Column="1"
@@ -387,34 +418,22 @@
             <Button Classes="folder" Classes.selected="{Binding IsOutboxView}"
                     Command="{Binding ShowOutboxCommand}" Click="FolderSelectedClicked" IsVisible="{Binding HasOutbox}"
                     AutomationProperties.Name="Open Busy">
-              <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Text="Busy" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="{Binding OutboxCountText}" FontWeight="SemiBold"
-                           Foreground="{DynamicResource BetterMailAccentBrush}" Margin="6,0,1,0" />
-              </Grid>
+              <Border Background="{Binding BusyBadgeBackground}" CornerRadius="10" Padding="10,4" HorizontalAlignment="Left">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <TextBlock Text="Busy" Foreground="{Binding BusyBadgeForeground}" />
+                  <TextBlock Text="{Binding OutboxCountText}" Foreground="{Binding BusyBadgeForeground}" FontWeight="SemiBold" />
+                </StackPanel>
+              </Border>
             </Button>
-            <Expander Margin="0,1" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-              <Expander.Header>
-                <Grid ColumnDefinitions="*,Auto" HorizontalAlignment="Stretch">
-                  <TextBlock Text="Sync issues" FontWeight="SemiBold" />
-                  <TextBlock Grid.Column="1" Text="{Binding SyncIssueCountText}" FontWeight="SemiBold" Foreground="#D13438" Margin="6,0,1,0" />
-                </Grid>
-              </Expander.Header>
-              <StackPanel Margin="18,2,0,3">
-                <Button Classes="folder" Classes.selected="{Binding IsSyncIssuesView}" Command="{Binding ShowSyncIssuesCommand}" Click="FolderSelectedClicked">
-                  <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Text="All issues" />
-                    <TextBlock Grid.Column="1" Text="{Binding SyncIssueCountText}" Foreground="#D13438" />
-                  </Grid>
-                </Button>
-                <Button Classes="folder" Classes.selected="{Binding IsDraftConflictsView}" Command="{Binding ShowDraftConflictsCommand}" Click="FolderSelectedClicked">
-                  <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Text="Conflicts" />
-                    <TextBlock Grid.Column="1" Text="{Binding DraftConflictCountText}" Foreground="#D13438" />
-                  </Grid>
-                </Button>
-              </StackPanel>
-            </Expander>
+            <Button Classes="folder" Classes.selected="{Binding IsSyncIssuesView}" IsVisible="{Binding HasSyncIssues}"
+                    Command="{Binding ShowSyncIssuesCommand}" Click="FolderSelectedClicked" AutomationProperties.Name="Open Sync Issues">
+              <Border Background="#24D13438" CornerRadius="10" Padding="10,4" HorizontalAlignment="Left">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <TextBlock Text="Sync Issues" Foreground="#E45155" />
+                  <TextBlock Text="{Binding SyncIssueCountText}" Foreground="#E45155" FontWeight="SemiBold" />
+                </StackPanel>
+              </Border>
+            </Button>
 
             <TextBlock Text="ACCOUNTS" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource BetterMailMutedBrush}" Margin="4,12,4,3" />
             <ItemsControl ItemsSource="{Binding FolderGroups}" HorizontalAlignment="Stretch">
@@ -900,19 +919,7 @@
                 IsVisible="{Binding IsGenericWorkspaceModule}">
           <Grid x:Name="ModuleHeader" ColumnDefinitions="*,320,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="10" RowSpacing="8">
             <TextBlock Text="{Binding ActiveModule}" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center" />
-            <TextBox x:Name="ModuleSearch" Grid.Column="1"
-                     Classes="moduleSearch"
-                     Text="{Binding ModuleSearchText}"
-                     PlaceholderText="Search this module"
-                     IsVisible="{Binding ShowWorkspaceSearch}"
-                     AutomationProperties.Name="Search this module" />
-            <Button x:Name="ModuleRefresh" Grid.Column="2"
-                    Classes="command"
-                    Content="Search"
-                    Command="{Binding SearchWorkspaceCommand}"
-                    IsVisible="{Binding ShowWorkspaceSearch}"
-                    AutomationProperties.Name="Search this module" />
-            <Button Grid.Column="2"
+            <Button x:Name="ModuleRefresh" Grid.Column="1"
                     Classes="command"
                     Content="Refresh"
                     Command="{Binding RefreshWorkspaceCommand}"
@@ -950,7 +957,11 @@
               <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsPeopleRefreshing}"
                            Grid.ColumnSpan="2" Height="2" VerticalAlignment="Bottom"
                            IsHitTestVisible="False" AutomationProperties.Name="Refreshing contacts" />
+              <StackPanel Orientation="Horizontal" Spacing="10">
               <Button Classes="primary" Content="New contact" Command="{Binding NewContactCommand}" HorizontalAlignment="Left" AutomationProperties.Name="Create a contact" />
+                <Button Classes="command" IsVisible="{Binding HasPeopleFilter}" Command="{Binding ClearPeopleFilterCommand}"
+                        Content="{Binding ModuleSearchText, StringFormat='Clear filter: {0} ×'}" AutomationProperties.Name="Clear People filter" />
+              </StackPanel>
               <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
                 <RadioButton Content="Table" GroupName="PeopleView" IsChecked="{Binding PeopleTableView, Mode=OneWay}" Click="PeopleTableClicked" />
                 <RadioButton Content="Cards" GroupName="PeopleView" IsChecked="{Binding PeopleCardView}" />
@@ -989,23 +1000,17 @@
                       <app:AsyncImage Width="26" Height="26" Request="{Binding Avatar}" AllowLoading="{ReflectionBinding $parent[Window].DataContext.ContactImagesEnabled}" VerticalAlignment="Center" />
                       <Grid Grid.Column="1" ColumnDefinitions="*,*" ColumnSpacing="12" VerticalAlignment="Center"
                             ToolTip.Tip="{Binding ProvenanceText}">
-                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                          <Border Grid.Column="1" IsVisible="{Binding IsDiscovered}" Background="{DynamicResource BetterMailSelectionBrush}" CornerRadius="8" Padding="6,2" Margin="6,0,0,0">
+                            <TextBlock Text="Discovered" FontSize="10" Foreground="{DynamicResource BetterMailMutedBrush}" />
+                          </Border>
+                        </Grid>
                         <TextBlock Grid.Column="1" Text="{Binding EmailText}" Foreground="{DynamicResource BetterMailMutedBrush}" TextTrimming="CharacterEllipsis" />
                       </Grid>
                       <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                         <Button Classes="command" Content="New mail" Click="ComposeContactClicked" AutomationProperties.Name="Start a mail to contact" />
-                        <Button Classes="command" Content="•••" AutomationProperties.Name="Contact actions">
-                          <Button.Flyout><Flyout Placement="BottomEdgeAlignedRight">
-                            <StackPanel Spacing="4" MinWidth="160">
-                              <TextBlock Text="{Binding ProvenanceText}" TextWrapping="Wrap" MaxWidth="240" Margin="8" />
-                              <TextBlock Text="{Binding KindText}" Foreground="{DynamicResource BetterMailMutedBrush}" Margin="8" />
-                              <Button Classes="command" Content="View mail" Click="ViewContactMailClicked" />
-                              <Button Classes="command" Content="Copy email" CommandParameter="{Binding EmailText}" Click="CopyContactTextClicked" />
-                              <Button Classes="command" Content="Edit" IsVisible="{Binding IsSaved}" Click="EditPersonClicked" />
-                              <Button Classes="command" Content="Delete" IsVisible="{Binding IsSaved}" Click="DeletePersonClicked" />
-                            </StackPanel>
-                          </Flyout></Button.Flyout>
-                        </Button>
+                        <Button Classes="command" Content="{Binding DetailsActionText}" Click="EditPersonClicked" AutomationProperties.Name="Contact details" />
                       </StackPanel>
                     </Grid>
                   </Border>
@@ -1021,6 +1026,10 @@
                 <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
               </ListBox.ItemsPanel>
               <ListBox.Styles>
+                <Style Selector="Border.personCard"><Setter Property="Background" Value="{DynamicResource BetterMailSurfaceBrush}" /></Style>
+                <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter"><Setter Property="Background" Value="Transparent" /></Style>
+                <Style Selector="ListBoxItem:selected:pointerover /template/ ContentPresenter"><Setter Property="Background" Value="Transparent" /></Style>
+                <Style Selector="Border.personCard:pointerover"><Setter Property="Background" Value="{DynamicResource BetterMailSelectionBrush}" /></Style>
                 <Style Selector="ListBoxItem">
                   <Setter Property="Padding" Value="0" />
                   <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -1035,29 +1044,23 @@
                     <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="{Binding Columns}" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                 <DataTemplate x:DataType="app:PersonEntry" x:CompileBindings="True">
-                  <Border Padding="16" Margin="0,0,10,10" CornerRadius="6" MinHeight="100" Background="{DynamicResource BetterMailSurfaceBrush}"
+                  <Border Classes="personCard" Padding="16" Margin="0,0,10,10" CornerRadius="6" MinHeight="100"
                           BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1">
                     <Grid ColumnDefinitions="40,*,Auto" ColumnSpacing="8" MinHeight="38">
                       <app:AsyncImage Width="36" Height="36" Request="{Binding Avatar}" AllowLoading="{ReflectionBinding $parent[Window].DataContext.ContactImagesEnabled}" VerticalAlignment="Center" />
                       <Grid Grid.Column="1" RowDefinitions="Auto,Auto" RowSpacing="8" VerticalAlignment="Center"
                             ToolTip.Tip="{Binding ProvenanceText}">
-                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                          <Border Grid.Column="1" IsVisible="{Binding IsDiscovered}" Background="{DynamicResource BetterMailSelectionBrush}" CornerRadius="8" Padding="6,2" Margin="6,0,0,0">
+                            <TextBlock Text="Discovered" FontSize="10" Foreground="{DynamicResource BetterMailMutedBrush}" />
+                          </Border>
+                        </Grid>
                         <TextBlock Grid.Row="1" Text="{Binding EmailText}" Foreground="{DynamicResource BetterMailMutedBrush}" TextTrimming="CharacterEllipsis" />
                       </Grid>
                       <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                         <Button Classes="command" Content="New mail" Click="ComposeContactClicked" AutomationProperties.Name="Start a mail to contact" />
-                        <Button Classes="command" Content="•••" AutomationProperties.Name="Contact actions">
-                          <Button.Flyout><Flyout Placement="BottomEdgeAlignedRight">
-                            <StackPanel Spacing="4" MinWidth="160">
-                              <TextBlock Text="{Binding ProvenanceText}" TextWrapping="Wrap" MaxWidth="240" Margin="8" />
-                              <TextBlock Text="{Binding KindText}" Foreground="{DynamicResource BetterMailMutedBrush}" Margin="8" />
-                              <Button Classes="command" Content="View mail" Click="ViewContactMailClicked" />
-                              <Button Classes="command" Content="Copy email" CommandParameter="{Binding EmailText}" Click="CopyContactTextClicked" />
-                              <Button Classes="command" Content="Edit" IsVisible="{Binding IsSaved}" Click="EditPersonClicked" />
-                              <Button Classes="command" Content="Delete" IsVisible="{Binding IsSaved}" Click="DeletePersonClicked" />
-                            </StackPanel>
-                          </Flyout></Button.Flyout>
-                        </Button>
+                        <Button Classes="command" Content="{Binding DetailsActionText}" Click="EditPersonClicked" AutomationProperties.Name="Contact details" />
                       </StackPanel>
                     </Grid>
                   </Border>
@@ -1068,14 +1071,14 @@
               </ListBox.ItemTemplate>
             </ListBox>
             <Grid Grid.RowSpan="3" IsVisible="{Binding IsContactPaneOpen}" ZIndex="20">
-              <Button Background="#99000000" BorderThickness="0" CornerRadius="0"
+              <Button Background="#99000000" BorderThickness="0" CornerRadius="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                       Command="{Binding CancelEditContactCommand}"
                       AutomationProperties.Name="Close contact editor backdrop" />
               <Border Width="460" MaxWidth="460" Margin="12"
                       HorizontalAlignment="Right" VerticalAlignment="Stretch"
                       Background="{DynamicResource BetterMailSurfaceBrush}"
                       BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1">
-                <StackPanel Margin="20" Spacing="10">
+                <Grid RowDefinitions="*,Auto"><ScrollViewer><StackPanel Margin="20" Spacing="10">
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Text="{Binding ContactEditorTitle}" FontSize="22" FontWeight="SemiBold"
                                IsVisible="{Binding IsContactEditorOpen}" />
@@ -1084,6 +1087,11 @@
                     <Button Grid.Column="1" Classes="command" Content="Close"
                             Command="{Binding CancelEditContactCommand}" AutomationProperties.Name="Close contact pane" />
                   </Grid>
+                  <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding IsEditingContact}">
+                    <Button Classes="command" Content="Write email" Click="ContactDetailsMailClicked" />
+                    <Button Classes="command" Content="View mail" Click="ContactDetailsHistoryClicked" />
+                    <Button Classes="command" Content="Copy email" CommandParameter="{Binding ContactEmails}" Click="CopyContactTextClicked" />
+                  </StackPanel>
                   <StackPanel Spacing="8" IsVisible="{Binding IsContactEditorOpen}">
                     <TextBlock Text="Account" FontWeight="SemiBold" />
                     <ComboBox ItemsSource="{Binding ContactOwners}" SelectedItem="{Binding SelectedContactOwner}"
@@ -1099,8 +1107,27 @@
                     <TextBox Text="{Binding ContactName}" PlaceholderText="Display name" AutomationProperties.Name="Contact display name" />
                     <TextBlock Text="Email addresses" FontWeight="SemiBold" />
                     <TextBox Text="{Binding ContactEmails}" PlaceholderText="Email addresses separated by semicolons" AutomationProperties.Name="Contact email addresses" />
-                    <Button Classes="primary" Content="Save" Command="{Binding SaveContactCommand}"
-                            HorizontalAlignment="Right" AutomationProperties.Name="Save contact" />
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                      <StackPanel Grid.Column="0" Spacing="6"><TextBlock Text="First name" FontWeight="SemiBold" /><TextBox Text="{Binding ContactGivenName}" AutomationProperties.Name="Contact First name" /></StackPanel>
+                      <StackPanel Grid.Column="1" Spacing="6"><TextBlock Text="Last name" FontWeight="SemiBold" /><TextBox Text="{Binding ContactSurname}" AutomationProperties.Name="Contact Last name" /></StackPanel>
+                    </Grid>
+                    <TextBlock Text="Mobile phone" FontWeight="SemiBold" />
+                    <TextBox Text="{Binding ContactMobilePhone}" AutomationProperties.Name="Contact Mobile phone" />
+                    <TextBlock Text="Work phones (semicolon separated)" FontWeight="SemiBold" />
+                    <TextBox Text="{Binding ContactBusinessPhones}" AutomationProperties.Name="Contact Work phones (semicolon separated)" />
+                    <TextBlock Text="Home phones (semicolon separated)" FontWeight="SemiBold" />
+                    <TextBox Text="{Binding ContactHomePhones}" AutomationProperties.Name="Contact Home phones (semicolon separated)" />
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                      <StackPanel Grid.Column="0" Spacing="6"><TextBlock Text="Company" FontWeight="SemiBold" /><TextBox Text="{Binding ContactCompanyName}" AutomationProperties.Name="Contact Company" /></StackPanel>
+                      <StackPanel Grid.Column="1" Spacing="6"><TextBlock Text="Job title" FontWeight="SemiBold" /><TextBox Text="{Binding ContactJobTitle}" AutomationProperties.Name="Contact Job title" /></StackPanel>
+                    </Grid>
+                    <TextBlock Text="Office / location" FontWeight="SemiBold" />
+                    <TextBox Text="{Binding ContactOfficeLocation}" AutomationProperties.Name="Contact Office / location" />
+                    <TextBlock Text="Notes" FontWeight="SemiBold" />
+                    <TextBox Text="{Binding ContactPersonalNotes}" AutomationProperties.Name="Contact Notes" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="70" />
+                    <Button Classes="command" Content="Delete contact" IsVisible="{Binding IsEditingContact}"
+                            Command="{Binding RequestDeleteContactCommand}" CommandParameter="{Binding EditingContact}" HorizontalAlignment="Left" />
+
                   </StackPanel>
                   <StackPanel Spacing="12" IsVisible="{Binding IsConfirmingContactDelete}">
                     <TextBlock Text="{Binding ContactDeleteText}" TextWrapping="Wrap" />
@@ -1110,7 +1137,12 @@
                       <Button Grid.Column="2" Content="Cancel" Command="{Binding CancelDeleteContactCommand}" />
                     </Grid>
                   </StackPanel>
+                </StackPanel></ScrollViewer>
+                <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="20,10" IsVisible="{Binding IsContactEditorOpen}">
+                  <Button Content="Cancel" Command="{Binding CancelEditContactCommand}" />
+                  <Button Classes="primary" Content="Save contact" Command="{Binding SaveContactCommand}" AutomationProperties.Name="Save contact" />
                 </StackPanel>
+                </Grid>
               </Border>
             </Grid>
           </Grid>

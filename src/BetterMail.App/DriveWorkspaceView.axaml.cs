@@ -82,10 +82,8 @@ public sealed partial class DriveWorkspaceView : UserControl
             SearchGrid.RowDefinitions.Clear();
             SearchGrid.RowDefinitions.Add(new(GridLength.Auto));
             SearchGrid.RowDefinitions.Add(new(GridLength.Auto));
-            Grid.SetRow(SearchBox, 0);
-            Grid.SetColumn(SearchBox, 0);
-            Grid.SetRow(SearchButton, 0);
-            Grid.SetColumn(SearchButton, 1);
+            Grid.SetRow(WorkspaceTitle, 0);
+            Grid.SetColumn(WorkspaceTitle, 0);
             Grid.SetRow(ClearSearchButton, 0);
             Grid.SetColumn(ClearSearchButton, 2);
             Grid.SetRow(AccountFilter, 1);
@@ -122,10 +120,8 @@ public sealed partial class DriveWorkspaceView : UserControl
             SearchGrid.ColumnDefinitions.Add(new(GridLength.Auto));
             SearchGrid.RowDefinitions.Clear();
             SearchGrid.RowDefinitions.Add(new(GridLength.Auto));
-            Grid.SetRow(SearchBox, 0);
-            Grid.SetColumn(SearchBox, 0);
-            Grid.SetRow(SearchButton, 0);
-            Grid.SetColumn(SearchButton, 1);
+            Grid.SetRow(WorkspaceTitle, 0);
+            Grid.SetColumn(WorkspaceTitle, 0);
             Grid.SetRow(ClearSearchButton, 0);
             Grid.SetColumn(ClearSearchButton, 2);
             Grid.SetRow(AccountFilter, 0);
@@ -230,7 +226,7 @@ public sealed partial class DriveWorkspaceView : UserControl
         }
         if (args.Key == Key.F && args.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
-            SearchBox.Focus();
+            (TopLevel.GetTopLevel(this) as MainWindow)?.FocusGlobalSearch();
             args.Handled = true;
             return;
         }

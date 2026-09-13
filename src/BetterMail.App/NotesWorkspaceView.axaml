@@ -12,16 +12,8 @@
             RowDefinitions="Auto"
             ColumnSpacing="6"
             RowSpacing="6">
-        <TextBox Classes="moduleSearch" x:Name="SearchBox"
-                 Text="{Binding SearchText}"
-                 PlaceholderText="Search all linked OneNote accounts"
-                 AutomationProperties.Name="Search OneNote pages across accounts"
-                 TabIndex="200" />
-        <Button x:Name="SearchButton" Grid.Column="1" Classes="command"
-                Content="Search"
-                Command="{Binding SearchCommand}"
-                AutomationProperties.Name="Search OneNote"
-                TabIndex="201" />
+        <TextBlock x:Name="WorkspaceTitle" Text="Notes" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center" />
+
         <Button x:Name="NewPageButton" Grid.Column="2" Classes="primary"
                 Content="New page"
                 Command="{Binding NewPageCommand}"

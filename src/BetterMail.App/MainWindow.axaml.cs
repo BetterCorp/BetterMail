@@ -33,6 +33,15 @@ public sealed partial class MainWindow : Window
     private bool _preservingMessageSelection;
     private bool _updatingMessageSelection;
 
+    private void ContactDetailsMailClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (_viewModel?.EditingContact is { } person) _viewModel.ComposeTo(person);
+    }
+    private void ContactDetailsHistoryClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (_viewModel?.EditingContact is { } person) _viewModel.ViewMailFor(person);
+    }
+
     private void EditPersonClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is MainWindowViewModel vm && sender is Control { DataContext: PersonEntry person })
@@ -53,6 +62,10 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _agendaClock.Tick += (_, _) => _viewModel?.UpdateAgendaClock();
+        AgendaButton.Flyout!.Opened += (_, _) => _agendaClock.Start();
+        AgendaButton.Flyout.Closed += (_, _) => _agendaClock.Stop();
+        Closed += (_, _) => _agendaClock.Stop();
         MessageList.AddHandler(PointerWheelChangedEvent, (_, _) => _messageListInputVersion++, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         MessageList.AddHandler(PointerPressedEvent, (_, _) => _messageListInputVersion++, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         MessageList.AddHandler(KeyDownEvent, (_, _) => _messageListInputVersion++, Avalonia.Interactivity.RoutingStrategies.Tunnel);
@@ -179,18 +192,9 @@ public sealed partial class MainWindow : Window
         ReadingSplitter.IsVisible = showMail && !phone;
 
         SetColumns(ModuleHeader, phone ? 1 : 1, GridLength.Auto);
-        Grid.SetRow(ModuleSearch, phone ? 1 : 0);
-        Grid.SetColumn(ModuleSearch, 0);
-        Grid.SetColumnSpan(ModuleSearch, phone ? 2 : 1);
         Grid.SetRow(ModuleRefresh, 0);
         Grid.SetColumn(ModuleRefresh, 1);
-        if (!phone)
-        {
-            SetColumns(ModuleHeader, 1, 320, GridLength.Auto);
-            Grid.SetColumn(ModuleSearch, 1);
-            Grid.SetColumnSpan(ModuleSearch, 1);
-            Grid.SetColumn(ModuleRefresh, 2);
-        }
+
 
         UpdateMailPanes();
     }
@@ -554,6 +558,26 @@ public sealed partial class MainWindow : Window
                 return;
         }
         args.Handled = true;
+    }
+
+    internal void FocusGlobalSearch() { MailSearch.Focus(); MailSearch.SelectAll(); }
+
+    private readonly Avalonia.Threading.DispatcherTimer _agendaClock = new() { Interval = TimeSpan.FromMinutes(1) };
+    private async void DayAgendaClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (_viewModel is null || sender is not Button button) return;
+        _viewModel.UpdateAgendaClock();
+        if (button.Flyout is Flyout { Content: Control content }) content.Width = Math.Min(360, Math.Max(240, Bounds.Width - 48));
+        button.Flyout!.ShowAt(button);
+        await _viewModel.RefreshDayAgendaAsync();
+    }
+    private void AgendaEventClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (sender is Button { DataContext: DayAgendaItem item })
+        {
+            AgendaButton.Flyout?.Hide();
+            _viewModel?.OpenAgendaEvent(item);
+        }
     }
 
     private void GlobalSearchFocused(object? sender, Avalonia.Interactivity.RoutedEventArgs args)

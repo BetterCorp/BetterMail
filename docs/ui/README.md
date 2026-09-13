@@ -103,3 +103,23 @@ Double-click opens the clicked message immediately and hydrates its cached conve
 | Draft issue quick actions | [Screenshot](screenshots/draft-issue-actions-light.png) | [Screenshot](screenshots/draft-issue-actions-dark.png) |
 
 The offline preview checks full-width search rows, selection after full reconciliation and individual state updates, and immediate preview opening without a cached thread. All screenshots in this section use fictional data.
+
+
+## Status badges, People and day agenda
+
+Busy and Sync Issues use compact badges; both disappear when empty. Sync Issues includes conflicts in the same list, distinguished by the existing status labels. Queued actions start in a muted informational state, turn orange after one failed attempt, and red after repeated failures. Their failure count persists across restarts; successful completion removes the queued action. The sync button also reflects consecutive mail/workspace failures and returns to its informational state after recovery. Unconfirmed sends remain red because they require review rather than automatic resending.
+
+People cards highlight only the hovered card. Saved contacts have a labelled Details action; mail-discovered people have a Discovered badge and Save contact action. The editor supports first/last names, email addresses, mobile/work/home phones, company, job title, office/location and notes. **Settings → Accounts → Default account for new contacts** chooses the destination for new contacts and saved discoveries. Existing contacts retain their original owner. Microsoft 365 reads these fields during contact sync and patches only details the user changes; unknown or unchanged fields are omitted from the update. No Google People API is added.
+
+The global search prompt names the current workspace, whose results appear first. Explicit `type:` filters still take precedence. Workspace headers now hold actions instead of duplicate search boxes; Ctrl+F returns to global search. People results opened from search show a clearable filter in their action bar.
+
+The next-event chip opens today's cached agenda with a live Now marker, past/current/upcoming states and links to individual event previews. The preview puts title/date/time and Join meeting before location, organizer, attendees and notes. References reviewed: [ClickUp event popover](https://mobbin.com/screens/c410b28a-f27d-497b-8c03-1cd4418a567c) and [Salesforce event summary](https://mobbin.com/screens/96ccd056-5033-46a6-8e5a-4e34eaadf1f3). The agenda uses local dates/time and includes overlapping overnight events; provider sync refreshes its cache.
+
+| UI | Screenshots |
+| --- | --- |
+| People cards and discovery | [Hover](screenshots/people-card-hover-light.png) · [Dark](screenshots/people-cards-dark.png) |
+| Expanded contact editor | [Light](screenshots/contact-details-light.png) |
+| Today agenda | [Light](screenshots/today-agenda-light.png) · [Dark](screenshots/today-agenda-dark.png) |
+| Event preview | [Light](screenshots/event-details-light.png) · [Dark](screenshots/event-details-dark.png) |
+
+All examples use fictional data from the offline native preview. Regression tests cover persisted retry counts, badge recovery, default contact ownership, safe partial updates, richer contact search, cached agenda boundaries, selection-dependent updates and keyboard-accessible thread headers.

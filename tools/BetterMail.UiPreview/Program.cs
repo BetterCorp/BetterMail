@@ -157,6 +157,12 @@ internal static class Program
         if (vm.SelectedMessages.Count != previewMessages.Length || list.SelectedItems!.Count != previewMessages.Length)
             throw new InvalidOperationException("A message metadata refresh collapsed multi-selection.");
         await Shot("mail-multiselect-light");
+        var retainedPrimary = vm.SelectedMessage!.ProviderId;
+        var withoutOne = vm.Messages.Where(message => message.ProviderId != vm.Messages.Last(item => item.ProviderId != retainedPrimary).ProviderId).ToArray();
+        typeof(MainWindowViewModel).GetMethod("ReconcileMessages", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(vm, [withoutOne]);
+        if (vm.SelectedMessage?.ProviderId != retainedPrimary || vm.SelectedMessages.Count != withoutOne.Length || !vm.MailSelectionText.StartsWith(withoutOne.Length.ToString()))
+            throw new InvalidOperationException("Reconciliation did not update bulk-selection state when a secondary row disappeared.");
+        typeof(MainWindowViewModel).GetMethod("ReconcileMessages", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(vm, [previewMessages]);
         await ClickRow(3, "none");
         var selectedMailId = vm.SelectedMessage!.ProviderId;
         var reconcileList = typeof(MainWindowViewModel).GetMethod("ReconcileMessages", BindingFlags.NonPublic | BindingFlags.Instance)!;
@@ -239,6 +245,13 @@ internal static class Program
         if (addressText.SelectionStart == addressText.SelectionEnd) throw new InvalidOperationException("Could not select sender address text with the pointer.");
         await Shot("thread-selectable-addresses-light");
         Console.WriteLine("Native address selection and thread scroll/selection preservation checks passed.");
+        var keyboardHeader = headerScroll.GetVisualDescendants().OfType<Border>().First(border => border.Classes.Contains("threadHeader"));
+        keyboardHeader.BringIntoView();
+        keyboardHeader.Focus();
+        await Input("none", "Return");
+        if (vm.ConversationThread.SelectedMessage != keyboardHeader.DataContext)
+            throw new InvalidOperationException("Focused thread header did not activate with Enter.");
+        Console.WriteLine("Thread headers remain keyboard accessible without an arrow control.");
         headerImages = threadView.GetVisualDescendants().OfType<AsyncImage>().ToArray();
         vm.MailSenderImagesEnabled = false;
         if (threadView.ShowSenderImages || headerImages.Any(i => i.AllowLoading || i.IsVisible))
@@ -275,6 +288,32 @@ internal static class Program
         vm.BusyActions.Clear();
         vm.Drafts.Clear();
         Application.Current.RequestedThemeVariant = ThemeVariant.Light;
+        var now = DateTimeOffset.Now;
+        var eventSource = new CalendarEventSource(account, new(new("team", "Team calendar", "#5576CF", true, account.AccountId), "#5576CF", () => { }),
+            new("meeting", "team", "Design review", now.AddMinutes(-15), now.AddMinutes(30), "Studio room · Second floor",
+                [new(new("Jamie Chen", "jamie@studio.example"))],
+                IsReminderOn: true, ReminderMinutesBeforeStart: 10, AccountId: account.AccountId,
+                Availability: CalendarAvailability.Busy, Organizer: new("Alex Morgan", account.EmailAddress),
+                Body: "Review the new navigation and agree the next steps.\n\nBring your feedback on search and the contact experience.", OnlineMeetingUrl: "https://meet.google.com/example-room"));
+        typeof(MainWindowViewModel).GetProperty("NextCalendarEvent")!.SetValue(vm, eventSource);
+        typeof(MainWindowViewModel).GetField("_dayAgenda", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(vm,
+            new[] { eventSource with { Event = eventSource.Event with { ProviderId = "earlier", Subject = "Morning planning", StartsAt = now.AddHours(-1), EndsAt = now.AddMinutes(-40) } }, eventSource,
+                eventSource with { Event = eventSource.Event with { ProviderId = "later", Subject = "Project check-in", StartsAt = now.AddHours(1), EndsAt = now.AddHours(2) } } });
+        typeof(MainWindowViewModel).GetMethod("UpdateAgendaClock", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(vm, null);
+        await ((AsyncCommand)vm.ShowUnifiedInboxCommand).ExecuteAsync();
+        window.FindControl<Button>("AgendaButton")!.Flyout!.ShowAt(window.FindControl<Button>("AgendaButton")!);
+        await Shot("today-agenda-light");
+        Application.Current.RequestedThemeVariant = ThemeVariant.Dark;
+        await Shot("today-agenda-dark");
+        window.FindControl<Button>("AgendaButton")!.Flyout!.Hide();
+        var eventWindow = (Window)Activator.CreateInstance(typeof(MainWindow).Assembly.GetType("BetterMail.App.CalendarEventWindow")!, eventSource, null)!;
+        eventWindow.WindowDecorations = WindowDecorations.None;
+        eventWindow.Position = new PixelPoint(0, 0);
+        eventWindow.Show();
+        await Shot("event-details-dark", eventWindow);
+        Application.Current.RequestedThemeVariant = ThemeVariant.Light;
+        await Shot("event-details-light", eventWindow);
+        eventWindow.Close();
         foreach (var (name, command) in new[] { ("calendar", vm.ShowCalendarCommand), ("files", vm.ShowFilesCommand), ("notes", vm.ShowNotesCommand), ("people", vm.ShowContactsCommand), ("todos", vm.ShowTasksCommand) })
         {
             await ((AsyncCommand)command).ExecuteAsync();
@@ -307,8 +346,18 @@ internal static class Program
             }
             if (name == "people")
             {
+                vm.People.Add(PersonEntry.Discovered(new("taylor@studio.example", "Taylor Brooks", [mailbox.Id], 3, now), "Mail history"));
                 vm.PeopleCardView = true;
                 await Shot("people-cards-light");
+                var cards = window.FindControl<ListBox>("PeopleBoxes")!.GetVisualDescendants().OfType<Border>().Where(border => border.Classes.Contains("personCard")).ToArray();
+                var point = cards[0].PointToScreen(new Point(8, 8));
+                await Input("none", "move", point.X.ToString(), point.Y.ToString());
+                if (Equals(cards[0].Background, cards[1].Background)) throw new InvalidOperationException("Hover did not highlight only the individual contact card.");
+                await Shot("people-card-hover-light");
+                await Input("none", "move", "10", "10");
+                await ((AsyncCommand<PersonEntry>)vm.EditContactCommand).ExecuteAsync(vm.People.First(person => person.SavedContact?.ProviderId == "jamie"));
+                await Shot("contact-details-light");
+                await ((AsyncCommand)vm.CancelEditContactCommand).ExecuteAsync();
                 if (!window.FindControl<ListBox>("PeopleBoxes")!.IsVisible || window.FindControl<ListBox>("PeopleCards")!.IsVisible)
                     throw new InvalidOperationException("People card view did not switch.");
                 vm.PeopleCardView = false;
@@ -428,7 +477,7 @@ public class PreviewProvider : DispatchProxy
         {
             "GetCalendarsAsync" => new CalendarInfo[] { new("team", "Team calendar", "#5576CF", true, account.AccountId) },
             "GetEventsAsync" => new CalendarEvent[] { new("review", "team", "Design review", Today.AddHours(10), Today.AddHours(11), "Studio room", AccountId: account.AccountId), new("planning", "team", "Autumn planning", Today.AddDays(1).AddHours(13), Today.AddDays(1).AddHours(14), "Online", AccountId: account.AccountId) },
-            "GetContactsAsync" or "SearchContactsAsync" => new ContactInfo[] { new("jamie", "Jamie Chen", ["jamie@studio.example"], account.AccountId), new("priya", "Priya Patel", ["priya@studio.example"], account.AccountId), new("sam", "Sam Rivera", ["sam@studio.example"], account.AccountId) },
+            "GetContactsAsync" or "SearchContactsAsync" => new ContactInfo[] { new("jamie", "Jamie Chen", ["jamie@studio.example"], account.AccountId, Details: new(GivenName: "Jamie", Surname: "Chen", MobilePhone: "+1 202 555 0142", CompanyName: "Studio", JobTitle: "Design lead", OfficeLocation: "Main studio", PersonalNotes: "Prefers afternoon meetings.")), new("priya", "Priya Patel", ["priya@studio.example"], account.AccountId), new("sam", "Sam Rivera", ["sam@studio.example"], account.AccountId) },
             "GetTaskListsAsync" => new TaskListInfo[] { new("launch", "Autumn launch", account.AccountId), new("personal", "My day", account.AccountId) },
             "GetTasksAsync" when args!.OfType<TaskListInfo>().FirstOrDefault()?.ProviderId == "personal" => Array.Empty<TaskInfo>(),
             "GetTasksAsync" => new TaskInfo[] { new("brief", "launch", "Review the creative brief", Today, false, account.AccountId), new("research", "launch", "Share customer research", Today.AddDays(1), false, account.AccountId), new("plan", "launch", "Finalize the launch checklist", Today.AddDays(2), false, account.AccountId), new("done", "launch", "Set up the project workspace", Today, true, account.AccountId) },
