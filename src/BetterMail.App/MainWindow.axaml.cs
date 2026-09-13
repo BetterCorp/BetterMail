@@ -560,7 +560,11 @@ public sealed partial class MainWindow : Window
         args.Handled = true;
     }
 
-    internal void FocusGlobalSearch() { MailSearch.Focus(); MailSearch.SelectAll(); }
+    internal void FocusGlobalSearch()
+    {
+        if (_viewModel is not null) _viewModel.IsSearchEditing = true;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => { MailSearch.Focus(); MailSearch.SelectAll(); });
+    }
 
     private readonly Avalonia.Threading.DispatcherTimer _agendaClock = new() { Interval = TimeSpan.FromMinutes(1) };
     private async void DayAgendaClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
@@ -582,11 +586,27 @@ public sealed partial class MainWindow : Window
 
     private void GlobalSearchFocused(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
     {
-        if (_viewModel?.HasSearchText == true) _viewModel.SearchCommand.Execute(null);
+        _viewModel?.OpenSearchInput();
+    }
+
+    private void GlobalSearchLostFocus(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (_viewModel is not null) _viewModel.IsSearchEditing = false;
+    }
+    private void SearchBadgesFocused(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (_viewModel is not null) _viewModel.IsSearchEditing = true;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => MailSearch.Focus());
     }
 
     private void GlobalSearchKeyDown(object? sender, KeyEventArgs args)
     {
+        if (args.Key == Key.Enter && _viewModel is { HasSearchText: false })
+        {
+            _viewModel.OpenSearchInput();
+            args.Handled = true;
+            return;
+        }
         if (args.Key == Key.Enter && _viewModel?.SearchCommand.CanExecute(null) == true)
         {
             _viewModel.SearchCommand.Execute(null);
@@ -880,7 +900,7 @@ public sealed partial class MainWindow : Window
         {
             viewModel.SearchText = query;
             viewModel.SearchCommand.Execute(null);
-        }));
+        }, viewModel));
     }
 
     private async void MoveMessagesClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
@@ -1059,11 +1079,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void FocusMailSearch()
-    {
-        MailSearch.Focus();
-        MailSearch.SelectAll();
-    }
+    private void FocusMailSearch() => FocusGlobalSearch();
 
     private void OpenCompose(ComposeRequest request)
     {

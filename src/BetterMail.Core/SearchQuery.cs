@@ -7,11 +7,17 @@ namespace BetterMail.Core;
 public sealed record SearchQuery(IReadOnlyList<string> Terms, IReadOnlyDictionary<string, string> Fields,
     IReadOnlyList<SearchDate> Dates)
 {
-    public static readonly string[] Keys = ["type", "account", "in", "from", "to", "cc", "subject", "date", "has", "is", "importance", "category", "archives"];
+    public static readonly string[] Keys = ["type", "account", "in", "notin", "from", "to", "cc", "subject", "date", "has", "is", "importance", "category", "archives"];
     public string Text => string.Join(' ', Terms);
     public string? this[string key] => Fields.GetValueOrDefault(key);
-    public bool HasMailFilters => Dates.Count > 0 || Fields.Keys.Any(key => key is not ("type" or "account"));
-    public string Scope => this["type"] ?? (HasMailFilters ? "Mail" : "Everything");
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> Multiple { get; init; } = new Dictionary<string, IReadOnlyList<string>>();
+    public IReadOnlyList<string> Values(string key) => Multiple.TryGetValue(key, out var values) ? values : this[key] is { } value ? [value] : [];
+    public bool HasMailFilters => Dates.Count > 0 || Fields.Keys.Any(key => key is "from" or "to" or "cc" or "subject" or "has" or "is" or "importance" or "category" or "archives") ||
+        (Values("in").Count + Values("notin").Count > 0 && !IsDrivePathSearch);
+    public bool IsDrivePathSearch => Values("type").Count == 1 && Values("type")[0] == "Drive";
+    public IReadOnlyList<string> Scopes => Values("type").Count > 0 ? Values("type") : [HasMailFilters ? "Mail" : "Everything"];
+    public bool Includes(string scope) => Scopes.Contains("Everything") || Scopes.Contains(scope);
+    public string Scope => Scopes.Count == 1 ? Scopes[0] : "Multiple";
     public string FtsText => string.Join(' ', Terms.Select(term => "\"" + term.Replace("\"", "\"\"") + "\"*"));
 
     public static SearchQuery Parse(string text)
@@ -19,6 +25,7 @@ public sealed record SearchQuery(IReadOnlyList<string> Terms, IReadOnlyDictionar
         var terms = new List<string>();
         var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var dates = new List<SearchDate>();
+        var multiple = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var index = 0;
         while (index < text.Length)
         {
@@ -31,7 +38,7 @@ public sealed record SearchQuery(IReadOnlyList<string> Terms, IReadOnlyDictionar
                 text[start..index] is not ("http" or "https"))
             {
                 key = text[start..index].ToLowerInvariant();
-                if (!Keys.Contains(key)) throw new FormatException($"Unknown search key '{key}'. Open Search options for available keys.");
+                if (!Keys.Contains(key)) throw new FormatException($"Unknown search key '{key}'. Open Advanced filter for available keys.");
                 index++;
             }
             else index = start;
@@ -39,10 +46,17 @@ public sealed record SearchQuery(IReadOnlyList<string> Terms, IReadOnlyDictionar
             if (value.Length == 0) throw new FormatException($"Enter a value for {key ?? "the search term"}.");
             if (key is null) terms.Add(value);
             else if (key == "date") dates.Add(SearchDate.Parse(value));
-            else if (!fields.TryAdd(key, value)) throw new FormatException($"Use '{key}' once. Date is the only repeatable key.");
+            else
+            {
+                if (!fields.TryAdd(key, value) && key is not ("type" or "account" or "in" or "notin" or "is" or "category"))
+                    throw new FormatException($"Use '{key}' once.");
+                if (!multiple.TryGetValue(key, out var values)) multiple[key] = values = [];
+                values.Add(value);
+            }
         }
-        if (fields.TryGetValue("type", out var type))
-            fields["type"] = type.ToLowerInvariant() switch
+        if (multiple.TryGetValue("type", out var types))
+            for (var i = 0; i < types.Count; i++)
+                types[i] = types[i].ToLowerInvariant() switch
             {
                 "everything" or "all" => "Everything", "mail" => "Mail", "people" or "contacts" => "People",
                 "calendar" => "Calendar", "todo" or "todos" or "tasks" or "to do" => "To Do",
@@ -53,18 +67,42 @@ public sealed record SearchQuery(IReadOnlyList<string> Terms, IReadOnlyDictionar
         Validate("is", ["read", "unread", "flagged", "pinned"]);
         Validate("importance", ["low", "normal", "high"]);
         Validate("archives", ["true", "false"]);
-        var query = new SearchQuery(terms, fields, dates);
-        if (query.HasMailFilters && query.Scope != "Mail")
+        foreach (var pair in multiple) fields[pair.Key] = pair.Value[0];
+        var query = new SearchQuery(terms, fields, dates) { Multiple = multiple.ToDictionary(pair => pair.Key,
+            pair => (IReadOnlyList<string>)pair.Value.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), StringComparer.OrdinalIgnoreCase) };
+        if (query.Values("is").Contains("read") && query.Values("is").Contains("unread"))
+            throw new FormatException("Choose read or unread; a message cannot be both.");
+        if (query.HasMailFilters && !query.Includes("Mail"))
             throw new FormatException("Folder, address, subject, date, attachment, state, importance, category and archive filters require type:mail (or omit type).");
         return query;
 
         void Validate(string key, string[] allowed)
         {
-            if (!fields.TryGetValue(key, out var value)) return;
-            value = value.ToLowerInvariant();
-            if (!allowed.Contains(value)) throw new FormatException($"{key}: use {string.Join(", ", allowed)}.");
-            fields[key] = value;
+            if (!multiple.TryGetValue(key, out var values)) return;
+            for (var i = 0; i < values.Count; i++)
+            {
+                var value = values[i].ToLowerInvariant();
+                if (!allowed.Contains(value)) throw new FormatException($"{key}: use {string.Join(", ", allowed)}.");
+                values[i] = value;
+            }
         }
+    }
+
+    public static IReadOnlyList<string> Tokens(string text)
+    {
+        var result = new List<string>();
+        var start = 0; char close = '\0'; var escaped = false;
+        for (var i = 0; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (escaped) { escaped = false; continue; }
+            if (c == '\\' && close != '\0') { escaped = true; continue; }
+            if (close != '\0') { if (c == close) close = '\0'; continue; }
+            if (c is '{' or '"') { close = c == '{' ? '}' : '"'; continue; }
+            if (char.IsWhiteSpace(c)) { if (i > start) result.Add(text[start..i]); start = i + 1; }
+        }
+        if (start < text.Length) result.Add(text[start..]);
+        return result;
     }
 
     private static string ReadValue(string text, ref int index)
@@ -92,7 +130,7 @@ public sealed record SearchQuery(IReadOnlyList<string> Terms, IReadOnlyDictionar
     public static string Encode(string value) => value.Length > 0 && !value.Any(c => char.IsWhiteSpace(c) || c is ':' or '{' or '}' or '"' or '\\')
         ? value : "{" + value.Replace("\\", "\\\\").Replace("}", "\\}") + "}";
     public string Serialize() => string.Join(' ', Terms.Select(Encode)
-        .Concat(Fields.Select(field => field.Key + ":" + Encode(field.Value)))
+        .Concat(Fields.Keys.SelectMany(key => Values(key).Select(value => key + ":" + Encode(value))))
         .Concat(Dates.Select(date => "date:" + Encode(date.Source))));
 }
 

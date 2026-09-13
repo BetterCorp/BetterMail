@@ -1,18 +1,27 @@
 <Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        x:Class="BetterMail.App.SearchOptionsWindow" Title="Search options" Width="620" Height="760" MinWidth="380" MinHeight="450"
+        x:Class="BetterMail.App.SearchOptionsWindow" Title="Advanced filter" Width="720" Height="820" MinWidth="420" MinHeight="450"
         Icon="/Assets/BetterMail.ico">
+  <Window.Styles>
+    <Style Selector="Button.filterChoice">
+      <Setter Property="Background" Value="{DynamicResource BetterMailSurfaceBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BetterMailDividerBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="10,6" />
+      <Setter Property="MinHeight" Value="34" />
+    </Style>
+  </Window.Styles>
   <Grid Margin="20" RowDefinitions="Auto,*,Auto,Auto" RowSpacing="12">
-    <TextBlock Text="Build a search" FontSize="20" FontWeight="SemiBold" />
-    <ScrollViewer Grid.Row="1">
-      <StackPanel Spacing="12">
-        <TextBlock Text="The fields below update your search text. Use braces or quotes for values with spaces. All conditions must match." TextWrapping="Wrap" Opacity="0.7" />
-        <TextBlock Text="Query" FontWeight="SemiBold" />
-        <TextBox x:Name="QueryText" TextWrapping="Wrap" AcceptsReturn="True" MinHeight="60" AutomationProperties.Name="Search query" />
-        <Button Content="Read query into fields" Click="ReadClicked" />
-        <StackPanel x:Name="FieldsPanel" Spacing="10" />
-        <Expander Header="Available keys and syntax" IsExpanded="True">
+    <TextBlock Text="Advanced filter" FontSize="20" FontWeight="SemiBold" />
+    <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled" ClipToBounds="True">
+      <StackPanel Spacing="14">
+        <TextBlock Text="Choose any matching types, accounts, folders or categories. State and date conditions must all match." TextWrapping="Wrap" Opacity="0.7" />
+        <StackPanel x:Name="FieldsPanel" Spacing="14" />
+        <Expander Header="Available keys and syntax" IsExpanded="False">
           <SelectableTextBlock x:Name="SyntaxHelp" TextWrapping="Wrap" FontSize="12" />
         </Expander>
+        <TextBlock Text="Search query" FontWeight="SemiBold" />
+        <TextBox x:Name="QueryText" IsReadOnly="True" TextWrapping="Wrap" AutomationProperties.Name="Generated search query" />
       </StackPanel>
     </ScrollViewer>
     <TextBlock Grid.Row="2" x:Name="FormError" TextWrapping="Wrap" Foreground="{DynamicResource BetterMailAccentBrush}" />

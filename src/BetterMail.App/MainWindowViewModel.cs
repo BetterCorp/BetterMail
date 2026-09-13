@@ -995,6 +995,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             {
                 RaisePropertyChanged(nameof(SearchResultSummary));
                 RaisePropertyChanged(nameof(HasSearchText));
+                RaisePropertyChanged(nameof(ShowSearchBadges));
+                RaisePropertyChanged(nameof(SearchBadges));
                 _ = StartGlobalSearchAsync(debounce: true);
             }
         }
@@ -2052,15 +2054,19 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         try
         {
             parsed = SearchQuery.Parse(rawQuery);
+            ValidateSearchReferences(parsed);
             _selectedSearchScope = parsed.Scope;
-            _selectedSearchAccountFilter = ResolveQueryAccount(parsed["account"]);
-            if (_selectedSearchAccountFilter?.MailboxId is not null && parsed.Scope != "Mail")
+            _queryAccounts = parsed.Values("account").Select(value => ResolveQueryAccount(value)!).ToArray();
+            _selectedSearchAccountFilter = _queryAccounts.Count == 1 ? _queryAccounts[0] : null;
+            if (_queryAccounts.Any(item => item.MailboxId is not null) && !parsed.Includes("Mail"))
                 throw new FormatException("Shared-mailbox searches require type:mail. Other workspace searches use the linked account's address.");
             _selectedSearchFolderFilter = null;
             _includeArchivedMailInSearch = parsed["archives"] == "true";
             query = parsed.Text;
             searchFolders = ResolveQueryFolders(parsed);
-            SearchNotice = parsed.HasMailFilters
+            SearchNotice = parsed.IsDrivePathSearch && parsed.Values("in").Count + parsed.Values("notin").Count > 0
+                ? "Drive folder filters search the synced file index. Sync Drive to include more files."
+                : parsed.HasMailFilters
                 ? "Advanced filters search synced mail. Sync first to include mail that is not cached yet."
                 : "";
         }
@@ -2075,7 +2081,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
         IsGlobalSearchRunning = true;
         IsGlobalSearchOpen = true;
-        if (SelectedSearchScope is not ("Everything" or "Mail"))
+        if (!parsed.Includes("Mail"))
         {
             ClearLatestMailSearchResults();
         }
@@ -2087,7 +2093,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             }
 
             var searches = new List<Task>();
-            if (SelectedSearchScope is "Everything" or "Mail")
+            if (parsed.Includes("Mail"))
             {
                 var localMailSearch = AddGlobalResultsAsync(
                     "Mail",
@@ -2100,13 +2106,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             AddSearch("People", () => SearchPeopleGloballyAsync(query, source.Token));
             AddSearch("Calendar", () => SearchCalendarGloballyAsync(query, source.Token));
             AddSearch("To Do", () => SearchTasksGloballyAsync(query, source.Token));
-            AddSearch("Drive", () => SearchDriveGloballyAsync(query, source.Token));
+            AddSearch("Drive", () => SearchDriveGloballyAsync(query, source.Token, parsed));
             AddSearch("Notes", () => SearchNotesGloballyAsync(query, source.Token));
             await Task.WhenAll(searches);
 
             void AddSearch(string category, Func<Task<IReadOnlyList<GlobalSearchResult>>> search)
             {
-                if (SelectedSearchScope is "Everything" || SelectedSearchScope == category)
+                if (parsed.Includes(category))
                 {
                     searches.Add(AddGlobalResultsAsync(category, search(), source));
                 }
@@ -2174,12 +2180,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         CancellationToken cancellationToken)
     {
         var account = SelectedSearchAccountFilter;
+        var selectedAccounts = _queryAccounts;
+        var cachedMailboxes = Mailboxes.Count > 0 ? Mailboxes.ToArray() : await _store!.GetMailboxesAsync(cancellationToken);
+        var mailboxIds = selectedAccounts.Count == 0 ? null : cachedMailboxes.Where(mailbox => selectedAccounts.Any(item =>
+            item.MailboxId is { } id ? mailbox.Id == id : mailbox.AccountId == item.AccountId)).Select(mailbox => mailbox.Id).ToArray();
         var messages = (await _store!.SearchFilteredMailAsync(query, folders, 500, cancellationToken,
-                account?.AccountId, account?.MailboxId, includeUnknownFolders: query["in"] is null, knownFolders: Folders.Select(folder => new MailFolderKey(folder.MailboxId, folder.ProviderId)).ToArray()))
+                account?.AccountId, account?.MailboxId, includeUnknownFolders: query.Values("in").Count == 0 && query.Values("notin").Count == 0, knownFolders: Folders.Select(folder => new MailFolderKey(folder.MailboxId, folder.ProviderId)).ToArray(), allowedMailboxIds: mailboxIds))
             .OrderByDescending(static message => message.ReceivedAt)
             .ThenByDescending(static message => message.ProviderId, StringComparer.Ordinal)
             .ToArray();
         cancellationToken.ThrowIfCancellationRequested();
+        _latestMailMailboxIds = mailboxIds;
         _latestMailAccount = account;
         _latestMailQuery = query;
         _latestMailFolders = folders;
@@ -2257,13 +2268,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         ReplaceGlobalMailSearchResults(merged.Take(100));
     }
 
-    private bool MailboxMatchesSearchFilters(Mailbox mailbox) =>
-        (SelectedSearchAccountFilter?.MailboxId is { } mailboxId
-            ? mailbox.Id == mailboxId
-            : SelectedSearchAccountFilter?.AccountId is null ||
-                SelectedSearchAccountFilter.AccountId == mailbox.AccountId) &&
-        (!IsMailSearchScope || SelectedSearchFolderFilter?.MailboxId is null ||
-            SelectedSearchFolderFilter.MailboxId == mailbox.Id);
+    private bool MailboxMatchesSearchFilters(Mailbox mailbox) => QueryMailboxMatches(mailbox) &&
+        (!IsMailSearchScope || SelectedSearchFolderFilter?.MailboxId is null || SelectedSearchFolderFilter.MailboxId == mailbox.Id);
 
     private async Task<bool> IsMailboxSearchCoverageCompleteAsync(
         Mailbox mailbox,
@@ -2382,8 +2388,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         string query,
         CancellationToken cancellationToken)
     {
-        var cached = await _store!.SearchWorkspaceItemsAsync<CalendarEvent>(
-            "calendar-event", query, 30, SelectedSearchAccountFilter?.AccountId, cancellationToken);
+        var cached = await SearchSelectedWorkspaceCacheAsync<CalendarEvent>(
+            "calendar-event", query, 30, cancellationToken);
         if (cached.Count > 0 || _workspaceProvider is null)
         {
             return CalendarResults(cached, query);
@@ -2398,7 +2404,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             if (group.Key.AccountId is not null)
             {
-                await _store.ReplaceCalendarEventsAsync(
+                await _store!.ReplaceCalendarEventsAsync(
                     group.Key.AccountId, group.Key.CalendarId,
                     now.AddYears(-1), now.AddYears(2), group.ToArray(), cancellationToken);
             }
@@ -2420,8 +2426,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         string query,
         CancellationToken cancellationToken)
     {
-        var cached = await _store!.SearchWorkspaceItemsAsync<TaskInfo>(
-            "task", query, 30, SelectedSearchAccountFilter?.AccountId, cancellationToken);
+        var cached = await SearchSelectedWorkspaceCacheAsync<TaskInfo>(
+            "task", query, 30, cancellationToken);
         if (cached.Count > 0 || _workspaceProvider is null)
         {
             return TaskResults(cached, query);
@@ -2434,7 +2440,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             if (group.Key.AccountId is not null)
             {
-                await _store.ReplaceWorkspaceItemsAsync(
+                await _store!.ReplaceWorkspaceItemsAsync(
                     "task", group.Key.AccountId, group.Key.ListId, group.ToArray(),
                     static item => item.ProviderId,
                     static item => $"{item.Title} {item.Notes} {string.Join(' ', item.Categories ?? [])}",
@@ -2454,10 +2460,15 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private async Task<IReadOnlyList<GlobalSearchResult>> SearchDriveGloballyAsync(
         string query,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, SearchQuery parsed)
     {
-        var cached = await _store!.SearchWorkspaceItemsAsync<CloudFile>(
-            "drive-file", query, 40, SelectedSearchAccountFilter?.AccountId, cancellationToken);
+        if (parsed.IsDrivePathSearch && parsed.Values("in").Count + parsed.Values("notin").Count > 0)
+        {
+            var ids = _queryAccounts.Count == 0 ? null : _queryAccounts.Where(item => item.MailboxId is null).Select(item => item.AccountId!).Distinct().ToArray();
+            return DriveResults(await _store!.SearchFilteredDriveFilesAsync(parsed, ids, cancellationToken: cancellationToken));
+        }
+        var cached = await SearchSelectedWorkspaceCacheAsync<CloudFile>(
+            "drive-file", query, 40, cancellationToken);
         if (cached.Count > 0 || _workspaceProvider is null)
         {
             return DriveResults(cached);
@@ -2470,7 +2481,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             if (group.Key is not null)
             {
-                await _store.UpsertWorkspaceItemsAsync(
+                await _store!.UpsertWorkspaceItemsAsync(
                     "drive-file", group.Key, "index", group.ToArray(),
                     static item => item.ProviderId,
                     static item => $"{item.Name} {item.Path}", cancellationToken);
@@ -2487,8 +2498,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         string query,
         CancellationToken cancellationToken)
     {
-        var cached = await _store!.SearchWorkspaceItemsAsync<NoteInfo>(
-            "note", query, 30, SelectedSearchAccountFilter?.AccountId, cancellationToken);
+        var cached = await SearchSelectedWorkspaceCacheAsync<NoteInfo>(
+            "note", query, 30, cancellationToken);
         if (cached.Count > 0 || _workspaceProvider is null)
         {
             return NoteResults(cached, query);
@@ -2501,7 +2512,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             if (group.Key is not null)
             {
-                await _store.ReplaceWorkspaceItemsAsync(
+                await _store!.ReplaceWorkspaceItemsAsync(
                     "note", group.Key, "all", group.ToArray(),
                     static item => item.ProviderId,
                     static item => item.Title, cancellationToken);
@@ -2525,8 +2536,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     {
         var batches = await Task.WhenAll(Accounts
             .Where(account => account.Capabilities.HasFlag(capability) &&
-                (SelectedSearchAccountFilter?.AccountId is null ||
-                SelectedSearchAccountFilter.AccountId == account.AccountId))
+                QueryAccountMatches(account.AccountId))
             .Select(async account =>
         {
             try
@@ -2845,11 +2855,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         ActiveModule = "Mail";
         IsDraftsView = false;
         SetSelectedFolder(null);
+        _displayedMailMailboxIds = _latestMailMailboxIds;
         _displayedMailAccount = _latestMailAccount;
         _displayedMailQuery = _latestMailQuery;
         _displayedMailFolders = results is null ? _latestMailFolders
             : _latestMailFolders.Where(folder => results.Any(message => message.MailboxId == folder.MailboxId)).ToArray();
-        _mailSearchSummary = $"Query: {_latestMailQuery?.Serialize()}\nAccount: {_latestMailQuery?["account"] ?? "All linked accounts"}\nFolder: {_latestMailQuery?["in"] ?? "All searchable folders"}\nArchives: {(_latestMailQuery?["archives"] == "true" ? "included" : "excluded unless explicitly selected")}";
+        _mailSearchSummary = $"Query: {_latestMailQuery?.Serialize()}\nAccount: {(_latestMailQuery?.Values("account").Count > 0 ? string.Join(", ", _latestMailQuery.Values("account")) : "All linked accounts")}\nFolder: {(_latestMailQuery?.Values("in").Count > 0 ? string.Join(", ", _latestMailQuery.Values("in")) : "All searchable folders")}\nArchives: {(_latestMailQuery?["archives"] == "true" ? "included" : "excluded unless explicitly selected")}";
         if (results is not null && selected is not null)
         {
             _mailSearchSummary += $"\nShowing group: {SearchGroupFor(selected)}";
@@ -2913,7 +2924,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             {
                 _messagePageCursor = null;
                 var found = await _store.SearchFilteredMailAsync(displayedQuery, _displayedMailFolders, 500, token,
-                    _displayedMailAccount?.AccountId, _displayedMailAccount?.MailboxId, includeUnknownFolders: displayedQuery["in"] is null, knownFolders: Folders.Select(folder => new MailFolderKey(folder.MailboxId, folder.ProviderId)).ToArray());
+                    _displayedMailAccount?.AccountId, _displayedMailAccount?.MailboxId, includeUnknownFolders: displayedQuery.Values("in").Count == 0 && displayedQuery.Values("notin").Count == 0, knownFolders: Folders.Select(folder => new MailFolderKey(folder.MailboxId, folder.ProviderId)).ToArray(), allowedMailboxIds: _displayedMailMailboxIds);
                 if (loadVersion != _messageLoadVersion) return;
                 ReconcileMessages(found);
                 RaiseMessageState();

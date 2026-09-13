@@ -47,16 +47,33 @@
           <TextBlock Text="BetterMail" Foreground="{DynamicResource BetterMailTextBrush}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
         </StackPanel>
 
-        <Grid x:Name="HeaderSearch" Grid.Column="1" MaxWidth="900" HorizontalAlignment="Stretch" ColumnDefinitions="*,Auto,Auto">
+        <Grid x:Name="HeaderSearch" Grid.Column="1" MaxWidth="900" HorizontalAlignment="Stretch" ColumnDefinitions="*">
           <TextBox x:Name="MailSearch" Classes="search"
                    PlaceholderText="{Binding GlobalSearchPlaceholder}"
                    Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                    Padding="12,6,36,6"
-                   KeyDown="GlobalSearchKeyDown" GotFocus="GlobalSearchFocused"
+                   KeyDown="GlobalSearchKeyDown" GotFocus="GlobalSearchFocused" LostFocus="GlobalSearchLostFocus" IsVisible="{Binding !ShowSearchBadges}"
                    AutomationProperties.Name="Search everything"
                    AutomationProperties.HelpText="Search mail, people, calendar, tasks, drives, and notes across linked accounts"
                    TabIndex="0"
                    VerticalAlignment="Center" />
+          <Button Background="{DynamicResource BetterMailSearchBackgroundBrush}" BorderThickness="0" IsVisible="{Binding ShowSearchBadges}" GotFocus="SearchBadgesFocused" Click="SearchBadgesFocused"
+                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalAlignment="Center" Height="34" Padding="6,2,36,2"
+                  AutomationProperties.Name="Edit search filters">
+            <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
+              <ItemsControl ItemsSource="{Binding SearchBadges}">
+                <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="5" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate><DataTemplate x:DataType="app:SearchFilterBadge">
+                  <Border Background="{Binding Background}" CornerRadius="4" Padding="6,3" ToolTip.Tip="{Binding Help}">
+                    <Grid>
+                      <TextBlock Text="{Binding Text}" Foreground="{Binding Foreground}" FontSize="12" IsVisible="{Binding !IsPlain}" />
+                      <TextBlock Text="{Binding Text}" Foreground="{DynamicResource BetterMailSearchForegroundBrush}" FontSize="12" IsVisible="{Binding IsPlain}" />
+                    </Grid>
+                  </Border>
+                </DataTemplate></ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </Button>
           <Button Grid.Column="0"
                   Content="×"
                   MinWidth="0" MinHeight="0"
@@ -72,21 +89,9 @@
                   Background="Transparent"
                   Foreground="{DynamicResource BetterMailSearchForegroundBrush}"
                   AutomationProperties.Name="Clear search" />
-          <Button Grid.Column="1"
-                  Content="Search"
-                  Command="{Binding SearchCommand}"
-                  Background="Transparent"
-                  Foreground="{DynamicResource BetterMailTextBrush}"
-                  Padding="10,5"
-                  AutomationProperties.Name="Run mail search"
-                  TabIndex="1"
-                  VerticalAlignment="Center" />
-          <Button Grid.Column="2" Content="Filters" Padding="12,5" Margin="4,0,0,0" Click="SearchOptionsClicked" VerticalAlignment="Center"
-                  ToolTip.Tip="Search options and syntax" AutomationProperties.Name="Search options and syntax" />
           <Popup x:Name="GlobalSearchPopup"
-                 Grid.ColumnSpan="3"
                  IsOpen="{Binding IsGlobalSearchOpen, Mode=TwoWay}"
-                 PlacementTarget="{Binding #MailSearch}"
+                 PlacementTarget="{Binding #HeaderSearch}"
                  Placement="BottomEdgeAlignedLeft"
                  IsLightDismissEnabled="True">
             <Border x:Name="GlobalSearchResultsPanel"
@@ -98,21 +103,18 @@
                     BoxShadow="0 8 24 0 #44000000"
                     Padding="0">
               <Grid RowDefinitions="Auto,Auto,*">
-                <Grid ColumnDefinitions="*,Auto" Margin="16,12,8,9">
-                  <StackPanel Spacing="2" VerticalAlignment="Center">
-                    <TextBlock Text="Search results" FontSize="16" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding SearchText}" TextWrapping="Wrap" FontSize="11" Opacity="0.62" />
-                  </StackPanel>
-                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <ProgressBar IsIndeterminate="True" Width="62" Height="3" IsVisible="{Binding IsGlobalSearchRunning}" />
-                    <Button Content="Filters" Padding="10,5" Click="SearchOptionsClicked" AutomationProperties.Name="Search filters and syntax" />
-                    <Button Classes="command" Content="×" Command="{Binding CloseGlobalSearchCommand}" AutomationProperties.Name="Close search results" />
-                  </StackPanel>
+                <Grid ColumnDefinitions="Auto,Auto,*" RowDefinitions="Auto,Auto" ColumnSpacing="12" Margin="16,12,16,9">
+                  <TextBlock Text="Search results" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+                  <Button Grid.Column="1" Classes="command" Content="Advanced filter" Padding="6,3" Click="SearchOptionsClicked"
+                          Foreground="{DynamicResource BetterMailAccentBrush}" AutomationProperties.Name="Advanced filter" />
+                  <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="{Binding SearchText}" TextWrapping="Wrap" FontSize="11" Opacity="0.62" />
                 </Grid>
                 <StackPanel Grid.Row="1" Spacing="5" Margin="16,0,12,8">
                   <TextBlock Text="{Binding SearchError}" IsVisible="{Binding SearchError, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}" TextWrapping="Wrap" Foreground="{DynamicResource BetterMailAccentBrush}" />
                   <TextBlock Text="{Binding SearchNotice}" IsVisible="{Binding SearchNotice, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}" TextWrapping="Wrap" FontSize="11" Opacity="0.7" />
                 </StackPanel>
+                <ProgressBar Grid.Row="2" IsIndeterminate="True" Height="2" VerticalAlignment="Top" ZIndex="2"
+                             IsHitTestVisible="False" IsVisible="{Binding IsGlobalSearchRunning}" />
                 <ListBox Grid.Row="2"
                          ItemsSource="{Binding GlobalSearchResults}"
                          HorizontalAlignment="Stretch"

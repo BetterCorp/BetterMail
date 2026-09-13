@@ -8,10 +8,10 @@
   </UserControl.Resources>
   <Grid RowDefinitions="Auto,Auto,Auto,*" Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
     <Border Padding="24,14" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1">
-      <Grid ColumnDefinitions="*,Auto">
-        <TextBlock Text="Settings" FontSize="24" FontWeight="SemiBold" />
-        <Button Grid.Column="1" Classes="command" Content="Close" Command="{Binding CloseSettingsCommand}"
+      <Grid ColumnDefinitions="Auto,*" ColumnSpacing="16">
+        <Button Classes="command" Content="Close" Command="{Binding CloseSettingsCommand}"
                 AutomationProperties.Name="Close settings" />
+        <TextBlock Grid.Column="1" Text="Settings" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center" />
       </Grid>
     </Border>
 

@@ -92,7 +92,7 @@ People opens from the local contact cache and mail history, then refreshes in th
 
 ## Mail navigation, search and mailbox layout
 
-Search uses a labelled Filters button, a compact results header, and rows that stretch across the results panel. Opening the filter form preserves plain terms such as `bob`; focusing a nonempty search field or pressing Enter reruns the search, even while an older provider search is pending. References reviewed in Mobbin: [Front advanced search](https://mobbin.com/screens/43b2e9ff-ac6c-4240-9d4a-201fc24fd597), [Skiff search](https://mobbin.com/screens/cce393ee-75b8-48b4-934d-346f1b1583ab), and [Notion Mail filters](https://mobbin.com/screens/37573e33-3175-4605-9082-f0fc04d436be).
+Search uses a compact results header with an Advanced filter text button, a full-width loading line above the results, and rows that stretch across the results panel. The main search input has no separate Search/Filters buttons; results dismiss on outside click. Opening the filter form preserves plain terms such as `bob`; focusing a nonempty search field or pressing Enter reruns the search, even while an older provider search is pending. References reviewed in Mobbin: [Front advanced search](https://mobbin.com/screens/43b2e9ff-ac6c-4240-9d4a-201fc24fd597), [Skiff search](https://mobbin.com/screens/cce393ee-75b8-48b4-934d-346f1b1583ab), and [Notion Mail filters](https://mobbin.com/screens/37573e33-3175-4605-9082-f0fc04d436be).
 
 Double-click opens the clicked message immediately and hydrates its cached conversation afterward. Thread headers retain selectable text without an extra down-arrow button. Mail-list refreshes restore selected row identities and preserve scroll unless the user navigates or scrolls meanwhile. Sync-issue drafts have a direct × delete action with per-row progress; deleting another issue does not wait for the previous network deletion.
 
@@ -135,3 +135,25 @@ The pending-action line is anchored to the bottom of the entire conversation hea
 | Window action settings (light) | [Screenshot](screenshots/preview-action-settings-light.png) |
 | Window action settings (dark) | [Screenshot](screenshots/preview-action-settings-dark.png) |
 | Thread header pending action | [Screenshot](screenshots/thread-action-bottom-light.png) |
+
+
+### Advanced search and smart badges
+
+The unfocused global search input renders structured filters as green badges when valid and red badges for invalid syntax or unresolved account/mail-folder references. For example, `type:Mails` is invalid while `type:mail` is valid. Focusing the input restores the exact query text. Settings now places Close to the left of its title.
+
+Advanced filter automatically generates the query from grouped controls. Types, accounts/shared mailboxes, included/excluded folders, states and categories support multiple choices. Date conditions use date/time pickers and comparison operators; Attachments offers Yes, No and Not set. Mail-specific controls are hidden and omitted from the query when Mail is not among the selected types. Hidden values remain available if Mail is selected again. The editable source is the main search box; the form's generated-query preview is read-only.
+
+Repeat `type:`, `account:`, `in:` or `category:` for alternatives. Repeated `is:` conditions are combined (unread and flagged, for example); read plus unread is rejected. `notin:` excludes a folder and its descendants. The folder browser is filtered by selected accounts, supports multiple checked folders, and retains removable selected-path entries. Picker-qualified `ownerID::path` values avoid matching the same path in another mailbox/account. Unqualified paths match across selected accounts.
+
+With **Drive as the only selected type**, the path browser loads Drive folders on expansion. Drive folder searches include descendants and filter the synced file index before applying the result limit; the results panel explicitly identifies this cached scope. This does not add a new Drive provider. Other mail-only filters affect the Mail portion of multi-type searches.
+
+| Search UI | Preview |
+| --- | --- |
+| Smart filters (light / dark) | [Light](screenshots/search-badges-light.png) · [Dark](screenshots/search-badges-dark.png) |
+| Advanced filter | [Light](screenshots/search-options-light.png) · [Dark](screenshots/search-options-dark.png) |
+| Multi-select types | [Screenshot](screenshots/search-type-multiselect-light.png) |
+| Date/time conditions | [Light](screenshots/search-date-filters-light.png) · [Dark](screenshots/search-date-filters-dark.png) |
+| Folder exclusions | [Screenshot](screenshots/search-folder-exclusions-dark.png) |
+| Drive folder browser | [Screenshot](screenshots/search-drive-folders-dark.png) |
+
+Native checks exercise badge/text focus transitions, outside-click dismissal, full-width progress, mail-group visibility, form submission, folder browsing and the left Settings close button. All screenshots use fictional offline data.

@@ -10,7 +10,7 @@ using System.Diagnostics;
 
 // A standalone Linux visual-review host. Uses the real views and fictional, offline data.
 // Never starts the production app lifetime, account authentication, or synchronization.
-internal static class Program
+internal static partial class Program
 {
     [STAThread]
     public static void Main(string[] args)
@@ -23,7 +23,7 @@ internal static class Program
         using var stop = new CancellationTokenSource();
         Dispatcher.UIThread.Post(async () =>
         {
-            try { await CaptureAsync(output); }
+            try { if (args.Contains("--search")) await CaptureSearchAsync(output); else await CaptureAsync(output); }
             catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
             finally { stop.Cancel(); }
         });
