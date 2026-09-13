@@ -38,6 +38,19 @@ public sealed partial class MainWindowViewModel
         BusyActions.Any(action => action.Kind is MailActionKind.Move or MailActionKind.UpdateState && ActionMatches(action, message));
     private static bool ActionMatches(MailAction action, MailMessage message) => action.MailboxId == message.MailboxId &&
         (action.ProviderId == message.ProviderId || action.ItemId == message.ProviderId || (action.PreviousProviderIds ?? []).Contains(message.ProviderId));
+    private bool _busyOutcomeInitialized;
+    internal void InitializeBusyOutcome(IReadOnlyList<MailAction> actions)
+    {
+        if (_busyOutcomeInitialized) return;
+        _busyOutcomeInitialized = true;
+        var failed = actions.Where(action => action.Error is not null || action.IsRetryPaused || action.NeedsSendReview).ToArray();
+        if (failed.Length == 0) return;
+        _failedBusyAtPreviousEnd = failed.Select(action => action.Id).ToHashSet();
+        _completedSyncSeverity = failed.Any(action => action.IsRetryPaused || action.NeedsSendReview) ? 2 : 1;
+        _syncSeverity = _completedSyncSeverity;
+        MailActionStateChanged();
+    }
+
     private int _syncSeverity;
     private int _completedSyncSeverity;
     private bool _workspaceWarning;

@@ -10,6 +10,30 @@ public sealed class WorkspaceInteractionTests
 {
     private static MailAccount Account(string id) => new("microsoft365", id, "tenant", id + "@example.test", id, ProviderCapabilities.Contacts | ProviderCapabilities.Calendar);
 
+    [Theory]
+    [InlineData(false, false, 1)]
+    [InlineData(true, false, 2)]
+    [InlineData(false, true, 2)]
+    public void RestoredBusyFailuresRetainAttentionUntilCompletedRecovery(bool paused, bool unconfirmed, int expected)
+    {
+        var vm = new MainWindowViewModel(null, Path.GetTempPath(), _ => { }, _ => { }, null);
+        var action = new MailAction("restored", "account", "mailbox", "message", unconfirmed ? MailActionKind.Send : MailActionKind.Move,
+            "Example", DateTimeOffset.UtcNow, Error: "Offline", FailureCount: paused ? 3 : 1, SendAttempted: unconfirmed);
+        vm.BusyActions.Add(action);
+        vm.InitializeBusyOutcome([action]);
+        Assert.Equal(expected, vm.BusySeverity);
+        vm.BeginSyncOutcome();
+        Assert.Equal(expected, vm.SyncSeverity);
+        vm.RecordSyncOutcome(false);
+        Assert.Equal(2, vm.BusySeverity); // The existing failure survived another run.
+        vm.BusyActions.Clear();
+        Assert.Equal(2, vm.SyncSeverity);
+        vm.RecordSyncOutcome(false);
+        Assert.Equal(0, vm.BusySeverity);
+        vm.InitializeBusyOutcome([action]); // Subsequent refreshes must not restore stale history.
+        Assert.Equal(0, vm.SyncSeverity);
+    }
+
     [Fact]
     public async Task DefaultContactAccountAppliesToNewAndDiscoveredContactsWithoutChangingSavedOwnership()
     {
