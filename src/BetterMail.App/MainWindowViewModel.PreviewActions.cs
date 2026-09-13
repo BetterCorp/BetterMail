@@ -2,6 +2,21 @@ namespace BetterMail.App;
 
 public sealed partial class MainWindowViewModel
 {
+    private bool _defaultReplyAll = true;
+    public bool DefaultReplyAll
+    {
+        get => _defaultReplyAll;
+        set
+        {
+            if (!SetProperty(ref _defaultReplyAll, value)) return;
+            RaisePropertyChanged(nameof(DefaultReplyLabel));
+            RaisePropertyChanged(nameof(DefaultReplyCommand));
+            ConversationThread.DefaultReplyAll = value;
+        }
+    }
+    public string DefaultReplyLabel => DefaultReplyAll ? "Reply all" : "Reply";
+    public System.Windows.Input.ICommand DefaultReplyCommand => DefaultReplyAll ? ReplyAllCommand : ReplyCommand;
+
     private IReadOnlyList<PreviewActionSetting>? _previewActionSettings;
     public IReadOnlyList<PreviewActionSetting> PreviewActionSettings => _previewActionSettings ??=
         new (ConversationAction Action, string Label)[]

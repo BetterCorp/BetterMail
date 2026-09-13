@@ -31,7 +31,7 @@
   </Window.Styles>
   <Window.KeyBindings>
     <KeyBinding Gesture="Ctrl+N" Command="{Binding ComposeCommand}" />
-    <KeyBinding Gesture="Ctrl+R" Command="{Binding ReplyCommand}" />
+    <KeyBinding Gesture="Ctrl+R" Command="{Binding DefaultReplyCommand}" />
     <KeyBinding Gesture="Ctrl+Shift+R" Command="{Binding ReplyAllCommand}" />
     <KeyBinding Gesture="Ctrl+F" Command="{Binding ForwardCommand}" />
     <KeyBinding Gesture="Ctrl+E" Command="{Binding FocusSearchCommand}" />
@@ -269,15 +269,14 @@
             IsVisible="{Binding ShowMailSurface}"
             Padding="0">
       <Grid ColumnDefinitions="*,Auto">
-        <Grid Grid.Column="0" Margin="8,6" ColumnDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="3" IsVisible="{Binding !IsMailActionRunning}">
+        <Grid Grid.Column="0" ClipToBounds="True" Margin="8,6" ColumnDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="3" IsVisible="{Binding !IsMailActionRunning}">
           <StackPanel Orientation="Horizontal" Spacing="3">
             <Button x:Name="FolderToggle" Classes="command" Content="☰ Folders" Click="FolderToggleClicked" IsVisible="False" AutomationProperties.Name="Show folders" />
             <Button Classes="primary" Content="＋ New mail" Command="{Binding ComposeCommand}" AutomationProperties.Name="New mail" />
           </StackPanel>
           <Border Grid.Column="1" Width="1" Height="24" Background="{DynamicResource BetterMailDividerBrush}" Margin="6,3" />
           <StackPanel x:Name="InlineMailActions" Grid.Column="2" Orientation="Horizontal" Spacing="3">
-            <Button Classes="command" Content="Reply all" Command="{Binding ReplyAllCommand}" AutomationProperties.Name="Reply all to selected message" />
-            <Button Classes="command" Content="↩ Reply" Command="{Binding ReplyCommand}" AutomationProperties.Name="Reply to selected message" />
+            <Button Classes="command" Content="{Binding DefaultReplyLabel}" Command="{Binding DefaultReplyCommand}" AutomationProperties.Name="{Binding DefaultReplyLabel}" />
             <Button Classes="command" Content="↪ Forward" Command="{Binding ForwardCommand}" AutomationProperties.Name="Forward selected message" />
             <Button Classes="command" Content="Archive" Command="{Binding ArchiveCommand}" AutomationProperties.Name="Archive selected message" AutomationProperties.HelpText="Keyboard shortcut Backspace" />
             <Button Classes="command" Content="Delete" Command="{Binding DeleteCommand}" AutomationProperties.Name="Delete selected message" />
@@ -326,6 +325,7 @@
                 CornerRadius="0"
                 HorizontalContentAlignment="Stretch"
                 IsVisible="{Binding HasNextCalendarEvent}"
+                Background="{DynamicResource BetterMailSurfaceBrush}" ClipToBounds="True"
                 x:Name="AgendaButton" Click="DayAgendaClicked"
                 AutomationProperties.Name="{Binding NextCalendarEventSubject, StringFormat='Open next event: {0}'}">
           <Button.Flyout>
@@ -919,14 +919,23 @@
       <Grid RowDefinitions="Auto,*">
         <Border Padding="22,12" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1"
                 IsVisible="{Binding IsGenericWorkspaceModule}">
-          <Grid x:Name="ModuleHeader" ColumnDefinitions="*,320,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="10" RowSpacing="8">
+          <Grid x:Name="ModuleHeader" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="10" RowSpacing="8">
             <TextBlock Text="{Binding ActiveModule}" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center" />
-            <Button x:Name="ModuleRefresh" Grid.Column="1"
-                    Classes="command"
-                    Content="Refresh"
-                    Command="{Binding RefreshWorkspaceCommand}"
-                    IsVisible="{Binding ShowWorkspaceRefresh}"
-                    AutomationProperties.Name="Refresh current module" />
+            <Grid Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="16">
+              <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsPeopleRefreshing}"
+                           Grid.ColumnSpan="2" Height="2" VerticalAlignment="Bottom"
+                           IsHitTestVisible="False" AutomationProperties.Name="Refreshing contacts" />
+              <StackPanel Orientation="Horizontal" Spacing="10">
+              <Button Classes="primary" Content="New contact" Command="{Binding NewContactCommand}" HorizontalAlignment="Left" AutomationProperties.Name="Create a contact" />
+                <Button Classes="command" IsVisible="{Binding HasPeopleFilter}" Command="{Binding ClearPeopleFilterCommand}"
+                        Content="{Binding ModuleSearchText, StringFormat='Clear filter: {0} ×'}" AutomationProperties.Name="Clear People filter" />
+              </StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                <RadioButton Content="Table" GroupName="PeopleView" IsChecked="{Binding PeopleTableView, Mode=OneWay}" Click="PeopleTableClicked" />
+                <RadioButton Content="Cards" GroupName="PeopleView" IsChecked="{Binding PeopleCardView}" />
+              </StackPanel>
+            </Grid>
+
           </Grid>
         </Border>
 
@@ -955,20 +964,11 @@
                        IsVisible="{Binding IsWorkspaceLoading}" />
 
           <Grid IsVisible="{Binding IsContactsModule}" RowDefinitions="Auto,Auto,*" Margin="18,10">
-            <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
-              <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsPeopleRefreshing}"
-                           Grid.ColumnSpan="2" Height="2" VerticalAlignment="Bottom"
-                           IsHitTestVisible="False" AutomationProperties.Name="Refreshing contacts" />
-              <StackPanel Orientation="Horizontal" Spacing="10">
-              <Button Classes="primary" Content="New contact" Command="{Binding NewContactCommand}" HorizontalAlignment="Left" AutomationProperties.Name="Create a contact" />
-                <Button Classes="command" IsVisible="{Binding HasPeopleFilter}" Command="{Binding ClearPeopleFilterCommand}"
-                        Content="{Binding ModuleSearchText, StringFormat='Clear filter: {0} ×'}" AutomationProperties.Name="Clear People filter" />
-              </StackPanel>
-              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                <RadioButton Content="Table" GroupName="PeopleView" IsChecked="{Binding PeopleTableView, Mode=OneWay}" Click="PeopleTableClicked" />
-                <RadioButton Content="Cards" GroupName="PeopleView" IsChecked="{Binding PeopleCardView}" />
-              </StackPanel>
+            <Grid IsVisible="{Binding PeopleTableView}" ColumnDefinitions="28,*,Auto" ColumnSpacing="8" Margin="8,0,8,8">
+              <Grid Grid.Column="1" ColumnDefinitions="*,*,*" ColumnSpacing="12"><TextBlock Text="Name" FontWeight="SemiBold" /><TextBlock Grid.Column="1" Text="Email" FontWeight="SemiBold" /><TextBlock Grid.Column="2" Text="Company / role" FontWeight="SemiBold" /></Grid>
+              <TextBlock Grid.Column="2" Text="Actions" Width="160" />
             </Grid>
+
             <Border Background="#18D9493D"
                     BorderBrush="#55D9493D"
                     BorderThickness="1"
@@ -1000,7 +1000,7 @@
                           BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1">
                     <Grid ColumnDefinitions="28,*,Auto" ColumnSpacing="8" MinHeight="38">
                       <app:AsyncImage Width="26" Height="26" Request="{Binding Avatar}" AllowLoading="{ReflectionBinding $parent[Window].DataContext.ContactImagesEnabled}" VerticalAlignment="Center" />
-                      <Grid Grid.Column="1" ColumnDefinitions="*,*" ColumnSpacing="12" VerticalAlignment="Center"
+                      <Grid Grid.Column="1" ColumnDefinitions="*,*,*" ColumnSpacing="12" VerticalAlignment="Center"
                             ToolTip.Tip="{Binding ProvenanceText}">
                         <Grid ColumnDefinitions="*,Auto">
                           <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
@@ -1009,8 +1009,9 @@
                           </Border>
                         </Grid>
                         <TextBlock Grid.Column="1" Text="{Binding EmailText}" Foreground="{DynamicResource BetterMailMutedBrush}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Grid.Column="2" Text="{Binding WorkText}" Foreground="{DynamicResource BetterMailMutedBrush}" TextTrimming="CharacterEllipsis" />
                       </Grid>
-                      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                      <StackPanel Grid.Column="2" Width="160" HorizontalAlignment="Right" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                         <Button Classes="command" Content="New mail" Click="ComposeContactClicked" AutomationProperties.Name="Start a mail to contact" />
                         <Button Classes="command" Content="{Binding DetailsActionText}" Click="EditPersonClicked" AutomationProperties.Name="Contact details" />
                       </StackPanel>
@@ -1048,23 +1049,24 @@
                 <DataTemplate x:DataType="app:PersonEntry" x:CompileBindings="True">
                   <Border Classes="personCard" Padding="16" Margin="0,0,10,10" CornerRadius="6" MinHeight="100"
                           BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="1">
-                    <Grid ColumnDefinitions="40,*,Auto" ColumnSpacing="8" MinHeight="38">
-                      <app:AsyncImage Width="36" Height="36" Request="{Binding Avatar}" AllowLoading="{ReflectionBinding $parent[Window].DataContext.ContactImagesEnabled}" VerticalAlignment="Center" />
-                      <Grid Grid.Column="1" RowDefinitions="Auto,Auto" RowSpacing="8" VerticalAlignment="Center"
-                            ToolTip.Tip="{Binding ProvenanceText}">
-                        <Grid ColumnDefinitions="*,Auto">
-                          <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                          <Border Grid.Column="1" IsVisible="{Binding IsDiscovered}" Background="{DynamicResource BetterMailSelectionBrush}" CornerRadius="8" Padding="6,2" Margin="6,0,0,0">
-                            <TextBlock Text="Discovered" FontSize="10" Foreground="{DynamicResource BetterMailMutedBrush}" />
+                    <StackPanel Spacing="10" ToolTip.Tip="{Binding ProvenanceText}">
+                      <Grid ColumnDefinitions="*,40" ColumnSpacing="10">
+                        <StackPanel Spacing="5">
+                          <TextBlock Text="{Binding DisplayName}" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                          <Border IsVisible="{Binding IsDiscovered}" HorizontalAlignment="Left" Background="{DynamicResource BetterMailSelectionBrush}" CornerRadius="4" Padding="6,2">
+                            <TextBlock Text="Discovered" FontSize="10" />
                           </Border>
-                        </Grid>
-                        <TextBlock Grid.Row="1" Text="{Binding EmailText}" Foreground="{DynamicResource BetterMailMutedBrush}" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <app:AsyncImage Grid.Column="1" Width="36" Height="36" Request="{Binding Avatar}" AllowLoading="{ReflectionBinding $parent[Window].DataContext.ContactImagesEnabled}" />
                       </Grid>
-                      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                        <Button Classes="command" Content="New mail" Click="ComposeContactClicked" AutomationProperties.Name="Start a mail to contact" />
-                        <Button Classes="command" Content="{Binding DetailsActionText}" Click="EditPersonClicked" AutomationProperties.Name="Contact details" />
-                      </StackPanel>
-                    </Grid>
+                      <TextBlock Text="{Binding WorkText}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource BetterMailMutedBrush}" />
+                      <TextBlock Text="{Binding EmailText}" TextTrimming="CharacterEllipsis" />
+                      <Border Height="1" Background="{DynamicResource BetterMailDividerBrush}" />
+                      <Grid ColumnDefinitions="*,Auto">
+                        <Button Classes="command" Content="New mail" HorizontalAlignment="Left" Click="ComposeContactClicked" AutomationProperties.Name="Start a mail to contact" />
+                        <Button Grid.Column="1" Classes="command" Content="{Binding DetailsActionText}" Click="EditPersonClicked" AutomationProperties.Name="Contact details" />
+                      </Grid>
+                    </StackPanel>
                   </Border>
                 </DataTemplate>
                     </ItemsControl.ItemTemplate>
@@ -1154,7 +1156,7 @@
                       VerticalAlignment="Center"
                       Spacing="6">
             <TextBlock Text="Nothing to show" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" />
-            <TextBlock Text="Try refreshing or changing your search." Opacity="0.62" />
+            <TextBlock Text="Contacts appear automatically as accounts sync. Try changing your search or add a contact." Opacity="0.62" />
           </StackPanel>
         </Grid>
       </Grid>

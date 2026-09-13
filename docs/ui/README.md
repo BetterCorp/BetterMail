@@ -157,3 +157,26 @@ With **Drive as the only selected type**, the path browser loads Drive folders o
 | Drive folder browser | [Screenshot](screenshots/search-drive-folders-dark.png) |
 
 Native checks exercise badge/text focus transitions, outside-click dismissal, full-width progress, mail-group visibility, form submission, folder browsing and the left Settings close button. All screenshots use fictional offline data.
+
+
+### Workspace follow-up (PR #20)
+
+People opens cached contacts immediately and starts background loading, including when the mailbox tree is not populated yet. New contact and Table/Cards live in one toolbar, with no Refresh action. The table uses aligned Name, Email, Company / role and Actions columns; cards separate identity, contact details and actions.
+
+To Do uses the same account/folder styles as mail and calendar. Double-click or Enter opens the selected task. The due-date picker binds to a local `DateTime` adapter while provider dates remain `DateTimeOffset`; editing a saved due date no longer produces a cast error. Due date and time have separate labels. Refresh is handled by synchronization rather than a toolbar button.
+
+Notes expansion preserves tree containers and handles the native expand event. Errors use a short per-node summary with full details in a flyout; cached notes remain available. Microsoft's OneNote library limit (10008) still applies; this change does not bypass it. See [Microsoft's error documentation](https://learn.microsoft.com/en-us/graph/onenote-error-codes).
+
+Settings → Mail & notifications now defaults the primary reply action to Reply all; turning the setting off chooses Reply to sender. Explicit choices remain in the menu, and open previews follow preference changes. Signature editing and template previews open in independent windows, keeping native browser surfaces out of the scrolling settings page. The next-event header is opaque and mail actions collapse into More earlier on narrow windows.
+
+Mobbin references reviewed: [Qatalog cards](https://mobbin.com/screens/e22383a1-0ec8-44c0-92a6-43a4a756dd7c), [Pipedrive contacts table](https://mobbin.com/screens/2eb73474-8d4d-431f-9a7c-3d5e8c6d5921), [Asana task details](https://mobbin.com/screens/e7810f1e-ed82-419f-9041-bae74f62d627).
+
+Run `dotnet run --project tools/BetterMail.UiPreview -c Release -- /tmp/bettermail-workspaces --workspaces` under Xvfb to verify first-load contacts, task double-click/date binding, Notes expansion and signature surface separation. Screenshots use fictional offline data only.
+
+![Contact cards](screenshots/people-cards-light.png)
+![Contact table](screenshots/people-table-dark.png)
+![Task editor](screenshots/task-editor-dark.png)
+![Narrow mail header](screenshots/mail-header-narrow-dark.png)
+![Notes status](screenshots/notes-limit-dark.png)
+![Signature settings](screenshots/signature-settings-dark.png)
+![Default reply](screenshots/default-reply-settings-dark.png)

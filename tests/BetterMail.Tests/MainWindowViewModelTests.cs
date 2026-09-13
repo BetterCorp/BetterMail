@@ -473,8 +473,8 @@ public sealed class MainWindowViewModelTests
         Assert.Equal((ResponsiveLayoutMode)expected, MainWindow.LayoutModeFor(width));
 
     [Theory]
-    [InlineData(839, false)]
-    [InlineData(840, true)]
+    [InlineData(999, false)]
+    [InlineData(1000, true)]
     public void KeepsInlineMailActionsOnlyWhenTheyFit(double width, bool expected) =>
         Assert.Equal(expected, MainWindow.UsesInlineMailActions(width));
 

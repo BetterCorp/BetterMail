@@ -94,7 +94,8 @@ public sealed class TasksWorkspaceViewModelTests
         await viewModel.OpenNewTaskAsync();
         viewModel.EditorTitle = " File report ";
         viewModel.EditorHasDueDate = true;
-        viewModel.EditorDueDate = new DateTimeOffset(2026, 7, 20, 0, 0, 0, TimeSpan.Zero);
+        viewModel.EditorCalendarDate = new DateTime(2026, 7, 20);
+        Assert.Equal(new DateTime(2026, 7, 20), viewModel.EditorCalendarDate);
         viewModel.EditorDueTime = new TimeSpan(14, 30, 0);
         await viewModel.SaveEditorAsync();
 
@@ -105,6 +106,7 @@ public sealed class TasksWorkspaceViewModelTests
         Assert.Equal(AccountA.AccountId, created.Info.AccountId);
 
         await viewModel.OpenEditTaskAsync(created);
+        Assert.Equal(created.Info.DueAt!.Value.LocalDateTime.Date, viewModel.EditorCalendarDate);
         viewModel.EditorTitle = "Updated report";
         viewModel.EditorHasDueDate = false;
         await viewModel.SaveEditorAsync();

@@ -6,6 +6,19 @@ namespace BetterMail.Tests;
 public sealed class PreviewActionTests
 {
     [Fact]
+    public void DefaultReplyIsAllAndCanBeSetToSender()
+    {
+        var vm = new MainWindowViewModel(null, Path.GetTempPath(), _ => { }, _ => { }, null);
+        Assert.True(new AppPreferences().DefaultReplyAll);
+        Assert.Same(vm.ReplyAllCommand, vm.DefaultReplyCommand);
+        Assert.Same(vm.ConversationThread.ReplyAllCommand, vm.ConversationThread.DefaultReplyCommand);
+        vm.DefaultReplyAll = false;
+        Assert.Same(vm.ReplyCommand, vm.DefaultReplyCommand);
+        Assert.Same(vm.ConversationThread.ReplyCommand, vm.ConversationThread.DefaultReplyCommand);
+        Assert.Equal("Reply", vm.DefaultReplyLabel);
+    }
+
+    [Fact]
     public void WindowActionPreferencesPersistIndependentlyAndDefaultToStayOpen()
     {
         var directory = Path.Combine(Path.GetTempPath(), "bettermail-preview-settings-" + Guid.NewGuid());

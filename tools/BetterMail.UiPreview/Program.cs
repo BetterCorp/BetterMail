@@ -23,7 +23,7 @@ internal static partial class Program
         using var stop = new CancellationTokenSource();
         Dispatcher.UIThread.Post(async () =>
         {
-            try { if (args.Contains("--search")) await CaptureSearchAsync(output); else await CaptureAsync(output); }
+            try { if (args.Contains("--workspaces")) await CaptureWorkspaceFixesAsync(output); else if (args.Contains("--search")) await CaptureSearchAsync(output); else await CaptureAsync(output); }
             catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
             finally { stop.Cancel(); }
         });

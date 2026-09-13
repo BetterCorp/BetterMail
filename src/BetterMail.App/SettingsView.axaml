@@ -143,6 +143,11 @@
       <ScrollViewer IsVisible="{Binding ShowMailSettings}">
         <StackPanel MaxWidth="920" HorizontalAlignment="Stretch" Spacing="18">
           <TextBlock Text="Mail &amp; notifications" FontSize="22" FontWeight="SemiBold" />
+          <Border Classes="settingsCard"><StackPanel Spacing="8">
+            <TextBlock Text="Default reply" FontSize="18" FontWeight="SemiBold" />
+            <ToggleSwitch Content="Reply all by default" IsChecked="{Binding DefaultReplyAll}" />
+            <TextBlock Text="Turn off to reply only to the sender. Both options remain available in the mail menu." TextWrapping="Wrap" Opacity="0.65" />
+          </StackPanel></Border>
           <Border Classes="settingsCard">
             <StackPanel Spacing="9">
               <TextBlock Text="Notifications" FontSize="18" FontWeight="SemiBold" />
@@ -323,9 +328,7 @@
                             BorderBrush="{DynamicResource BetterMailDividerBrush}"
                             BorderThickness="1"
                             Background="White">
-                      <NativeWebView Source="{Binding SelectedSignatureTemplatePreviewUri}"
-                                     NavigationStarted="SignaturePreviewNavigationStarted"
-                                     AutomationProperties.Name="Selected signature template preview" />
+                      <Button Content="Preview template" Click="PreviewSignatureClicked" HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="10">
                       <TextBlock Text="{Binding SelectedSignatureTemplate.Description}"
@@ -373,9 +376,8 @@
                   <TextBlock Grid.Column="1" Text="Read only" VerticalAlignment="Center" Opacity="0.62"
                              IsVisible="{Binding !CanEditSelectedSignature}" />
                 </Grid>
-                <app:RichHtmlEditor x:Name="SignatureHtmlEditor" Height="330" ClipToBounds="True" Html="{Binding SignatureEditorHtml, Mode=TwoWay}"
-                                    IsReadOnly="{Binding !CanEditSelectedSignature}"
-                                    Placeholder="Create your signature…" />
+                <Button Classes="command" Content="Open signature editor" Click="EditSignatureClicked" HorizontalAlignment="Left" />
+                <TextBlock Text="Edit and preview in a separate window. Save changes here when you are ready." TextWrapping="Wrap" Opacity="0.65" />
                 <TextBlock Text="{Binding SignatureEditorError}" Foreground="#D9493D" TextWrapping="Wrap"
                            IsVisible="{Binding HasSignatureEditorError}" />
                 <WrapPanel Orientation="Horizontal">

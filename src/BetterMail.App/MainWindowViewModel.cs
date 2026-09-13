@@ -3598,7 +3598,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private int _peopleCardColumns = 3;
     internal void SetPeopleViewportWidth(double width)
     {
-        var columns = Math.Clamp((int)(Math.Max(0, width) / 380), 1, 4);
+        var columns = Math.Clamp((int)(Math.Max(0, width) / 290), 1, 4);
         if (_peopleCardColumns == columns) return;
         _peopleCardColumns = columns;
         if (PeopleCardView) RebuildPeopleCardRows();
@@ -3613,9 +3613,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private async Task OpenPeopleAsync()
     {
-        if (_loadedPeopleQuery != ModuleSearchText || People.Count == 0)
-            await LoadPeopleCoreAsync(ModuleSearchText, cacheOnly: true);
-        PeopleBackgroundRefresh = RefreshPeopleInBackgroundAsync();
+        _peopleRefreshCount++;
+        RaisePeopleProgress();
+        try
+        {
+            RebuildContactOwners();
+            if (_loadedPeopleQuery != ModuleSearchText || People.Count == 0)
+                await LoadPeopleCoreAsync(ModuleSearchText, cacheOnly: true);
+            PeopleBackgroundRefresh = RefreshPeopleInBackgroundAsync();
+        }
+        finally { _peopleRefreshCount--; RaisePeopleProgress(); }
     }
 
     private int _peopleRefreshCount;
@@ -4758,7 +4765,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         _recipientDirectoryTask = null;
         var selectedMailboxId = SelectedContactOwner?.Mailbox.Id;
         Replace(ContactOwners,
-            from mailbox in Mailboxes
+            from mailbox in Mailboxes.Concat(Accounts
+                .Where(account => !Mailboxes.Any(mailbox => mailbox.AccountId == account.AccountId && !mailbox.IsShared))
+                .Select(account => new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName)))
             join account in Accounts on mailbox.AccountId equals account.AccountId
             where account.Capabilities.HasFlag(ProviderCapabilities.Contacts) &&
                   (mailbox.IsShared || mailbox.Address.Equals(account.EmailAddress, StringComparison.OrdinalIgnoreCase))

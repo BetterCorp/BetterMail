@@ -135,7 +135,16 @@ public sealed class TasksWorkspaceViewModel : ViewModelBase
     public string EditorHeading => IsEditing ? "Edit task" : "New task";
     public string EditorTitle { get => _editorTitle; set => SetProperty(ref _editorTitle, value); }
     public bool EditorHasDueDate { get => _editorHasDueDate; set => SetProperty(ref _editorHasDueDate, value); }
-    public DateTimeOffset? EditorDueDate { get => _editorDueDate; set => SetProperty(ref _editorDueDate, value); }
+    public DateTimeOffset? EditorDueDate
+    {
+        get => _editorDueDate;
+        set { if (SetProperty(ref _editorDueDate, value)) RaisePropertyChanged(nameof(EditorCalendarDate)); }
+    }
+    public DateTime? EditorCalendarDate
+    {
+        get => EditorDueDate?.LocalDateTime.Date;
+        set => EditorDueDate = value is { } date ? new DateTimeOffset(DateTime.SpecifyKind(date.Date, DateTimeKind.Local)) : null;
+    }
     public TimeSpan? EditorDueTime { get => _editorDueTime; set => SetProperty(ref _editorDueTime, value); }
     public string? EditorError
     {

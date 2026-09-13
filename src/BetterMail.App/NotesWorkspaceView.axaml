@@ -44,10 +44,9 @@
                 BorderBrush="#55D9493D"
                 BorderThickness="1"
                 IsVisible="{Binding HasPartialErrors}">
-          <TextBlock Text="{Binding PartialErrorText}"
-                     Foreground="#B3261E"
-                     TextWrapping="Wrap"
-                     AutomationProperties.LiveSetting="Polite" />
+          <Button Classes="command" Content="Notes sync issues · details" HorizontalContentAlignment="Left">
+            <Button.Flyout><Flyout><ScrollViewer MaxHeight="360" MaxWidth="420"><TextBlock Text="{Binding PartialErrorText}" TextWrapping="Wrap" /></ScrollViewer></Flyout></Button.Flyout>
+          </Button>
         </Border>
         <TreeView x:Name="NotesTree" Grid.Row="1"
                   ItemsSource="{Binding VisibleRoots}"
@@ -77,7 +76,7 @@
                              TextTrimming="CharacterEllipsis" />
                 </StackPanel>
                 <TextBlock Grid.Row="1" Grid.Column="1"
-                           Text="{Binding Error}"
+                           Text="{Binding ErrorSummary}" ToolTip.Tip="{Binding Error}"
                            Foreground="#B3261E"
                            FontSize="11"
                            TextWrapping="Wrap"

@@ -19,10 +19,13 @@ def key(name, down):
     t.XTestFakeKeyEvent(d, x.XKeysymToKeycode(d, x.XStringToKeysym(name.encode())), down, 0)
 modifier = sys.argv[1]
 if modifier != 'none': key(modifier, 1)
-if sys.argv[2] == 'click':
+if sys.argv[2] in ('click', 'doubleclick'):
     t.XTestFakeMotionEvent(d, -1, int(sys.argv[3]), int(sys.argv[4]), 0)
     t.XTestFakeButtonEvent(d, 1, 1, 0)
     t.XTestFakeButtonEvent(d, 1, 0, 0)
+    if sys.argv[2] == 'doubleclick':
+        t.XTestFakeButtonEvent(d, 1, 1, 70)
+        t.XTestFakeButtonEvent(d, 1, 0, 0)
 elif sys.argv[2] == 'move':
     t.XTestFakeMotionEvent(d, -1, int(sys.argv[3]), int(sys.argv[4]), 0)
 elif sys.argv[2] == 'drag':

@@ -27,6 +27,14 @@ public sealed record ConversationActionRequest(
 
 public sealed class ConversationThreadViewModel : ViewModelBase
 {
+    private bool _defaultReplyAll = true;
+    public bool DefaultReplyAll
+    {
+        get => _defaultReplyAll;
+        set { if (SetProperty(ref _defaultReplyAll, value)) { RaisePropertyChanged(nameof(DefaultReplyLabel)); RaisePropertyChanged(nameof(DefaultReplyCommand)); } }
+    }
+    public string DefaultReplyLabel => DefaultReplyAll ? "Reply all" : "Reply";
+    public ICommand DefaultReplyCommand => DefaultReplyAll ? ReplyAllCommand : ReplyCommand;
     private readonly MailContentRenderer _renderer;
     private readonly Func<ConversationActionRequest, Task>? _action;
     private readonly Action<MailMessage>? _selectionChanged;

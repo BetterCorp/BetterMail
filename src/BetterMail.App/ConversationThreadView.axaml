@@ -43,8 +43,7 @@
       <Grid>
         <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
           <StackPanel Orientation="Horizontal" Spacing="4">
-            <Button Classes="command" Content="Reply all" Command="{Binding ReplyAllCommand}" />
-            <Button Classes="command" Content="Reply" Command="{Binding ReplyCommand}" />
+            <Button Classes="command" Content="{Binding DefaultReplyLabel}" Command="{Binding DefaultReplyCommand}" />
             <Button Classes="command" Content="Forward" Command="{Binding ForwardCommand}" />
             <Button Classes="command" Content="Archive" Command="{Binding ArchiveCommand}" />
             <Button Classes="command" Content="Delete" Command="{Binding DeleteCommand}" />
@@ -53,6 +52,8 @@
               <Button.Flyout>
                 <Flyout>
                   <StackPanel MinWidth="190">
+                    <Button Classes="command" Content="Reply to sender" Command="{Binding ReplyCommand}" />
+                    <Button Classes="command" Content="Reply all" Command="{Binding ReplyAllCommand}" />
                     <Button Classes="command" Content="Junk" HorizontalContentAlignment="Left" Command="{Binding JunkCommand}" />
                     <Button Classes="command" Content="Not junk" HorizontalContentAlignment="Left" Command="{Binding NotJunkCommand}" />
                     <Button Classes="command" Content="{Binding ToggleFlagText}" HorizontalContentAlignment="Left" Command="{Binding ToggleFlagCommand}" />

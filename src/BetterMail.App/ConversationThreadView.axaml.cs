@@ -250,7 +250,7 @@ public sealed partial class ConversationThreadView : UserControl
         var command = args.Key switch
         {
             Key.R when args.KeyModifiers.HasFlag(KeyModifiers.Shift) => viewModel.ReplyAllCommand,
-            Key.R => viewModel.ReplyCommand,
+            Key.R => viewModel.DefaultReplyCommand,
             Key.F => viewModel.ForwardCommand,
             _ => null
         };

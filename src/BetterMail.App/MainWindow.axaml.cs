@@ -88,7 +88,7 @@ public sealed partial class MainWindow : Window
         _ => ResponsiveLayoutMode.Wide
     };
 
-    internal static bool UsesInlineMailActions(double width) => width >= 840;
+    internal static bool UsesInlineMailActions(double width) => width >= 1000;
 
     internal static ShellKeyAction ShellActionFor(
         Key key,
@@ -192,8 +192,6 @@ public sealed partial class MainWindow : Window
         ReadingSplitter.IsVisible = showMail && !phone;
 
         SetColumns(ModuleHeader, phone ? 1 : 1, GridLength.Auto);
-        Grid.SetRow(ModuleRefresh, 0);
-        Grid.SetColumn(ModuleRefresh, 1);
 
 
         UpdateMailPanes();
@@ -833,6 +831,12 @@ public sealed partial class MainWindow : Window
                         viewModel.FilesProvider, viewModel.Accounts.ToArray()));
                 }
             });
+        previewViewModel.DefaultReplyAll = viewModel.DefaultReplyAll;
+        void ReplyPreferenceChanged(object? _, PropertyChangedEventArgs change)
+        {
+            if (change.PropertyName == nameof(MainWindowViewModel.DefaultReplyAll)) previewViewModel.DefaultReplyAll = viewModel.DefaultReplyAll;
+        }
+        viewModel.PropertyChanged += ReplyPreferenceChanged;
         previewViewModel.Reconcile(preview.Messages, preview.Selected);
         previewViewModel.ReconcileDrafts(preview.Drafts);
         window = new Window
@@ -856,7 +860,7 @@ public sealed partial class MainWindow : Window
                 SaveWindowSessions();
             }
         };
-        window.Closed += (_, _) => _previewWindows.Remove(session);
+        window.Closed += (_, _) => { viewModel.PropertyChanged -= ReplyPreferenceChanged; _previewWindows.Remove(session); };
         IndependentWindow.Show(window);
         SaveWindowSessions();
     }
