@@ -89,6 +89,16 @@ internal static class Program
         await Shot("mailbox-order-light", settingsWindow);
         Application.Current!.RequestedThemeVariant = ThemeVariant.Dark;
         await Shot("mailbox-order-dark", settingsWindow);
+        vm.SelectedSettingsTab = vm.SettingsTabs.Single(tab => tab.Name == "Mail & notifications");
+        vm.ConfigurePreviewActions(["Delete", "Archive", "Move", "Reply", "ReplyAll", "Forward"]);
+        await Task.Delay(200);
+        var previewSettings = settingsWindow.GetVisualDescendants().OfType<TextBlock>().First(block => block.Text == "Separate mail windows");
+        var settingsScroll = previewSettings.GetVisualAncestors().OfType<ScrollViewer>().First();
+        var settingsPosition = previewSettings.TranslatePoint(new Point(), settingsScroll)!.Value;
+        settingsScroll.Offset = new Vector(0, settingsScroll.Offset.Y + settingsPosition.Y - 12);
+        await Shot("preview-action-settings-dark", settingsWindow);
+        Application.Current!.RequestedThemeVariant = ThemeVariant.Light;
+        await Shot("preview-action-settings-light", settingsWindow);
         settingsWindow.Close();
         vm.Mailboxes.Remove(studioMailbox);
         vm.Mailboxes.Remove(supportMailbox);
@@ -185,7 +195,18 @@ internal static class Program
         if (!openedPreview.IsVisible || openedPreview.Title != previewMessages[3].Subject)
             throw new InvalidOperationException("Preview did not immediately open the clicked mail.");
         await opening;
-        openedPreview.Close();
+        var separateThread = (ConversationThreadViewModel)((ConversationThreadView)openedPreview.Content!).DataContext!;
+        vm.ConfigurePreviewActions([]);
+        await ((AsyncCommand)separateThread.ReplyCommand).ExecuteAsync();
+        if (!openedPreview.IsVisible) throw new InvalidOperationException("Stay open closed the preview.");
+        var composeWindows = (System.Collections.IDictionary)typeof(MainWindow).GetField("_composeWindows", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+        foreach (var compose in composeWindows.Values.Cast<Window>().ToArray()) compose.Close();
+        vm.ConfigurePreviewActions(["Reply"]);
+        await ((AsyncCommand)separateThread.ReplyCommand).ExecuteAsync();
+        if (openedPreview.IsVisible || composeWindows.Count == 0)
+            throw new InvalidOperationException("Close after reply did not leave the composer open and close the preview.");
+        foreach (var compose in composeWindows.Values.Cast<Window>().ToArray()) compose.Close();
+        Console.WriteLine("Separate preview honors Stay open and Close after reply, while composer remains available.");
         window.Activate();
         Console.WriteLine("Preview opens the clicked mail immediately, even without a cached thread.");
 
@@ -252,6 +273,17 @@ internal static class Program
         if (vm.ConversationThread.SelectedMessage != keyboardHeader.DataContext)
             throw new InvalidOperationException("Focused thread header did not activate with Enter.");
         Console.WriteLine("Thread headers remain keyboard accessible without an arrow control.");
+        var busyHeader = (ConversationMessageItem)keyboardHeader.DataContext!;
+        vm.BusyActions.Add(new MailAction("header-loader", account.AccountId, busyHeader.Message.MailboxId, busyHeader.Message.ProviderId,
+            MailActionKind.Move, busyHeader.Message.Subject, DateTimeOffset.Now, busyHeader.Message.ProviderId, "archive", "Archive"));
+        await Task.Delay(200);
+        var headerContainer = (Grid)keyboardHeader.Parent!;
+        var indicator = headerContainer.Children.OfType<ProgressBar>().Single();
+        if (!indicator.IsVisible || Math.Abs(indicator.Bounds.Bottom - headerContainer.Bounds.Height) > 1)
+            throw new InvalidOperationException("Pending action indicator is not at the bottom of the whole thread header.");
+        await Shot("thread-action-bottom-light");
+        vm.BusyActions.Remove(vm.BusyActions.Single(action => action.Id == "header-loader"));
+
         headerImages = threadView.GetVisualDescendants().OfType<AsyncImage>().ToArray();
         vm.MailSenderImagesEnabled = false;
         if (threadView.ShowSenderImages || headerImages.Any(i => i.AllowLoading || i.IsVisible))

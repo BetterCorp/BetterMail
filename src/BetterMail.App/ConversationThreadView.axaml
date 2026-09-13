@@ -153,13 +153,13 @@
                                FontSize="11"
                                Foreground="{DynamicResource BetterMailAccentBrush}"
                                TextWrapping="Wrap" />
-                    <ProgressBar Grid.ColumnSpan="2" Height="2" IsIndeterminate="True" VerticalAlignment="Bottom" IsHitTestVisible="False">
+                  </Grid>
+                </Border>
+                <ProgressBar Height="2" IsIndeterminate="True" VerticalAlignment="Bottom" IsHitTestVisible="False">
                   <ProgressBar.IsVisible><MultiBinding Converter="{StaticResource MailActionFeedback}">
                     <Binding /><ReflectionBinding Path="FeedbackOwner" RelativeSource="{RelativeSource AncestorType={x:Type app:ConversationThreadView}}" /><ReflectionBinding Path="FeedbackOwner.MailActionVersion" RelativeSource="{RelativeSource AncestorType={x:Type app:ConversationThreadView}}" />
                   </MultiBinding></ProgressBar.IsVisible>
                 </ProgressBar>
-              </Grid>
-                </Border>
               </Grid>
             </Border>
           </DataTemplate>

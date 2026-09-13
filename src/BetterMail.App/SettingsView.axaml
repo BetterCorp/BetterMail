@@ -179,6 +179,24 @@
           </Border>
           <Border Classes="settingsCard">
             <StackPanel Spacing="9">
+              <TextBlock Text="Separate mail windows" FontSize="18" FontWeight="SemiBold" />
+              <TextBlock Text="Choose what happens to a separate mail window after each action. Closing does not wait for sync; pending actions remain visible in the main window."
+                         Opacity="0.62" TextWrapping="Wrap" />
+              <ItemsControl ItemsSource="{Binding PreviewActionSettings}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="app:PreviewActionSetting">
+                    <Grid ColumnDefinitions="*,150" ColumnSpacing="12" Margin="0,3">
+                      <TextBlock Text="{Binding Label}" VerticalAlignment="Center" />
+                      <ComboBox Grid.Column="1" ItemsSource="{Binding Behaviors}" SelectedItem="{Binding Behavior}"
+                                HorizontalAlignment="Stretch" AutomationProperties.Name="{Binding Label, StringFormat='Mail window after {0}'}" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+          <Border Classes="settingsCard">
+            <StackPanel Spacing="9">
               <TextBlock Text="Message quick actions" FontSize="18" FontWeight="SemiBold" />
               <TextBlock Text="Choose up to four actions shown at the right of a message when you hover or select it."
                          Opacity="0.62" TextWrapping="Wrap" />

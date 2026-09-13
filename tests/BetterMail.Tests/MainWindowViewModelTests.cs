@@ -175,8 +175,19 @@ public sealed class MainWindowViewModelTests
             var snapshot = vm.MoveSelectionSnapshot();
             var fresh = stale with { FolderId = alreadyInDestination ? "archive" : "other", Subject = "Updated subject", Body = "Updated body", IsFlagged = true, IsRead = false };
             await store.ApplySyncPageAsync("fresh", new([fresh], null, false), token);
-            if (standalone) await vm.HandlePreviewActionAsync(new(ConversationAction.Move, snapshot[0], destination));
-            else await vm.MoveSnapshotToFolderAsync(snapshot, destination);
+            var accepted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var moving = standalone
+                ? vm.HandlePreviewActionAsync(new(ConversationAction.Move, snapshot[0], destination, () => accepted.SetResult()))
+                : vm.MoveSnapshotToFolderAsync(snapshot, destination, () => accepted.SetResult());
+            if (!alreadyInDestination)
+            {
+                await accepted.Task.WaitAsync(token);
+                Assert.False(provider.MoveRelease.Task.IsCompleted);
+                Assert.NotEmpty(await store.GetMailActionsAsync(token));
+                Assert.NotEmpty(vm.BusyActions);
+            }
+            await moving;
+            Assert.Equal(!alreadyInDestination, accepted.Task.IsCompleted);
             var actions = await store.GetMailActionsAsync(token);
             if (alreadyInDestination) Assert.Empty(actions);
             else

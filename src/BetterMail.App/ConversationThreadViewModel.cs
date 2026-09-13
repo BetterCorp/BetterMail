@@ -23,7 +23,7 @@ public enum ConversationAction
 public sealed record ConversationActionRequest(
     ConversationAction Action,
     MailMessage Message,
-    MailFolderItem? Destination = null);
+    MailFolderItem? Destination = null, Action? Accepted = null);
 
 public sealed class ConversationThreadViewModel : ViewModelBase
 {
