@@ -123,11 +123,15 @@ public sealed class MainWindowViewModelTests
             var second = first with { Id = "second", ProviderDraftId = "remote-second" };
             await store.SaveLocalDraftAsync(first, token); await store.SaveLocalDraftAsync(second, token);
             vm.Drafts.Add(first); vm.Drafts.Add(second);
+            // Model a draft snapshot captured before deletion but delivered after both deletions.
+            var staleVersion = (int)typeof(MainWindowViewModel).GetField("_draftRefreshVersion", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(vm)!;
             var deleting = vm.DeleteDraftQuickAsync(first);
             Assert.True(vm.IsDraftDeletionPending(first));
             await deleting.WaitAsync(TimeSpan.FromSeconds(5), token);
             await vm.DeleteDraftQuickAsync(second).WaitAsync(TimeSpan.FromSeconds(5), token);
             Assert.False(provider.DeleteRelease.Task.IsCompleted);
+            var applied = (bool)typeof(MainWindowViewModel).GetMethod("TryApplyDraftSnapshot", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(vm, [staleVersion, new LocalDraft[] { first, second }])!;
+            Assert.False(applied);
             Assert.DoesNotContain(vm.Drafts, draft => draft.Id == first.Id || draft.Id == second.Id);
             Assert.True(await store.IsDraftPendingDeletionAsync(first.Id, token));
             Assert.True(await store.IsDraftPendingDeletionAsync(second.Id, token));
