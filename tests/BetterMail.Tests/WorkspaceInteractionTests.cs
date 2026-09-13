@@ -66,7 +66,7 @@ public sealed class WorkspaceInteractionTests
     }
 
     [Fact]
-    public async Task FailedSyncStepsEscalateTheBadgeUntilASuccessfulRetry()
+    public async Task FailedBackgroundSyncStepsWarnUntilSuccessfulRetry()
     {
         var vm = new MainWindowViewModel(null, Path.GetTempPath(), _ => { }, _ => { }, null);
         var step = new SyncStep("Draft reconciliation");
@@ -78,7 +78,7 @@ public sealed class WorkspaceInteractionTests
             await Assert.ThrowsAsync<InvalidOperationException>(() => (Task)run.Invoke(vm, [step, fail])!);
             Assert.False(step.Running);
             vm.RecordMailSyncOutcome(false);
-            Assert.Equal(attempt, vm.SyncSeverity);
+            Assert.Equal(1, vm.SyncSeverity);
         }
         Func<Task> succeed = () => Task.CompletedTask;
         await (Task)run.Invoke(vm, [step, succeed])!;
@@ -101,14 +101,36 @@ public sealed class WorkspaceInteractionTests
         vm.Drafts.Clear();
         Assert.True(notified);
         Assert.False(vm.HasSyncIssues);
+        vm.BeginSyncOutcome();
+        Assert.Equal(0, vm.SyncSeverity);
         vm.RecordSyncOutcome(true); Assert.Equal(1, vm.SyncSeverity);
-        vm.RecordSyncOutcome(true); Assert.Equal(2, vm.SyncSeverity);
+        vm.BeginSyncOutcome(); Assert.Equal(0, vm.SyncSeverity); // No stuck Busy work.
         vm.RecordSyncOutcome(false); Assert.Equal(0, vm.SyncSeverity);
-        var action = new MailAction("action", "one", "mailbox", "item", MailActionKind.Move, "Subject", DateTimeOffset.Now, FailureCount: 1);
-        vm.BusyActions.Add(action); Assert.Equal(1, vm.BusySeverity);
-        vm.BusyActions[0] = action with { FailureCount = 2 }; Assert.Equal(2, vm.SyncSeverity);
+        var action = new MailAction("action", "one", "mailbox", "item", MailActionKind.Move, "Subject", DateTimeOffset.Now);
+        vm.BusyActions.Add(action);
+        Assert.True(vm.SyncIsInformation);
+        Assert.Equal(0, vm.BusySeverity); // No badge and no warning from pending work alone.
+        vm.BeginSyncOutcome();
+        vm.BusyActions[0] = action with { Error = "Offline", FailureCount = 10 };
+        Assert.Equal(0, vm.BusySeverity); // Navigation changes only at the completed outcome.
+        vm.RecordSyncOutcome(false);
+        Assert.Equal(1, vm.SyncSeverity);
+        Assert.Equal(1, vm.BusySeverity); // Lifetime failure counts do not immediately turn it red.
+        vm.BeginSyncOutcome(); Assert.Equal(1, vm.SyncSeverity);
         vm.RecordSyncOutcome(false); Assert.Equal(2, vm.SyncSeverity);
-        vm.BusyActions.Clear(); Assert.Equal(0, vm.SyncSeverity);
+        vm.BeginSyncOutcome(); Assert.Equal(2, vm.SyncSeverity);
+        vm.BusyActions[0] = action; // Even a newly queued retry cannot clear latched red.
+        vm.RecordSyncOutcome(false); Assert.Equal(2, vm.BusySeverity);
+        vm.BusyActions.Clear(); Assert.Equal(2, vm.SyncSeverity);
+        vm.BeginSyncOutcome(); Assert.Equal(2, vm.SyncSeverity);
+        vm.RecordSyncOutcome(false);
+        Assert.Equal(0, vm.SyncSeverity);
+        Assert.Equal(0, vm.BusySeverity);
+        vm.RecordSyncOutcome(true, workspace: true);
+        vm.RecordSyncOutcome(true, workspace: true);
+        Assert.Equal(1, vm.SyncSeverity); // Workspace errors never accumulate into red.
+        vm.BeginSyncOutcome(); Assert.Equal(0, vm.SyncSeverity);
+
     }
 
     [Fact]
