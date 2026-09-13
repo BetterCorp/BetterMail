@@ -183,3 +183,6 @@ Run `dotnet run --project tools/BetterMail.UiPreview -c Release -- /tmp/betterma
 
 
 Task refresh follow-up: F5 remains available for an explicit refresh. On workspace sync completion, To Do reads the updated local cache and reconciles rows without clearing navigation or changing editor fields. Reopening the module with unchanged accounts also consumes the cache. Regression coverage verifies remote additions, updates and removals while preserving selection and unsaved edits.
+
+
+Reading-pane performance: full-body and thread queries now use a dedicated, persistent encrypted read-only WAL connection, separate from both sync writes and folder navigation. Thread membership is selected through the thread index before message lookup. The regression holds the writer gate, an uncommitted write transaction and the folder-reader gate while checking that the full compressed body renders in the reading pane. It also checks committed-snapshot isolation and cancellation of a superseded read.

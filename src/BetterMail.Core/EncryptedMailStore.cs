@@ -652,7 +652,7 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
         string mailboxId,
         string providerMessageId,
         CancellationToken cancellationToken = default) =>
-        (await QueryMessagesAsync(
+        (await QueryReadingPaneMessagesAsync(
             "WHERE mailbox_id = $mailbox AND provider_id = $provider",
             1,
             true,
@@ -710,10 +710,10 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
     public Task<IReadOnlyList<MailMessage>> GetThreadMessagesAsync(
         string threadId,
         CancellationToken cancellationToken = default) =>
-        QueryMessagesAsync(
+        QueryReadingPaneMessagesAsync(
             """
-            WHERE EXISTS (SELECT 1 FROM message_threads thread WHERE thread.mailbox_id = messages.mailbox_id
-                AND thread.provider_id = messages.provider_id AND thread.thread_id = $thread)
+            WHERE (mailbox_id, provider_id) IN
+                (SELECT mailbox_id, provider_id FROM message_threads WHERE thread_id = $thread)
             AND NOT EXISTS (SELECT 1 FROM mail_folders folder WHERE folder.mailbox_id = messages.mailbox_id
                 AND folder.provider_id = messages.folder_id AND folder.well_known_name IN ('deleteditems', 'junkemail'))
             """,
@@ -1413,6 +1413,7 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
         try
         {
             await DisposeFolderReaderAsync().ConfigureAwait(false);
+            await DisposeMessageReaderAsync().ConfigureAwait(false);
             if (_connection is not null)
             {
                 var connection = _connection;
@@ -1429,11 +1430,18 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
     }
 
     private Task<IReadOnlyList<MailMessage>> QueryMessagesAsync(
-        string where,
-        int limit,
-        bool includeBody,
-        CancellationToken cancellationToken,
-        params (string Name, object Value)[] parameters) => WithLockAsync<IReadOnlyList<MailMessage>>(async connection =>
+        string where, int limit, bool includeBody, CancellationToken cancellationToken,
+        params (string Name, object Value)[] parameters) =>
+        WithLockAsync(connection => QueryMessagesOnConnectionAsync(connection, where, limit, includeBody, cancellationToken, parameters), cancellationToken);
+
+    private Task<IReadOnlyList<MailMessage>> QueryReadingPaneMessagesAsync(
+        string where, int limit, bool includeBody, CancellationToken cancellationToken,
+        params (string Name, object Value)[] parameters) =>
+        WithMessageReadAsync(connection => QueryMessagesOnConnectionAsync(connection, where, limit, includeBody, cancellationToken, parameters), cancellationToken);
+
+    private static async Task<IReadOnlyList<MailMessage>> QueryMessagesOnConnectionAsync(
+        SqliteConnection connection, string where, int limit, bool includeBody, CancellationToken cancellationToken,
+        params (string Name, object Value)[] parameters)
     {
         var messages = new List<MailMessage>();
         await using var command = connection.CreateCommand();
@@ -1458,7 +1466,7 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
         }
 
         return messages;
-    }, cancellationToken);
+    }
 
     private async Task WithLockAsync(Func<SqliteConnection, Task> action, CancellationToken cancellationToken)
     {
