@@ -4110,10 +4110,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 var displayed = Messages.FirstOrDefault(candidate => SameMessage(candidate, message));
                 var actualDestination = Folders.FirstOrDefault(folder => folder.MailboxId == message.MailboxId &&
                     (folder.ProviderId == destinationFolderId || folder.WellKnownName == destinationFolderId))?.ProviderId ?? destinationFolderId;
-                if (displayed?.FolderId == actualDestination ||
-                    ConversationThread.SelectedMessage is { Message: var reading } && SameMessage(reading, message) && reading.FolderId == actualDestination)
+                // A body hydration can already contain the optimistic destination while
+                // the row still belongs to the source list. Only the actual navigation
+                // target determines whether the user has opened the destination folder.
+                if (_selectedFolder?.MailboxId == message.MailboxId && _selectedFolder.ProviderId == actualDestination)
                     continue;
-                if (displayed is not null && displayed.FolderId == message.FolderId)
+                if (displayed is not null && (displayed.FolderId == message.FolderId || displayed.FolderId == actualDestination))
                 {
                     var index = Messages.IndexOf(displayed);
                     var wasCurrent = SameMessage(SelectedMessage, displayed);

@@ -1864,7 +1864,14 @@ public sealed class MainWindowViewModelTests
             await WaitUntilAsync(() => viewModel.IsUnifiedInbox && viewModel.Messages.Count == 2, cancellationToken);
 
             provider.MoveRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            viewModel.DeleteCommand.Execute(null);
+            var deleting = ((AsyncCommand)viewModel.DeleteCommand).ExecuteAsync();
+            // Simulate body hydration observing the optimistic destination during
+            // the row's feedback interval, before it is removed from the source list.
+            await WaitUntilAsync(() => viewModel.BusyActions.Any(action => action.Kind == MailActionKind.Move), cancellationToken);
+            var deletingMessage = viewModel.SelectedMessage!;
+            typeof(MainWindowViewModel).GetMethod("ApplyMessageUpdate", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(viewModel, [deletingMessage, deletingMessage with { FolderId = "deleteditems" }]);
+            await deleting;
             await WaitUntilAsync(() => provider.MoveDestination == "deleteditems", cancellationToken);
             Assert.False(viewModel.IsMailActionRunning);
             Assert.Single(viewModel.Messages);
