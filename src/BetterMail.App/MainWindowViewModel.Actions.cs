@@ -6,6 +6,27 @@ namespace BetterMail.App;
 public sealed partial class MainWindowViewModel
 {
     private readonly Dictionary<string, string> _busyChecks = [];
+    public AsyncCommand<MailAction> RecoverBusyActionCommand { get; }
+
+    private async Task RecoverBusyActionAsync(MailAction action)
+    {
+        if (_store is null || _provider is null) return;
+        _busyChecks[action.Id] = "Verifying message identity…";
+        await RefreshBusyActionsAsync();
+        try
+        {
+            var account = Accounts.Single(account => account.AccountId == action.AccountId);
+            var mailbox = Mailboxes.Single(mailbox => mailbox.Id == action.MailboxId);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            Status = await new MailActionDiagnostics(_store, _provider).RecoverAsync(account, mailbox, action.Id, timeout.Token);
+            _busyChecks[action.Id] = Status;
+            await RefreshBusyActionsAsync();
+            await LoadMessagesAsync();
+            _ = SyncAsync();
+        }
+        catch (Exception error) { _busyChecks[action.Id] = error.Message; await RefreshBusyActionsAsync(); }
+    }
+
     public AsyncCommand<MailAction> RetryBusyActionCommand { get; }
     public AsyncCommand<MailAction> CheckBusyActionCommand { get; }
 
@@ -132,12 +153,20 @@ public sealed partial class MainWindowViewModel
         }
         var blocked = new HashSet<(string Mailbox, string Item)>();
         var batch = await _store.GetMailActionsAsync();
-        foreach (var pending in batch.Where(static action => action.Kind != MailActionKind.Send))
+        var queue = new Queue<MailAction>(batch.Where(static action => action.Kind != MailActionKind.Send));
+        while (queue.TryDequeue(out var pending))
         {
             if (blocked.Contains((pending.MailboxId, pending.ItemId))) continue;
             var account = Accounts.FirstOrDefault(account => account.AccountId == pending.AccountId);
             var mailbox = Mailboxes.FirstOrDefault(mailbox => mailbox.Id == pending.MailboxId && mailbox.AccountId == pending.AccountId);
             if (account is null || mailbox is null) continue;
+            // Also recover legacy paused items once, without requiring a manual Retry.
+            if (pending.CanAutomaticallyRecover)
+            {
+                using var recoveryTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                await new MailActionDiagnostics(_store, _provider).TryAutomaticRecoveryAsync(account, mailbox, pending.Id, recoveryTimeout.Token);
+                await RefreshBusyActionsAsync();
+            }
             var action = await _store.StartMailActionAsync(pending.Id);
             if (action is null) continue;
             await RefreshBusyActionsAsync();
@@ -190,6 +219,16 @@ public sealed partial class MainWindowViewModel
             {
                 await _store.FailMailActionAsync(action.Id, exception.Message);
                 blocked.Add((action.MailboxId, action.ItemId));
+                var failed = await _store.GetMailActionAsync(action.Id);
+                if (failed is { CanAutomaticallyRecover: true })
+                {
+                    using var recoveryTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                    if (await new MailActionDiagnostics(_store, _provider).TryAutomaticRecoveryAsync(account, mailbox, action.Id, recoveryTimeout.Token))
+                    {
+                        blocked.Remove((action.MailboxId, action.ItemId));
+                        if (await _store.GetMailActionAsync(action.Id) is { Accepted: false } repaired) queue.Enqueue(repaired);
+                    }
+                }
                 // A failed action remains pending at its intended destination. Do not
                 // reinsert it in the source list; Busy provides failure/recovery details.
             }

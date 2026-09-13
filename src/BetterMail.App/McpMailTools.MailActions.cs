@@ -132,5 +132,16 @@ internal sealed partial class McpMailTools
         await refreshAndSync();
         return queued;
     }
+    [McpServerTool(Name = "recover_mail_action", Destructive = true), Description("Verify a failed move/state action against an exact same-mailbox Internet Message-ID match, repair its stale server ID and queue a retry. If already at the move destination, confirm without repeating it. Preserves history and dependent actions. Ambiguous lookups and concurrently changed actions are rejected. Does not recover sends or drafts. Requires edit permission.")]
+    public async Task<string> RecoverMailAction(string mailboxId, string actionId)
+    {
+        var sender = await SenderAsync(mailboxId, true);
+        var provider = mailProvider?.Invoke() ?? throw new McpException("Mail provider unavailable.");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var result = await new MailActionDiagnostics(store, provider).RecoverAsync(sender.Account, sender.Mailbox, actionId,
+            timeout.Token, () => Authorize(mailboxId, true));
+        await refreshAndSync();
+        return result;
+    }
 
 }

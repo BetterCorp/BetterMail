@@ -24,8 +24,10 @@ public sealed class McpContentTests
                 await store.FailMailActionAsync(action.Id, "Missing");
             }
             await Assert.ThrowsAsync<McpException>(() => tools.RetryMailAction(mailbox.Id, action.Id));
+            await Assert.ThrowsAsync<McpException>(() => tools.RecoverMailAction(mailbox.Id, action.Id));
             setSettings(new(Enabled: true, AllowWrites: true, MailboxIds: [mailbox.Id]));
             await Assert.ThrowsAsync<McpException>(() => tools.RetryMailAction("other", action.Id));
+            await Assert.ThrowsAsync<McpException>(() => tools.RecoverMailAction("other", action.Id));
             Assert.True(await tools.RetryMailAction(mailbox.Id, action.Id));
             var pending = (await store.GetMailActionAsync(action.Id))!;
             Assert.Equal(3, pending.FailureCount);

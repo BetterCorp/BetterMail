@@ -43,5 +43,12 @@ that requires the exact Internet Message-ID within the same mailbox. A missing o
 is not evidence of deletion or delivery. `retry_mail_action` explicitly authorizes another attempt
 without erasing history; a subsequent failure pauses again. Fix the reported cause first. Unconfirmed
 sends cannot be retried through this tool. Earlier pending actions for the same message must be resolved
-first. A changed server ID is reported, not automatically rebound; verify and perform the intended
-operation in the provider before cancelling the obsolete local action.
+first. `recover_mail_action` rechecks a unique same-mailbox Internet Message-ID match, fetches the current
+message, then atomically repairs the queued ID and authorizes a retry. A move already at its
+destination is confirmed without repeating it. Changed queue state, ambiguous searches and
+unconfirmed sends are never repaired. The app exposes the same operation as **Recover and retry**.
+
+Missing-object failures on moves/state actions automatically attempt identity recovery once per
+queued action, including legacy paused actions. A verified recovery is retried in the same Busy
+processing pass. The attempt marker survives restart; uncertainty or failure of the repaired
+attempt leaves it paused with details. Sends and drafts are excluded from automatic recovery.
