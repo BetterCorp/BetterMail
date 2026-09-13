@@ -1485,7 +1485,7 @@ public sealed partial class Microsoft365WorkspaceProvider(
     internal static object BuildEventPayload(CalendarEventDraft draft)
     {
         ValidateDraft(draft);
-        return new
+        var payload = new
         {
             subject = draft.Subject,
             start = GraphDate(draft.StartsAt),
@@ -1500,6 +1500,12 @@ public sealed partial class Microsoft365WorkspaceProvider(
             reminderMinutesBeforeStart = draft.ReminderMinutesBeforeStart,
             recurrence = draft.Recurrence is null ? null : BuildRecurrence(draft.Recurrence)
         };
+        var result = JsonSerializer.SerializeToElement(payload).EnumerateObject()
+            .ToDictionary(property => property.Name, property => (object)property.Value.Clone());
+        // Omitted bodies leave existing descriptions intact for older callers.
+        if (draft.Body is not null)
+            result["body"] = new { content = draft.Body, contentType = draft.BodyIsHtml ? "html" : "text" };
+        return result;
     }
 
     internal static CalendarEvent MapEvent(

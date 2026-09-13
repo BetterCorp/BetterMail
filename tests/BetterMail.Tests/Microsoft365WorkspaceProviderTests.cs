@@ -16,6 +16,20 @@ public sealed class Microsoft365WorkspaceProviderTests
         ProviderCapabilities.Contacts | ProviderCapabilities.Tasks);
 
     [Fact]
+    public void CalendarBodyPayloadPreservesFormatAndDistinguishesOmittedFromCleared()
+    {
+        var draft = new CalendarEventDraft("calendar", "Subject", DateTimeOffset.Now, DateTimeOffset.Now.AddHours(1));
+        var omitted = JsonSerializer.SerializeToElement(Microsoft365WorkspaceProvider.BuildEventPayload(draft));
+        Assert.False(omitted.TryGetProperty("body", out _));
+        var html = JsonSerializer.SerializeToElement(Microsoft365WorkspaceProvider.BuildEventPayload(draft with { Body = "<p>Details</p>", BodyIsHtml = true }));
+        Assert.Equal("html", html.GetProperty("body").GetProperty("contentType").GetString());
+        Assert.Equal("<p>Details</p>", html.GetProperty("body").GetProperty("content").GetString());
+        var cleared = JsonSerializer.SerializeToElement(Microsoft365WorkspaceProvider.BuildEventPayload(draft with { Body = "" }));
+        Assert.Equal("text", cleared.GetProperty("body").GetProperty("contentType").GetString());
+        Assert.Equal("", cleared.GetProperty("body").GetProperty("content").GetString());
+    }
+
+    [Fact]
     public void BuildsCalendarSelectedMeetingPayload()
     {
         var draft = new CalendarEventDraft(

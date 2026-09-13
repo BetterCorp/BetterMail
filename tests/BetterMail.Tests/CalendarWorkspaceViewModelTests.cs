@@ -8,6 +8,38 @@ public sealed class CalendarWorkspaceViewModelTests
     private static readonly DateTimeOffset Now = new(2026, 7, 14, 9, 0, 0, TimeSpan.FromHours(2));
 
     [Fact]
+    public async Task EmailEventPreservesFullHtmlAndSupportsDescriptionChanges()
+    {
+        var provider = new FakeCalendarProvider();
+        var vm = new CalendarWorkspaceViewModel(provider, Accounts(), () => Now);
+        await vm.InitializeAsync(TestContext.Current.CancellationToken);
+        const string body = "<html><head><style>p { color:red; }</style></head><body><p>Full content &amp; details</p><p>Second paragraph</p></body></html>";
+        var mail = new MailMessage("mailbox", "email", null, null, "inbox", "Planning from email",
+            new MailAddress("Sender", "sender@example.com"), [], Now, "Short snippet", body,
+            true, true, false, MailImportance.Normal, [], null);
+        await vm.OpenFromEmailAsync(mail, Accounts()[0].AccountId);
+        Assert.True(vm.IsEditorOpen);
+        Assert.False(vm.IsEditing);
+        Assert.Equal(mail.Subject, vm.EditorSubject);
+        Assert.Contains("Full content & details", vm.EditorDescription);
+        Assert.Contains("Second paragraph", vm.EditorDescription);
+        Assert.DoesNotContain("color:red", vm.EditorDescription);
+        Assert.DoesNotContain("Short snippet", vm.EditorDescription);
+        Assert.Equal("", vm.EditorAttendees);
+        var draft = vm.BuildDraft("work");
+        Assert.Equal(body, draft.Body);
+        Assert.True(draft.BodyIsHtml);
+        Assert.Null(provider.CreatedDraft);
+        vm.EditorDescription = "Edited details";
+        draft = vm.BuildDraft("work");
+        Assert.Equal("Edited details", draft.Body);
+        Assert.False(draft.BodyIsHtml);
+        vm.EditorDescription = "";
+        Assert.Equal("", vm.BuildDraft("work").Body);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => vm.OpenFromEmailAsync(mail with { Body = null }, null));
+    }
+
+    [Fact]
     public async Task UnchangedAccountsPreserveCalendarChoices()
     {
         var accounts = Accounts()[..1];
@@ -65,6 +97,7 @@ public sealed class CalendarWorkspaceViewModelTests
         await WaitUntilAsync(() => viewModel.IsEditorOpen);
         viewModel.EditorSubject = "Planning";
         viewModel.EditorLocation = "Boardroom";
+        viewModel.EditorDescription = "Discussion notes";
         viewModel.EditorAttendees = "ada@example.com; grace@example.com";
         viewModel.EditorStartDate = Now.LocalDateTime.Date;
         viewModel.EditorEndDate = Now.LocalDateTime.Date;
@@ -98,10 +131,13 @@ public sealed class CalendarWorkspaceViewModelTests
             .Single(item => item.Source.Event.ProviderId == "created");
         viewModel.EditEventCommand.Execute(created);
         await WaitUntilAsync(() => viewModel.IsEditorOpen && viewModel.IsEditing);
+        Assert.Equal("Discussion notes", viewModel.EditorDescription);
         viewModel.EditorSubject = "Updated planning";
+        viewModel.EditorDescription = "Updated notes";
         viewModel.SaveEventCommand.Execute(null);
         await WaitUntilAsync(() => provider.UpdatedDraft is not null && !viewModel.IsEditorOpen);
         Assert.Equal("Updated planning", provider.UpdatedDraft!.Subject);
+        Assert.Equal("Updated notes", provider.UpdatedDraft.Body);
 
         viewModel.EditEventCommand.Execute(created);
         await WaitUntilAsync(() => viewModel.IsEditorOpen);
@@ -265,7 +301,7 @@ public sealed class CalendarWorkspaceViewModelTests
             var created = new CalendarEvent(
                 "created", draft.CalendarId, draft.Subject, draft.StartsAt, draft.EndsAt,
                 draft.Location, draft.Attendees, draft.IsReminderOn,
-                draft.ReminderMinutesBeforeStart, draft.Recurrence, account.AccountId);
+                draft.ReminderMinutesBeforeStart, draft.Recurrence, account.AccountId, Body: draft.Body, BodyIsHtml: draft.BodyIsHtml);
             _events.Add(created);
             return Task.FromResult(created);
         }

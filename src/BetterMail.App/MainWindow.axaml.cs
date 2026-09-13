@@ -813,7 +813,7 @@ public sealed partial class MainWindow : Window
             openDraft: viewModel.OpenLocalDraftAsync,
             action: request => viewModel.HandlePreviewActionAsync(request with
             {
-                Accepted = () => { if (viewModel.ShouldClosePreview(request.Action)) window?.Close(); }
+                Accepted = () => { if (request.Action == ConversationAction.CreateEvent) Activate(); if (viewModel.ShouldClosePreview(request.Action)) window?.Close(); }
             }),
             moveFolders: viewModel.MoveFoldersFor,
             showActions: true,
@@ -869,6 +869,10 @@ public sealed partial class MainWindow : Window
         Execute(_viewModel?.ReplyCommand);
     private void MessageReplyAllClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
         Execute(_viewModel?.ReplyAllCommand);
+    private async void MessageCreateEventClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (_viewModel?.SelectedMessage is { } message) await _viewModel.CreateEventFromEmailAsync(message);
+    }
     private void MessageForwardClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
         Execute(_viewModel?.ForwardCommand);
     private void MessageArchiveClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>

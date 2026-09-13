@@ -32,6 +32,15 @@ internal static partial class Program
         }
         if (window.GetVisualDescendants().OfType<Button>().Any(button => button.IsEffectivelyVisible && Equals(button.Content, "Refresh")))
             throw new InvalidOperationException("People still has a Refresh button.");
+        var eventMail = new MailMessage("preview", "event-email", null, null, "inbox", "Design review",
+            new MailAddress("Jamie", "jamie@studio.example"), [], DateTimeOffset.Now, "Short preview",
+            "<p>Hi Alex,</p><p>Let’s review the updated designs together.</p><p>Agenda: navigation, contacts, and calendar.</p>",
+            true, true, false, MailImportance.Normal, [], null);
+        await (Task)typeof(MainWindowViewModel).GetMethod("CreateEventFromEmailAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(vm, [eventMail, null])!;
+        if (vm.CalendarWorkspace?.IsEditorOpen != true || !vm.CalendarWorkspace.EditorDescription.Contains("Agenda:"))
+            throw new InvalidOperationException("Email did not open an event with its full content.");
+        await Shot("event-from-email-dark");
+        await ((AsyncCommand)vm.CalendarWorkspace.CloseEditorCommand).ExecuteAsync();
         await ((AsyncCommand)vm.ShowTasksCommand).ExecuteAsync();
         await Shot("tasks-dark");
         var tasksView = window.GetVisualDescendants().OfType<TasksWorkspaceView>().Single();

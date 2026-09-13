@@ -290,6 +290,7 @@
             <Button.Flyout>
               <Flyout Placement="BottomEdgeAlignedRight">
                 <StackPanel MinWidth="190">
+                  <Button Classes="command" Content="Create event" HorizontalContentAlignment="Left" Click="MessageCreateEventClicked" />
                   <Button Classes="command" Content="Reply all" HorizontalContentAlignment="Left" Click="MessageReplyAllClicked" AutomationProperties.Name="Reply all to selected message" />
                   <Button Classes="command" Content="Reply" HorizontalContentAlignment="Left" Click="MessageReplyClicked" AutomationProperties.Name="Reply to selected message" />
                   <Button Classes="command" Content="Forward" HorizontalContentAlignment="Left" Click="MessageForwardClicked" AutomationProperties.Name="Forward selected message" />
@@ -599,6 +600,7 @@
                   <Border.ContextMenu>
                     <ContextMenu>
                       <MenuItem Header="Reply" Click="MessageReplyClicked" AutomationProperties.Name="Reply to message" />
+                      <MenuItem Header="Create event" Click="MessageCreateEventClicked" />
                       <MenuItem Header="Reply all" Click="MessageReplyAllClicked" AutomationProperties.Name="Reply all to message" />
                       <MenuItem Header="Forward" Click="MessageForwardClicked" AutomationProperties.Name="Forward message" />
                       <Separator />
@@ -712,7 +714,8 @@
                                 <Button.Flyout>
                                   <Flyout Placement="BottomEdgeAlignedRight">
                                     <StackPanel MinWidth="190">
-                                      <Button Classes="command" Content="Reply all" HorizontalContentAlignment="Left" Click="MessageReplyAllClicked" />
+                                      <Button Classes="command" Content="Create event" HorizontalContentAlignment="Left" Click="MessageCreateEventClicked" />
+                  <Button Classes="command" Content="Reply all" HorizontalContentAlignment="Left" Click="MessageReplyAllClicked" />
                                       <Button Classes="command" Content="Reply" HorizontalContentAlignment="Left" Click="MessageReplyClicked" />
                                       <Button Classes="command" Content="Forward" HorizontalContentAlignment="Left" Click="MessageForwardClicked" />
                                       <Button Classes="command" Content="Archive" HorizontalContentAlignment="Left" Click="MessageArchiveClicked" />

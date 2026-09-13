@@ -186,3 +186,7 @@ Task refresh follow-up: F5 remains available for an explicit refresh. On workspa
 
 
 Reading-pane performance: full-body and thread queries now use a dedicated, persistent encrypted read-only WAL connection, separate from both sync writes and folder navigation. Thread membership is selected through the thread index before message lookup. The regression holds the writer gate, an uncommitted write transaction and the folder-reader gate while checking that the full compressed body renders in the reading pane. It also checks committed-snapshot isolation and cancellation of a superseded read.
+
+Event descriptions are now editable. Unchanged HTML is preserved; edited descriptions save as plain text. Mail menus and thread More menus offer Create event, opening an unsaved calendar event populated from the full cached email body and subject. The account's editable calendar is preferred, and an existing open editor is protected. Older API callers that omit a body leave existing descriptions untouched. Regression coverage exercises description edits, clearing, HTML preservation, and missing email bodies. The offline native preview exercises email-to-event creation with fictional data.
+
+![Event created from fictional email](screenshots/event-from-email-dark.png)

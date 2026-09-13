@@ -52,6 +52,7 @@
               <Button.Flyout>
                 <Flyout>
                   <StackPanel MinWidth="190">
+                    <Button Classes="command" Content="Create event" Command="{Binding CreateEventCommand}" />
                     <Button Classes="command" Content="Reply to sender" Command="{Binding ReplyCommand}" />
                     <Button Classes="command" Content="Reply all" Command="{Binding ReplyAllCommand}" />
                     <Button Classes="command" Content="Junk" HorizontalContentAlignment="Left" Command="{Binding JunkCommand}" />

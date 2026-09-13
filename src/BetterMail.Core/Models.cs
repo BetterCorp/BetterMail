@@ -300,7 +300,9 @@ public sealed record CalendarEventDraft(
     IReadOnlyList<CalendarAttendee>? Attendees = null,
     bool IsReminderOn = true,
     int ReminderMinutesBeforeStart = 15,
-    CalendarRecurrence? Recurrence = null);
+    CalendarRecurrence? Recurrence = null,
+    string? Body = null,
+    bool BodyIsHtml = false);
 
 public sealed record CalendarEvent(
     string ProviderId,

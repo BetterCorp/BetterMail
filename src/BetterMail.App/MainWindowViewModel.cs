@@ -5468,12 +5468,39 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         }
     }
 
+    internal async Task CreateEventFromEmailAsync(MailMessage message, Action? accepted = null)
+    {
+        try
+        {
+            if (_workspaceProvider is null || !AccountsWith(ProviderCapabilities.Calendar).Any())
+                throw new InvalidOperationException("Connect an account with a writable calendar to create an event.");
+            var fullMessage = message.Body is null ? await GetCachedMessageAsync(message) : message;
+            if (fullMessage?.Body is null)
+                throw new InvalidOperationException("The full email content is not available yet. Try again after it has loaded.");
+            await LoadCalendarWorkspaceAsync();
+            if (CalendarWorkspace is null || CalendarWorkspace.EditableCalendars.Count == 0)
+                throw new InvalidOperationException("No writable calendars are available.");
+            if (CalendarWorkspace.IsEditorOpen)
+                throw new InvalidOperationException("Save or close the current event editor before creating another event.");
+            await CalendarWorkspace.OpenFromEmailAsync(fullMessage,
+                Mailboxes.FirstOrDefault(mailbox => mailbox.Id == message.MailboxId)?.AccountId);
+            IsSettingsOpen = false;
+            ActiveModule = "Calendar";
+            accepted?.Invoke();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Error = exception.Message;
+        }
+    }
+
     private Task HandleConversationAction(ConversationActionRequest request) =>
         request.Action switch
         {
             ConversationAction.Reply => ReplyToAsync(request.Message),
             ConversationAction.ReplyAll => ReplyAllToAsync(request.Message),
             ConversationAction.Forward => ForwardMessageAsync(request.Message),
+            ConversationAction.CreateEvent => CreateEventFromEmailAsync(request.Message),
             _ => Task.CompletedTask
         };
 
@@ -5485,6 +5512,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         ConversationAction.Reply => ReplyToAsync(request.Message, request.Accepted),
         ConversationAction.ReplyAll => ReplyAllToAsync(request.Message, request.Accepted),
         ConversationAction.Forward => ForwardMessageAsync(request.Message, request.Accepted),
+        ConversationAction.CreateEvent => CreateEventFromEmailAsync(request.Message, request.Accepted),
         ConversationAction.Archive => MoveMessagesAsync([request.Message], "archive", "Archiving...", "Archived", request.Accepted),
         ConversationAction.Delete => MoveMessagesAsync([request.Message], "deleteditems", "Moving to Deleted Items...", "Moved to Deleted Items", request.Accepted),
         ConversationAction.Junk => MoveMessagesAsync([request.Message], "junkemail", "Moving to Junk Email...", "Moved to Junk Email", request.Accepted),

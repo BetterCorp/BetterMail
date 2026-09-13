@@ -17,7 +17,8 @@ public enum ConversationAction
     ToggleFlag,
     TogglePin,
     ViewHeaders,
-    Move
+    Move,
+    CreateEvent
 }
 
 public sealed record ConversationActionRequest(
@@ -85,6 +86,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
         SelectMessageCommand = new AsyncCommand<ConversationMessageItem>(SelectMessageAsync);
         ReplyCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.Reply), CanRunAction, allowConcurrent: true);
         ReplyAllCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.ReplyAll), CanRunAction, allowConcurrent: true);
+        CreateEventCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.CreateEvent), CanRunAction);
         ForwardCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.Forward), CanRunAction, allowConcurrent: true);
         ArchiveCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.Archive), CanRunAction, allowConcurrent: true);
         DeleteCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.Delete), CanRunAction, allowConcurrent: true);
@@ -107,6 +109,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
     public ICommand SelectMessageCommand { get; }
     public ICommand ReplyCommand { get; }
     public ICommand ReplyAllCommand { get; }
+    public ICommand CreateEventCommand { get; }
     public ICommand ForwardCommand { get; }
     public ICommand ArchiveCommand { get; }
     public ICommand DeleteCommand { get; }
@@ -459,6 +462,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
     {
         ((AsyncCommand)ReplyCommand).Refresh();
         ((AsyncCommand)ReplyAllCommand).Refresh();
+        ((AsyncCommand)CreateEventCommand).Refresh();
         ((AsyncCommand)ForwardCommand).Refresh();
         ((AsyncCommand)ArchiveCommand).Refresh();
         ((AsyncCommand)DeleteCommand).Refresh();
