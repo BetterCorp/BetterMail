@@ -4113,8 +4113,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 // A body hydration can already contain the optimistic destination while
                 // the row still belongs to the source list. Only the actual navigation
                 // target determines whether the user has opened the destination folder.
-                if (_selectedFolder?.MailboxId == message.MailboxId && _selectedFolder.ProviderId == actualDestination)
-                    continue;
+                var destinationIsOpen = _selectedFolder is not null
+                    ? _selectedFolder.MailboxId == message.MailboxId && _selectedFolder.ProviderId == actualDestination
+                    : IsUnifiedSection && Folders.Any(folder => folder.MailboxId == message.MailboxId &&
+                        folder.ProviderId == actualDestination && folder.WellKnownName == "inbox");
+                if (destinationIsOpen) continue;
                 if (displayed is not null && (displayed.FolderId == message.FolderId || displayed.FolderId == actualDestination))
                 {
                     var index = Messages.IndexOf(displayed);
