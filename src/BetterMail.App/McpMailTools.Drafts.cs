@@ -8,7 +8,7 @@ namespace BetterMail.App;
 
 internal sealed partial class McpMailTools
 {
-    [McpServerTool(Name = "get_capabilities", ReadOnly = true), Description("Read current MCP edit/send permissions, attachment upload limits, and enabled mailbox IDs. Use before planning a draft workflow. Sending still requires separate user authorization.")]
+    [McpServerTool(Name = "get_capabilities", ReadOnly = true), Description("Start here: returns permissions, limits, server tool names, and step-by-step instructions for creating mail with attachments and uploading to Drive. create_draft has no attachment parameter: use the separate attachment upload tools. Includes recovery guidance when client discovery is missing tools. Sending requires separate user authorization.")]
     public object GetCapabilities()
     {
         var settings = EnabledConfiguration();
@@ -16,7 +16,8 @@ internal sealed partial class McpMailTools
             directAttachmentBudgetBytes = LargeAttachmentPolicy.DirectAttachmentBudgetBytes,
             allowedDriveAccounts = settings.DriveAccountIds ?? [],
             maxAttachmentBytes = DraftAttachment.MaximumSizeBytes, maxChunkBytes = EncryptedMailStore.McpUploadChunkBytes,
-            maxConcurrentUploads = 4, uploadLifetimeMinutes = 60 };
+            maxConcurrentUploads = 4, uploadLifetimeMinutes = 60,
+            registeredTools = RegisteredToolNames(), usage = CapabilityUsage };
     }
 
     [McpServerTool(Name = "update_draft", Destructive = true), Description("Edit a saved draft without sending. Supply expectedUpdatedAt from read_draft to reject concurrent edits. Omitted fields are preserved; empty strings clear fields. bodyIsHtml describes a supplied body. Queued/deleted drafts cannot be edited.")]

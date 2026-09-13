@@ -107,7 +107,7 @@ internal sealed partial class McpMailTools(
             attachments = draft.Attachments.Select((item, index) => new { index, item.Name, item.ContentType, item.Size, item.IsInline }) };
     }
 
-    [McpServerTool(Name = "create_draft", Destructive = false), Description("Create a new saved draft. Requires edit permission. Does not send. Recipients accept Name <address> separated by semicolons. No local file access is exposed.")]
+    [McpServerTool(Name = "create_draft", Destructive = false), Description("Create a new saved draft. Requires edit permission. Does not send. Recipients accept Name <address> separated by semicolons. To attach files, use begin_attachment_upload, upload_attachment_chunk, and complete_attachment_upload after creating the draft; get_capabilities explains the workflow. No local file access is exposed.")]
     public async Task<object> CreateDraft(string mailboxId, string to, string subject, string body, string cc = "", string bcc = "", bool isHtml = false, MailImportance importance = MailImportance.Normal, bool isFlagged = false)
     {
         var sender = await SenderAsync(mailboxId, write: true);
