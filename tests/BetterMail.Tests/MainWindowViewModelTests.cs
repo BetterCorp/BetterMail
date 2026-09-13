@@ -1019,6 +1019,45 @@ public sealed class MainWindowViewModelTests
         finally { provider.MoveRelease.TrySetResult(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }
 
+    [Fact]
+    public async Task MovingToInboxPreservesRowWhenUnifiedInboxOpensDuringFeedback()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-move-unified-" + Guid.NewGuid());
+        var provider = new RecordingProvider { MoveRelease = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "account", "tenant", "alex@work.example", "Alex", ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, "Alex");
+            await store.SaveAccountAsync(account, token);
+            await store.SaveMailboxAsync(mailbox, token);
+            var inbox = new MailFolder(mailbox.Id, "actual-inbox-id", "Inbox", 0, 0, "inbox");
+            var archive = new MailFolder(mailbox.Id, "archive", "Archive", 0, 0, "archive");
+            await store.SaveFoldersAsync(mailbox.Id, [inbox, archive], token);
+            provider.FolderResults = [inbox, archive];
+            var vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
+            vm.Accounts.Add(account); vm.Mailboxes.Add(mailbox);
+            vm.Folders.Add(new(inbox, "Alex")); vm.Folders.Add(new(archive, "Alex"));
+            var message = Message(mailbox.Id, "archive", "Restore to inbox", "Full body") with { IsRead = true };
+            await store.ApplySyncPageAsync("seed", new([message], null, false), token);
+            await ((AsyncCommand<MailFolderItem>)vm.SelectFolderCommand).ExecuteAsync(vm.Folders[1]);
+            var moving = vm.MoveSelectionToFolderAsync(vm.Folders[0]);
+            await WaitUntilAsync(() => vm.BusyActions.Any(action => action.Kind == MailActionKind.Move), token);
+            await ((AsyncCommand)vm.ShowUnifiedInboxCommand).ExecuteAsync();
+            Assert.False(moving.IsCompleted);
+            Assert.Equal(message.ProviderId, Assert.Single(vm.Messages).ProviderId);
+            await moving;
+            Assert.True(vm.IsUnifiedInbox);
+            Assert.Equal(message.ProviderId, Assert.Single(vm.Messages).ProviderId);
+            Assert.Equal(inbox.ProviderId, vm.Messages[0].FolderId);
+            provider.MoveRelease.TrySetResult();
+            await WaitUntilAsync(() => !vm.IsSyncing, token);
+        }
+        finally { provider.MoveRelease.TrySetResult(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
     [Theory]
     [InlineData("archive")]
     [InlineData("deleteditems")]
@@ -1864,7 +1903,14 @@ public sealed class MainWindowViewModelTests
             await WaitUntilAsync(() => viewModel.IsUnifiedInbox && viewModel.Messages.Count == 2, cancellationToken);
 
             provider.MoveRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            viewModel.DeleteCommand.Execute(null);
+            var deleting = ((AsyncCommand)viewModel.DeleteCommand).ExecuteAsync();
+            // Simulate body hydration observing the optimistic destination during
+            // the row's feedback interval, before it is removed from the source list.
+            await WaitUntilAsync(() => viewModel.BusyActions.Any(action => action.Kind == MailActionKind.Move), cancellationToken);
+            var deletingMessage = viewModel.SelectedMessage!;
+            typeof(MainWindowViewModel).GetMethod("ApplyMessageUpdate", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(viewModel, [deletingMessage, deletingMessage with { FolderId = "deleteditems" }]);
+            await deleting;
             await WaitUntilAsync(() => provider.MoveDestination == "deleteditems", cancellationToken);
             Assert.False(viewModel.IsMailActionRunning);
             Assert.Single(viewModel.Messages);
