@@ -4086,7 +4086,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             var destination = Folders.FirstOrDefault(folder => folder.MailboxId == message.MailboxId &&
                 (folder.ProviderId == destinationFolderId || folder.WellKnownName == destinationFolderId))?.ProviderId ?? destinationFolderId;
             var pending = BusyActions.LastOrDefault(action => action.Kind == MailActionKind.Move && ActionMatches(action, message));
-            return pending is not null ? pending.DestinationId != destination || pending.Error is not null : message.FolderId != destination;
+            return pending is not null ? pending.DestinationId != destination : message.FolderId != destination;
         }).ToArray();
         if (messages.Count == 0) { Status = "Messages are already in this folder or queued for it"; return; }
         BeginMessageFeedback(messages);

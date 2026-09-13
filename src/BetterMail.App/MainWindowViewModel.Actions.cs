@@ -190,26 +190,8 @@ public sealed partial class MainWindowViewModel
             {
                 await _store.FailMailActionAsync(action.Id, exception.Message);
                 blocked.Add((action.MailboxId, action.ItemId));
-                if (action.Kind == MailActionKind.Move)
-                {
-                    var restored = await _store.GetMessageAsync(action.MailboxId, action.ProviderId!);
-                    var restoreToView = restored is not null &&
-                        (_selectedFolder?.ProviderId == restored.FolderId && _selectedFolder.MailboxId == restored.MailboxId ||
-                         IsPinnedView && restored.IsPinned || IsFlaggedView && restored.IsFlagged ||
-                         IsUnifiedInbox && Folders.Any(folder => folder.MailboxId == restored.MailboxId && folder.ProviderId == restored.FolderId && folder.WellKnownName == "inbox"));
-                    if (restored is not null && IsSearchResultsView && _displayedMailQuery is { } query)
-                    {
-                        var matching = await _store.SearchFilteredMailAsync(query, _displayedMailFolders, 500, default,
-                            _displayedMailAccount?.AccountId, _displayedMailAccount?.MailboxId, query["in"] is null,
-                            Folders.Select(folder => new MailFolderKey(folder.MailboxId, folder.ProviderId)).ToArray());
-                        restoreToView = matching.Any(message => SameMessage(message, restored));
-                    }
-                    if (restored is not null && restoreToView)
-                    {
-                        if (!Messages.Any(message => SameMessage(message, restored)))
-                            Messages.Insert(0, restored);
-                    }
-                }
+                // A failed action remains pending at its intended destination. Do not
+                // reinsert it in the source list; Busy provides failure/recovery details.
             }
             await RefreshBusyActionsAsync();
         }
