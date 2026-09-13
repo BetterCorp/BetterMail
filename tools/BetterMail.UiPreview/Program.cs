@@ -58,6 +58,42 @@ internal static class Program
         await CheckImageConsentAsync();
         window.Activate();
         await Shot("mail-light");
+        vm.SearchText = "review";
+        // Show the actual search popup with varied fictional result lengths.
+        await Task.Delay(250);
+        foreach (var (message, index) in previewMessages.Select((message, index) => (message, index)))
+            vm.GlobalSearchResults.Add(new("Mail", message.Subject, message.Preview, "Mail", message,
+                StartsCategory: index == 0, AccountGroup: "Alex Morgan · alex@work.example", StartsAccountGroup: index == 0, Badge: "Inbox"));
+        vm.IsGlobalSearchOpen = true;
+        await Shot("search-results-light");
+        var resultsPanel = window.FindControl<Border>("GlobalSearchResultsPanel")!;
+        var resultButtons = resultsPanel.GetVisualDescendants().OfType<Button>().Where(button => button.Classes.Contains("searchResult")).ToArray();
+        if (resultButtons.Length == 0 || resultButtons.Any(button => button.Bounds.Width < resultsPanel.Bounds.Width - 45))
+            throw new InvalidOperationException("Search result rows do not fill the available width.");
+        Application.Current!.RequestedThemeVariant = ThemeVariant.Dark;
+        await Shot("search-results-dark");
+        vm.IsGlobalSearchOpen = false;
+        vm.SearchText = "";
+        Application.Current!.RequestedThemeVariant = ThemeVariant.Light;
+        var studioMailbox = new Mailbox("studio", "alex@studio.example", "Studio");
+        var supportMailbox = new Mailbox(account.AccountId, "support@work.example", "Support", IsShared: true);
+        var projectsMailbox = new Mailbox("studio", "projects@studio.example", "Projects", IsShared: true);
+        vm.Mailboxes.Add(studioMailbox);
+        vm.Mailboxes.Add(supportMailbox);
+        vm.Mailboxes.Add(projectsMailbox);
+        vm.ConfigureMailboxLayout([supportMailbox.Id, projectsMailbox.Id, studioMailbox.Id, mailbox.Id], [studioMailbox.Id, mailbox.Id]);
+        vm.SelectedSettingsTab = vm.SettingsTabs.Single(tab => tab.Name == "Accounts");
+        var settingsWindow = new Window { DataContext = vm, Content = new SettingsView(), Width = 1100, Height = 900,
+            WindowDecorations = WindowDecorations.None, Position = new PixelPoint(0, 0) };
+        settingsWindow.Show();
+        await Shot("mailbox-order-light", settingsWindow);
+        Application.Current!.RequestedThemeVariant = ThemeVariant.Dark;
+        await Shot("mailbox-order-dark", settingsWindow);
+        settingsWindow.Close();
+        vm.Mailboxes.Remove(studioMailbox);
+        vm.Mailboxes.Remove(supportMailbox);
+        vm.Mailboxes.Remove(projectsMailbox);
+        Application.Current!.RequestedThemeVariant = ThemeVariant.Light;
         var searchOptions = new SearchOptionsWindow("budget type:mail account:{alex@work.example} in:{Inbox/Projects} date:{>=2026-09-01}", _ => { })
         { WindowDecorations = WindowDecorations.None, WindowStartupLocation = WindowStartupLocation.Manual, Position = new PixelPoint(0, 0) };
         searchOptions.Show();
@@ -121,6 +157,32 @@ internal static class Program
         if (vm.SelectedMessages.Count != previewMessages.Length || list.SelectedItems!.Count != previewMessages.Length)
             throw new InvalidOperationException("A message metadata refresh collapsed multi-selection.");
         await Shot("mail-multiselect-light");
+        await ClickRow(3, "none");
+        var selectedMailId = vm.SelectedMessage!.ProviderId;
+        var reconcileList = typeof(MainWindowViewModel).GetMethod("ReconcileMessages", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        reconcileList.Invoke(vm, [previewMessages.Select(message => message with { IsRead = true, IsFlagged = true }).ToArray()]);
+        await Task.Delay(200);
+        if (vm.SelectedMessage?.ProviderId != selectedMailId || list.SelectedItems!.OfType<MailMessage>().Single().ProviderId != selectedMailId)
+            throw new InvalidOperationException("Mail list lost its selected row after reconciliation.");
+        typeof(MainWindowViewModel).GetMethod("ApplyMessageUpdate", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(vm,
+            [vm.SelectedMessage, vm.SelectedMessage! with { IsPinned = true }]);
+        await Task.Delay(200);
+        if (list.SelectedItems!.OfType<MailMessage>().Single().ProviderId != selectedMailId)
+            throw new InvalidOperationException("Mail list lost its selected row after a state update.");
+        Console.WriteLine("Mail list selection survives full reconciliation and single-message state updates.");
+        await Shot("mail-list-stable-selection-light");
+        reconcileList.Invoke(vm, [previewMessages]);
+
+        var opening = (Task)typeof(MainWindow).GetMethod("OpenMessagePreviewAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [previewMessages[3]])!;
+        var previews = (System.Collections.IDictionary)typeof(MainWindow).GetField("_previewWindows", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+        var openedPreview = previews.Values.Cast<Window>().Single();
+        if (!openedPreview.IsVisible || openedPreview.Title != previewMessages[3].Subject)
+            throw new InvalidOperationException("Preview did not immediately open the clicked mail.");
+        await opening;
+        openedPreview.Close();
+        window.Activate();
+        Console.WriteLine("Preview opens the clicked mail immediately, even without a cached thread.");
+
         var moveFolders = folders.Concat(new[]
         {
             new MailFolderItem(new(mailbox.Id, "projects", "Projects", 0, 0, ParentProviderId: "inbox"), mailbox.DisplayName),
@@ -198,6 +260,20 @@ internal static class Program
         await Shot("sync-progress-dark");
         syncButton.Flyout.Hide();
         vm.SyncSteps.Clear();
+        Application.Current.RequestedThemeVariant = ThemeVariant.Light;
+        var issueDrafts = new[] { "Re: Design review", "September planning", "Re: Updated research notes" }
+            .Select((subject, index) => new LocalDraft("issue-" + index, account.AccountId, mailbox.Id, "jamie@studio.example", "", "", subject, "Draft body", [], PreviewProvider.Today,
+                SyncStatus: DraftSyncStatus.MissingRemote, SyncError: "The server draft was not found; the local draft was kept.")).ToArray();
+        foreach (var draft in issueDrafts) vm.Drafts.Add(draft);
+        await ((AsyncCommand)vm.ShowSyncIssuesCommand).ExecuteAsync();
+        vm.BusyActions.Add(new MailAction("delete-issue", account.AccountId, mailbox.Id, issueDrafts[0].Id,
+            MailActionKind.DeleteDraft, issueDrafts[0].Subject, DateTimeOffset.Now));
+        typeof(MainWindowViewModel).GetMethod("MailActionStateChanged", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(vm, null);
+        await Shot("draft-issue-actions-light");
+        Application.Current.RequestedThemeVariant = ThemeVariant.Dark;
+        await Shot("draft-issue-actions-dark");
+        vm.BusyActions.Clear();
+        vm.Drafts.Clear();
         Application.Current.RequestedThemeVariant = ThemeVariant.Light;
         foreach (var (name, command) in new[] { ("calendar", vm.ShowCalendarCommand), ("files", vm.ShowFilesCommand), ("notes", vm.ShowNotesCommand), ("people", vm.ShowContactsCommand), ("todos", vm.ShowTasksCommand) })
         {

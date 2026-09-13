@@ -89,7 +89,8 @@ public sealed record SearchQuery(IReadOnlyList<string> Terms, IReadOnlyDictionar
         return result.ToString();
     }
 
-    public static string Encode(string value) => "{" + value.Replace("\\", "\\\\").Replace("}", "\\}") + "}";
+    public static string Encode(string value) => value.Length > 0 && !value.Any(c => char.IsWhiteSpace(c) || c is ':' or '{' or '}' or '"' or '\\')
+        ? value : "{" + value.Replace("\\", "\\\\").Replace("}", "\\}") + "}";
     public string Serialize() => string.Join(' ', Terms.Select(Encode)
         .Concat(Fields.Select(field => field.Key + ":" + Encode(field.Value)))
         .Concat(Dates.Select(date => "date:" + Encode(date.Source))));

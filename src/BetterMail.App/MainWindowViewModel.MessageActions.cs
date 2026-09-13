@@ -4,6 +4,31 @@ namespace BetterMail.App;
 
 public sealed partial class MainWindowViewModel
 {
+    private readonly HashSet<string> _deletingDrafts = new(StringComparer.Ordinal);
+    public bool IsDraftDeletionPending(LocalDraft draft) => _deletingDrafts.Contains(draft.Id) ||
+        BusyActions.Any(action => action.ItemId == draft.Id && action.Kind is MailActionKind.DeleteDraft or MailActionKind.Send);
+    internal async Task DeleteDraftQuickAsync(LocalDraft draft)
+    {
+        if (_store is null || draft.IsQueued || !_deletingDrafts.Add(draft.Id)) return;
+        MailActionStateChanged();
+        var feedback = Task.Delay(350);
+        try
+        {
+            var current = await _store.GetLocalDraftAsync(draft.Id);
+            if (current is null || current.IsQueued) return;
+            await _store.QueueDraftDeletionAsync(current);
+            var action = (await _store.GetMailActionsAsync()).FirstOrDefault(item => item.Kind == MailActionKind.DeleteDraft && item.ItemId == current.Id);
+            if (action is not null) ShowQueuedAction(action);
+            await feedback;
+            foreach (var item in Drafts.Where(item => item.Id == draft.Id).ToArray()) Drafts.Remove(item);
+            RebuildVisibleDrafts();
+            RaiseDraftState();
+            _ = SyncAsync();
+        }
+        catch (Exception error) { Error = error.Message; }
+        finally { _deletingDrafts.Remove(draft.Id); MailActionStateChanged(); }
+    }
+
     private readonly Dictionary<string, int> _visualMailActions = new(StringComparer.Ordinal);
     private int _mailActionVersion;
     public int MailActionVersion => _mailActionVersion;

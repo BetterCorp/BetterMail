@@ -45,7 +45,7 @@ Navigation stays available while mailbox sync or another workspace load is pendi
 
 The sync button opens activity details during a running sync, including the current mailbox/folder, completed mailbox count, queued sends, Busy actions, view refresh, draft reconciliation, health reporting, workspace cache, and maintenance. Indeterminate indicators are used where the provider supplies no total.
 
-Settings → Accounts includes Move up / Move down controls. Order persists across restarts and groups shared mailboxes beneath their owning account. Generic navigation/search/attachment labels use Drive; provider labels next to an account retain OneDrive or Google Drive as appropriate. This does not add Google Drive provider support.
+Settings → Accounts → Mail sidebar includes Up / Down controls for every primary and shared mailbox. Mailboxes can be interleaved independently of their linked account, and each can start collapsed. Both preferences persist across restarts. Separate Workspace up / Workspace down controls order the linked accounts in other workspaces. Generic navigation/search/attachment labels use Drive; provider labels next to an account retain OneDrive or Google Drive as appropriate. This does not add Google Drive provider support.
 
 People uses compact virtualized rows with secondary actions in an overflow menu. Mail and Calendar share a neutral expandable account header. Drive new-folder and rename inputs appear in action flyouts rather than occupying the toolbar.
 
@@ -88,3 +88,18 @@ Mail sender images are separately controlled by **Settings → Accounts → Mail
 After normal mail and workspace sync finish, an optional background pass warms missing contact artwork from locally cached contacts. Either People images or Mail images must be enabled. It performs one lookup at a time, yields when image workers are busy, and cancels when normal sync restarts or both image settings are disabled. Successful contact images remain reusable while held in the bounded in-memory cache; misses wait 24 hours before retrying. Prefetch stops when the cache is full instead of evicting visible artwork. There is no persistent photo store: restarting the app or foreground cache eviction can require another lookup. Email changes naturally use a different cache key.
 
 People opens from the local contact cache and mail history, then refreshes in the background. Its Table/Cards switch persists across restarts; card rows remain virtualized and adapt from one to four columns. Calendar initializes from cached calendars and events before refreshing remotely, retains calendar visibility choices, and rejects outdated event results after navigation. First use without cached data still needs an initial provider fetch. The message list uses a compact single-line folder/count header, with a second line only for bulk selection.
+
+
+## Mail navigation, search and mailbox layout
+
+Search uses a labelled Filters button, a compact results header, and rows that stretch across the results panel. Opening the filter form preserves plain terms such as `bob`; focusing a nonempty search field or pressing Enter reruns the search, even while an older provider search is pending. References reviewed in Mobbin: [Front advanced search](https://mobbin.com/screens/43b2e9ff-ac6c-4240-9d4a-201fc24fd597), [Skiff search](https://mobbin.com/screens/cce393ee-75b8-48b4-934d-346f1b1583ab), and [Notion Mail filters](https://mobbin.com/screens/37573e33-3175-4605-9082-f0fc04d436be).
+
+Double-click opens the clicked message immediately and hydrates its cached conversation afterward. Thread headers retain selectable text without an extra down-arrow button. Mail-list refreshes restore selected row identities and preserve scroll unless the user navigates or scrolls meanwhile. Sync-issue drafts have a direct × delete action with per-row progress; deleting another issue does not wait for the previous network deletion.
+
+| Updated UI | Light | Dark |
+| --- | --- | --- |
+| Search results | [Screenshot](screenshots/search-results-light.png) | [Screenshot](screenshots/search-results-dark.png) |
+| Mailbox order and collapse defaults | [Screenshot](screenshots/mailbox-order-light.png) | [Screenshot](screenshots/mailbox-order-dark.png) |
+| Draft issue quick actions | [Screenshot](screenshots/draft-issue-actions-light.png) | [Screenshot](screenshots/draft-issue-actions-dark.png) |
+
+The offline preview checks full-width search rows, selection after full reconciliation and individual state updates, and immediate preview opening without a cached thread. All screenshots in this section use fictional data.

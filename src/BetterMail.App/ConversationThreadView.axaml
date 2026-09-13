@@ -115,11 +115,8 @@
           <DataTemplate x:DataType="app:ConversationMessageItem">
             <Border Classes="threadMessage"
                     Classes.selected="{Binding IsSelected}">
-              <Grid ColumnDefinitions="Auto,*">
-                <Button Classes="command" Content="⌄" VerticalAlignment="Top" Margin="2,6,0,0" Padding="5"
-                        Command="{Binding $parent[UserControl].DataContext.ToggleMessageCommand}" CommandParameter="{Binding}"
-                        AutomationProperties.Name="{Binding Sender, StringFormat='Expand or collapse message from {0}'}" />
-                <Border Grid.Column="1" Padding="12,8">
+              <Grid>
+                <Border Padding="12,8" Tapped="ThreadHeaderTapped">
                   <Grid ColumnDefinitions="*,Auto"
                         RowDefinitions="Auto,Auto,Auto"
                         ColumnSpacing="10">

@@ -448,6 +448,7 @@ public sealed partial class MainWindowViewModel
                     static item => item.Name);
                 var notes = new List<NoteInfo>();
                 var complete = true;
+                var notebookIssues = new Dictionary<string, List<string>>(StringComparer.Ordinal);
                 foreach (var notebook in notebooks)
                 {
                     try
@@ -472,9 +473,13 @@ public sealed partial class MainWindowViewModel
                     catch (Exception exception) when (exception is not OperationCanceledException)
                     {
                         complete = false;
-                        issues.Enqueue($"{account.EmailAddress} · Notes · {notebook.Name}: {WorkspaceErrors.Describe(exception)}");
+                        var description = WorkspaceErrors.Describe(exception);
+                        if (!notebookIssues.TryGetValue(description, out var names)) notebookIssues[description] = names = [];
+                        names.Add(notebook.Name);
                     }
                 }
+                foreach (var (description, names) in notebookIssues)
+                    issues.Enqueue($"{account.EmailAddress} · Notes · {string.Join(", ", names)}: {description}");
                 if (complete) await _store.ReplaceWorkspaceItemsAsync(
                     "note", account.AccountId, "all", notes,
                     static item => item.ProviderId,

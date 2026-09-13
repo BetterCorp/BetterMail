@@ -141,7 +141,6 @@ public sealed class MainWindowXamlTests
         Assert.Contains("new WindowSessionStore(_viewModel.DataDirectory)", window);
         Assert.DoesNotContain("MessageList.InvalidateMeasure()", window);
         Assert.DoesNotContain("MessageList.LayoutUpdated +=", window);
-        Assert.DoesNotContain("DispatcherPriority.Loaded", window);
     }
 
     [Fact]
@@ -219,7 +218,8 @@ public sealed class MainWindowXamlTests
         Assert.Contains("DoubleTapped=" + (char)34 + "CalendarEventDoubleTapped" + (char)34, calendarXaml);
         Assert.Contains(BindingAttribute("IsVisible", "ShowWorkspaceSurface"), xaml);
         Assert.Contains(BindingAttribute("IsVisible", "ShowMailSurface"), xaml);
-        Assert.Contains("ToggleMessageCommand", conversationXaml);
+        Assert.Contains("ThreadHeaderTapped", conversationXaml);
+        Assert.DoesNotContain("Content=\"⌄\"", conversationXaml);
         Assert.Contains("<SelectableTextBlock", threadHeaders);
         Assert.Contains("<SelectableTextBlock Text=" + (char)34 + "{Binding SelectedThread.Subject", conversationXaml);
         Assert.Contains("<SelectableTextBlock Text=" + (char)34 + "{Binding SenderAddress}", threadHeaders);

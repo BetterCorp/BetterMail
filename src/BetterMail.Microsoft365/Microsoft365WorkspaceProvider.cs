@@ -20,8 +20,6 @@ public sealed partial class Microsoft365WorkspaceProvider(
     private const string EventSelect =
         "id,calendar,subject,start,end,location,attendees,isReminderOn,reminderMinutesBeforeStart,recurrence,showAs," +
         "organizer,body,isAllDay,isCancelled,webLink,onlineMeeting";
-    private const string TaskSelect =
-        "id,title,status,body,dueDateTime,importance,isReminderOn,reminderDateTime,recurrence,categories,createdDateTime,completedDateTime";
     private static readonly string[] CalendarScopes = ["Calendars.ReadWrite"];
     private static readonly string[] ContactScopes = ["Contacts.ReadWrite"];
     private static readonly string[] TaskScopes = ["Tasks.ReadWrite"];
@@ -207,7 +205,7 @@ public sealed partial class Microsoft365WorkspaceProvider(
         MailAccount account, CancellationToken cancellationToken = default) =>
         GetPagedAsync(
             account,
-            "me/todo/lists?$select=id,displayName,wellknownListName,isOwner,isShared&$top=100",
+            "me/todo/lists",
             TaskScopes,
             item => MapTaskList(item, account.AccountId),
             cancellationToken);
@@ -264,7 +262,7 @@ public sealed partial class Microsoft365WorkspaceProvider(
     {
         var tasks = await GetPagedAsync(
             account,
-            $"{TaskEndpoint(account, list.AccountId, list.ProviderId)}?$select={TaskSelect}&$top=250",
+            TaskEndpoint(account, list.AccountId, list.ProviderId),
             TaskScopes,
             item => MapTask(item, list.ProviderId, account.AccountId),
             cancellationToken);

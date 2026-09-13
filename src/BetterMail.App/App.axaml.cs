@@ -131,6 +131,7 @@ public sealed partial class App : Application
         viewModel.MailSyncRange = preferences.MailSyncRange;
         viewModel.ConfigureMailQuickActions(preferences.MailQuickActions);
         viewModel.ConfigureAccountOrder(preferences.AccountOrder);
+        viewModel.ConfigureMailboxLayout(preferences.MailboxOrder, preferences.CollapsedMailboxes);
         viewModel.ContactImagesEnabled = preferences.ContactImagesEnabled;
         viewModel.MailSenderImagesEnabled = preferences.MailSenderImagesEnabled;
         viewModel.PeopleCardView = preferences.PeopleCardView;
@@ -163,7 +164,9 @@ public sealed partial class App : Application
                     AccountOrder: viewModel.GetAccountOrderPreferences(),
                     ContactImagesEnabled: viewModel.ContactImagesEnabled,
                     MailSenderImagesEnabled: viewModel.MailSenderImagesEnabled,
-                    PeopleCardView: viewModel.PeopleCardView));
+                    PeopleCardView: viewModel.PeopleCardView,
+                    MailboxOrder: viewModel.GetMailboxOrderPreferences(),
+                    CollapsedMailboxes: viewModel.GetCollapsedMailboxPreferences()));
             }
         };
         viewModel.ConfigureSenderPreferences(
