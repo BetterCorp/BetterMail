@@ -1875,17 +1875,27 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         }
     }
 
+    private int _draftRefreshVersion;
+
     private async Task RefreshDraftsAsync()
     {
         if (_store is null)
         {
             return;
         }
+        var version = Interlocked.Increment(ref _draftRefreshVersion);
         var drafts = await _store.GetLocalDraftSummariesAsync();
-        Replace(Drafts, drafts.Where(static draft => !draft.IsQueued));
-        Replace(Outbox, drafts.Where(static draft => draft.IsQueued && !draft.SendAccepted));
+        if (!TryApplyDraftSnapshot(version, drafts)) return;
         await RefreshBusyActionsAsync();
         RebuildVisibleDrafts();
+    }
+
+    private bool TryApplyDraftSnapshot(int version, IReadOnlyList<LocalDraft> drafts)
+    {
+        if (version != Volatile.Read(ref _draftRefreshVersion)) return false;
+        Replace(Drafts, drafts.Where(static draft => !draft.IsQueued));
+        Replace(Outbox, drafts.Where(static draft => draft.IsQueued && !draft.SendAccepted));
+        return true;
     }
 
     private async Task PrimeNewMailNotificationsAsync()

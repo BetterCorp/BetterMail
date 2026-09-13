@@ -17,6 +17,8 @@ public sealed partial class MainWindowViewModel
             var current = await _store.GetLocalDraftAsync(draft.Id);
             if (current is null || current.IsQueued) return;
             await _store.QueueDraftDeletionAsync(current);
+            // A refresh started before this commit must not resurrect its stale snapshot.
+            Interlocked.Increment(ref _draftRefreshVersion);
             var action = (await _store.GetMailActionsAsync()).FirstOrDefault(item => item.Kind == MailActionKind.DeleteDraft && item.ItemId == current.Id);
             if (action is not null) ShowQueuedAction(action);
             await feedback;
