@@ -33,6 +33,15 @@ public sealed partial class MainWindow : Window
     private bool _preservingMessageSelection;
     private bool _updatingMessageSelection;
 
+    private void ContactDetailsMailClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (_viewModel?.EditingContact is { } person) _viewModel.ComposeTo(person);
+    }
+    private void ContactDetailsHistoryClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (_viewModel?.EditingContact is { } person) _viewModel.ViewMailFor(person);
+    }
+
     private void EditPersonClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is MainWindowViewModel vm && sender is Control { DataContext: PersonEntry person })
@@ -53,6 +62,13 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _agendaClock.Tick += (_, _) => _viewModel?.UpdateAgendaClock();
+        AgendaButton.Flyout!.Opened += (_, _) => _agendaClock.Start();
+        AgendaButton.Flyout.Closed += (_, _) => _agendaClock.Stop();
+        Closed += (_, _) => _agendaClock.Stop();
+        MessageList.AddHandler(PointerWheelChangedEvent, (_, _) => _messageListInputVersion++, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        MessageList.AddHandler(PointerPressedEvent, (_, _) => _messageListInputVersion++, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        MessageList.AddHandler(KeyDownEvent, (_, _) => _messageListInputVersion++, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         DataContextChanged += (_, _) => BindViewModel(DataContext as MainWindowViewModel);
         SizeChanged += (_, args) => { ApplyResponsiveLayout(args.NewSize.Width); _viewModel?.SetPeopleViewportWidth(args.NewSize.Width - 110); };
         KeyDown += MainWindowKeyDown;
@@ -176,18 +192,9 @@ public sealed partial class MainWindow : Window
         ReadingSplitter.IsVisible = showMail && !phone;
 
         SetColumns(ModuleHeader, phone ? 1 : 1, GridLength.Auto);
-        Grid.SetRow(ModuleSearch, phone ? 1 : 0);
-        Grid.SetColumn(ModuleSearch, 0);
-        Grid.SetColumnSpan(ModuleSearch, phone ? 2 : 1);
         Grid.SetRow(ModuleRefresh, 0);
         Grid.SetColumn(ModuleRefresh, 1);
-        if (!phone)
-        {
-            SetColumns(ModuleHeader, 1, 320, GridLength.Auto);
-            Grid.SetColumn(ModuleSearch, 1);
-            Grid.SetColumnSpan(ModuleSearch, 1);
-            Grid.SetColumn(ModuleRefresh, 2);
-        }
+
 
         UpdateMailPanes();
     }
@@ -268,7 +275,7 @@ public sealed partial class MainWindow : Window
 
     private void MessageSelectionChanged(object? sender, SelectionChangedEventArgs args)
     {
-        if (_preservingMessageSelection)
+        if (_preservingMessageSelection || _viewModel?.IsReconcilingMessages == true)
         {
             return;
         }
@@ -298,9 +305,53 @@ public sealed partial class MainWindow : Window
         finally { _updatingMessageSelection = false; }
     }
 
+    private Vector? _messageListScroll;
+    private int _messageListInputVersion;
+    private int _capturedMessageListInputVersion;
+    private int _messageListReconcileVersion;
+    private void CaptureMessageListScroll()
+    {
+        _messageListReconcileVersion++;
+        _messageListScroll = _viewModel?.IsLoadingMessages == false
+            ? MessageList.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault()?.Offset : null;
+        _capturedMessageListInputVersion = _messageListInputVersion;
+    }
+
+    private void RestoreMessageListSelection()
+    {
+        if (_viewModel is null || MessageList.SelectedItems is not { } selection) return;
+        _preservingMessageSelection = true;
+        try
+        {
+            var desired = _viewModel.SelectedMessages.ToList();
+            if (_viewModel.SelectedMessage is { } primary && !desired.Contains(primary)) desired.Add(primary);
+            var keys = desired.Select(message => (message.MailboxId, message.ProviderId)).ToHashSet();
+            var current = _viewModel.Messages.Where(message => keys.Contains((message.MailboxId, message.ProviderId))).ToArray();
+            foreach (var old in selection.OfType<MailMessage>().Where(message => !current.Contains(message)).ToArray()) selection.Remove(old);
+            foreach (var message in current) if (!selection.Contains(message)) selection.Add(message);
+        }
+        finally { _preservingMessageSelection = false; }
+        if (_messageListScroll is { } offset)
+        {
+            var version = _capturedMessageListInputVersion;
+            var reconcileVersion = _messageListReconcileVersion;
+            var viewModel = _viewModel;
+            var contextVersion = viewModel.MessageListContextVersion;
+            var module = viewModel.ActiveModule;
+            var search = viewModel.IsSearchResultsView;
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (_messageListInputVersion == version && _messageListReconcileVersion == reconcileVersion &&
+                    ReferenceEquals(_viewModel, viewModel) && viewModel.MessageListContextVersion == contextVersion && viewModel.ActiveModule == module &&
+                    viewModel.IsSearchResultsView == search && !viewModel.IsLoadingMessages && MessageList.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault() is { } scroll)
+                    scroll.Offset = offset;
+            }, Avalonia.Threading.DispatcherPriority.Loaded);
+        }
+    }
+
     private void MessagesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs args)
     {
-        if (_viewModel is null || args.Action != NotifyCollectionChangedAction.Replace ||
+        if (_viewModel is null || _viewModel.IsReconcilingMessages || args.Action != NotifyCollectionChangedAction.Replace ||
             args.OldItems is null || args.NewItems is null || MessageList.SelectedItems is not { } selectedItems)
         {
             return;
@@ -509,6 +560,31 @@ public sealed partial class MainWindow : Window
         args.Handled = true;
     }
 
+    internal void FocusGlobalSearch() { MailSearch.Focus(); MailSearch.SelectAll(); }
+
+    private readonly Avalonia.Threading.DispatcherTimer _agendaClock = new() { Interval = TimeSpan.FromMinutes(1) };
+    private async void DayAgendaClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (_viewModel is null || sender is not Button button) return;
+        _viewModel.UpdateAgendaClock();
+        if (button.Flyout is Flyout { Content: Control content }) content.Width = Math.Min(360, Math.Max(240, Bounds.Width - 48));
+        button.Flyout!.ShowAt(button);
+        await _viewModel.RefreshDayAgendaAsync();
+    }
+    private void AgendaEventClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (sender is Button { DataContext: DayAgendaItem item })
+        {
+            AgendaButton.Flyout?.Hide();
+            _viewModel?.OpenAgendaEvent(item);
+        }
+    }
+
+    private void GlobalSearchFocused(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (_viewModel?.HasSearchText == true) _viewModel.SearchCommand.Execute(null);
+    }
+
     private void GlobalSearchKeyDown(object? sender, KeyEventArgs args)
     {
         if (args.Key == Key.Enter && _viewModel?.SearchCommand.CanExecute(null) == true)
@@ -624,12 +700,23 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        var viewModel = _viewModel;
         var session = new PreviewWindowSession(message.MailboxId, message.ProviderId);
-        var preview = await _viewModel.GetCachedPreviewAsync(session);
-        if (preview is not null)
+        // Show the clicked message immediately; hydrate the rest without delaying the window.
+        ShowPreviewWindow(session, new CachedMailPreview(message, [message], []));
+        if (!_previewWindows.TryGetValue(session, out var opened)) return;
+        try
         {
-            ShowPreviewWindow(session, preview);
+            var preview = await viewModel.GetCachedPreviewAsync(session);
+            if (preview is not null && _previewWindows.TryGetValue(session, out var current) && ReferenceEquals(current, opened) &&
+                opened.Content is ConversationThreadView { DataContext: ConversationThreadViewModel thread })
+            {
+                var selected = thread.SelectedMessage?.Message;
+                thread.Reconcile(preview.Messages, selected ?? preview.Selected);
+                thread.ReconcileDrafts(preview.Drafts);
+            }
         }
+        catch (Exception) { /* Keep the immediately displayed message available if cache hydration fails. */ }
     }
 
     internal async Task OpenNotificationAsync(
@@ -774,6 +861,13 @@ public sealed partial class MainWindow : Window
     private void MessageHeadersClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args) =>
         Execute(_viewModel?.ViewHeadersCommand);
 
+    private async void DraftDeleteClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        args.Handled = true;
+        if (_viewModel is not null && sender is Button { DataContext: LocalDraft draft })
+            await _viewModel.DeleteDraftQuickAsync(draft);
+    }
+
     private void SearchOptionsClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
     {
         if (_viewModel is null) return;
@@ -909,6 +1003,8 @@ public sealed partial class MainWindow : Window
             _viewModel.CalendarEventDetailsRequested -= ShowCalendarEventWindow;
             _viewModel.PropertyChanged -= ViewModelPropertyChanged;
             _viewModel.Messages.CollectionChanged -= MessagesCollectionChanged;
+            _viewModel.MessageListReconciled -= RestoreMessageListSelection;
+            _viewModel.MessageListReconciling -= CaptureMessageListScroll;
             AttachCalendarWorkspace(null);
         }
 
@@ -925,6 +1021,8 @@ public sealed partial class MainWindow : Window
             _viewModel.CalendarEventDetailsRequested += ShowCalendarEventWindow;
             _viewModel.PropertyChanged += ViewModelPropertyChanged;
             _viewModel.Messages.CollectionChanged += MessagesCollectionChanged;
+            _viewModel.MessageListReconciled += RestoreMessageListSelection;
+            _viewModel.MessageListReconciling += CaptureMessageListScroll;
             AttachCalendarWorkspace(_viewModel.CalendarWorkspace);
             MessageList.SelectedItem = _viewModel.SelectedMessage;
         }
@@ -934,7 +1032,7 @@ public sealed partial class MainWindow : Window
 
     private void ViewModelPropertyChanged(object? sender, PropertyChangedEventArgs args)
     {
-        if (args.PropertyName == nameof(MainWindowViewModel.SelectedMessage) && !_updatingMessageSelection)
+        if (args.PropertyName == nameof(MainWindowViewModel.SelectedMessage) && !_updatingMessageSelection && _viewModel?.IsReconcilingMessages != true)
         {
             var primary = _viewModel?.SelectedMessage;
             if (primary is null) MessageList.SelectedItems?.Clear();

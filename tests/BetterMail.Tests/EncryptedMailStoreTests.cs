@@ -6,6 +6,41 @@ namespace BetterMail.Tests;
 
 public sealed class EncryptedMailStoreTests
 {
+    [Fact]
+    public async Task ActionFailureCountSurvivesRetryAndStoreReload()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-retry-count-" + Guid.NewGuid());
+        var path = Path.Combine(directory, "mail.db");
+        var key = new string('A', 64);
+        try
+        {
+            string id;
+            await using (var store = new EncryptedMailStore(path, key))
+            {
+                await store.InitializeAsync(token);
+                var account = new MailAccount("microsoft365", "account", "tenant", "alex@example.test", "Alex", ProviderCapabilities.Mail);
+                var message = Message("account:alex@example.test", "message", "Subject", "Body");
+                await store.ApplySyncPageAsync("seed", new([message], null, false), token);
+                var action = await store.QueueMoveAsync(account, message, new(message.MailboxId, "archive", "Archive", 0, 0), token);
+                id = action.Id;
+                await store.StartMailActionAsync(id, token);
+                await store.FailMailActionAsync(id, "Offline", token);
+                Assert.Equal(1, Assert.Single(await store.GetMailActionsAsync(token)).FailureCount);
+                var retry = await store.StartMailActionAsync(id, token);
+                Assert.Null(retry!.Error);
+                Assert.Equal(1, retry.FailureCount);
+                await store.FailMailActionAsync(id, "Offline again", token);
+            }
+            await using var reopened = new EncryptedMailStore(path, key);
+            await reopened.InitializeAsync(token);
+            Assert.Equal(2, Assert.Single(await reopened.GetMailActionsAsync(token)).FailureCount);
+            Assert.True(await reopened.CancelMailActionAsync(id, token));
+            Assert.Empty(await reopened.GetMailActionsAsync(token));
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

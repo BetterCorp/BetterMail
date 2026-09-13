@@ -222,6 +222,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         ShowSyncIssuesCommand = new AsyncCommand(() => ShowDraftListAsync(DraftListFilter.SyncIssues));
         ShowDraftConflictsCommand = new AsyncCommand(() => ShowDraftListAsync(DraftListFilter.Conflicts));
         ShowCalendarCommand = new AsyncCommand(() => ShowWorkspaceModuleAsync("Calendar"), CanOpenWorkspaceModule, allowConcurrent: true);
+        MoveMailboxUpCommand = new AsyncCommand<MailboxLayoutItem>(item => MoveMailboxAsync(item, -1), item => OrderedMailboxes.FirstOrDefault()?.Id != item.Mailbox.Id);
+        MoveMailboxDownCommand = new AsyncCommand<MailboxLayoutItem>(item => MoveMailboxAsync(item, 1), item => OrderedMailboxes.LastOrDefault()?.Id != item.Mailbox.Id);
         MoveAccountUpCommand = new AsyncCommand<MailAccount>(account => MoveAccountAsync(account, -1), account => OrderedAccounts.FirstOrDefault() != account);
         MoveAccountDownCommand = new AsyncCommand<MailAccount>(account => MoveAccountAsync(account, 1), account => OrderedAccounts.LastOrDefault() != account);
         ShowContactsCommand = new AsyncCommand(() => ShowWorkspaceModuleAsync("People"), CanOpenWorkspaceModule, allowConcurrent: true);
@@ -232,7 +234,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         SearchWorkspaceCommand = new AsyncCommand(RefreshWorkspaceAsync, CanOpenWorkspaceModule);
         SelectFolderCommand = new AsyncCommand<MailFolderItem>(SelectFolderAsync, allowConcurrent: true);
         LoadMoreMessagesCommand = new AsyncCommand(LoadMoreMessagesAsync, () => HasMoreMessages && !_isLoadingMoreMessages);
-        SearchCommand = new AsyncCommand(() => StartGlobalSearchAsync(debounce: false, forceOpen: true), () => _store is not null);
+        SearchCommand = new AsyncCommand(() => StartGlobalSearchAsync(debounce: false, forceOpen: true), () => _store is not null, allowConcurrent: true);
         OpenGlobalSearchResultCommand = new AsyncCommand<GlobalSearchResult>(OpenGlobalSearchResultAsync);
         OpenGlobalSearchGroupCommand = new AsyncCommand<GlobalSearchResult>(OpenGlobalSearchGroupAsync);
         CloseGlobalSearchCommand = new AsyncCommand(CloseGlobalSearchAsync);
@@ -274,6 +276,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         CancelRemoveAccountCommand = new AsyncCommand(CancelRemoveAccountAsync);
         ConfirmRemoveAccountCommand = new AsyncCommand(RemovePendingAccountAsync, () => _pendingRemovalAccount is not null);
         EditContactCommand = new AsyncCommand<PersonEntry>(EditContactAsync);
+        ClearPeopleFilterCommand = new AsyncCommand(ClearPeopleFilterAsync);
+        ContactOwners.CollectionChanged += (_, _) => RaisePropertyChanged(nameof(DefaultContactOwner));
         NewContactCommand = new AsyncCommand(OpenNewContactAsync, () => ContactOwners.Count > 0 && !_isContactActionRunning);
         RequestDeleteContactCommand = new AsyncCommand<PersonEntry>(RequestDeleteContactAsync);
         SaveContactCommand = new AsyncCommand(SaveContactAsync, () => IsContactEditorOpen && SelectedContactOwner is not null && !_isContactActionRunning);
@@ -315,6 +319,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             async () => await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(RefreshMcpChangesAsync),
             async (sender, id, message) => await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => QueueSendAsync(sender, id, message)), evidence, () => _workspaceProvider);
         _selectedSettingsTab = SettingsTabs[0];
+        Drafts.CollectionChanged += (_, _) => RaiseDraftState();
+        BusyActions.CollectionChanged += (_, _) => { RaiseDraftState(); MailActionStateChanged(); };
         foreach (var id in DefaultMailQuickActionIds)
         {
             MailQuickActionSlots.Add(new(
@@ -733,7 +739,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         _ => null
     };
     public bool ShowWorkspaceSearch => IsContactsModule;
-    public bool ShowWorkspaceRefresh => IsGenericWorkspaceModule && !ShowWorkspaceSearch;
+    public bool ShowWorkspaceRefresh => IsGenericWorkspaceModule;
     public bool IsWorkspaceEmpty => !IsWorkspaceLoading && ActiveModule switch
     {
         "Calendar" => false,
@@ -926,6 +932,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             RaisePropertyChanged(nameof(IsCalendarModule));
             RaisePropertyChanged(nameof(IsGenericWorkspaceModule));
             RaisePropertyChanged(nameof(IsContactsModule));
+            RaisePropertyChanged(nameof(GlobalSearchPlaceholder));
             RaisePropertyChanged(nameof(IsTasksModule));
             RaisePropertyChanged(nameof(IsFilesModule));
             RaisePropertyChanged(nameof(IsNotesModule));
@@ -950,7 +957,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     public string ModuleSearchText
     {
         get => _moduleSearchText;
-        set => SetProperty(ref _moduleSearchText, value);
+        set { if (SetProperty(ref _moduleSearchText, value)) RaisePropertyChanged(nameof(HasPeopleFilter)); }
     }
 
     public bool IsWorkspaceLoading
@@ -1491,6 +1498,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             }
         });
         RaisePropertyChanged(nameof(SettingsAccounts));
+        RaisePropertyChanged(nameof(SettingsMailboxes));
         _initializationComplete = true;
         RaisePropertyChanged(nameof(HasAccounts));
         RaisePropertyChanged(nameof(ShowOnboarding));
@@ -1570,6 +1578,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(HasAccounts));
         RaisePropertyChanged(nameof(ShowOnboarding));
         RaisePropertyChanged(nameof(SettingsAccounts));
+        RaisePropertyChanged(nameof(SettingsMailboxes));
     }
 
     private async Task EnsureProviderAsync(string providerId, CancellationToken cancellationToken = default)
@@ -1738,6 +1747,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             RaisePropertyChanged(nameof(RemovalAccountText));
             RaisePropertyChanged(nameof(SharedMailboxes));
             RaisePropertyChanged(nameof(SettingsAccounts));
+            RaisePropertyChanged(nameof(SettingsMailboxes));
             RaisePropertyChanged(nameof(HasAccounts));
             RaisePropertyChanged(nameof(ShowOnboarding));
             ((AsyncCommand)SyncCommand).Refresh();
@@ -1777,6 +1787,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             await RefreshOwnedWorkspaceAccountsIfCreatedAsync();
             RebuildSenderSettings();
             RaisePropertyChanged(nameof(SettingsAccounts));
+            RaisePropertyChanged(nameof(SettingsMailboxes));
         });
     }
 
@@ -1921,6 +1932,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         RebuildSenderSettings();
         RaisePropertyChanged(nameof(SharedMailboxes));
         RaisePropertyChanged(nameof(SettingsAccounts));
+        RaisePropertyChanged(nameof(SettingsMailboxes));
         var folders = await _provider.GetFoldersAsync(account, mailbox);
         await _store.SaveFoldersAsync(mailbox.Id, folders);
         await LoadFoldersAsync();
@@ -1962,11 +1974,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             RebuildSenderSettings();
             RaisePropertyChanged(nameof(SharedMailboxes));
             RaisePropertyChanged(nameof(SettingsAccounts));
+            RaisePropertyChanged(nameof(SettingsMailboxes));
         }
         catch (Exception exception)
         {
             Error = $"Shared mailbox access could not be changed: {exception.Message}";
             RaisePropertyChanged(nameof(SettingsAccounts));
+            RaisePropertyChanged(nameof(SettingsMailboxes));
         }
     }
     internal async Task<CachedMailPreview?> OpenNotificationAsync(
@@ -2020,7 +2034,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             GlobalSearchResults.Clear();
         }
-        if (_store is null || query.Length < 2)
+        if (_store is null || query.Length == 0)
         {
             ClearLatestMailSearchResults();
             IsGlobalSearchRunning = false;
@@ -2555,7 +2569,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 await _store!.ReplaceWorkspaceItemsAsync(
                     "contact", account.AccountId, "all", contacts,
                     static item => item.ProviderId,
-                    static item => $"{item.DisplayName} {string.Join(' ', item.EmailAddresses)}",
+                    static item => item.SearchText,
                     cancellationToken);
             }
             else
@@ -2563,7 +2577,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 await _store!.UpsertWorkspaceItemsAsync(
                     "contact", account.AccountId, "all", contacts,
                     static item => item.ProviderId,
-                    static item => $"{item.DisplayName} {string.Join(' ', item.EmailAddresses)}",
+                    static item => item.SearchText,
                     cancellationToken);
             }
             return Filter(contacts);
@@ -2575,7 +2589,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
         IReadOnlyList<ContactInfo> Filter(IEnumerable<ContactInfo> contacts) => contacts
             .Where(contact => string.IsNullOrWhiteSpace(query) ||
-                Contains(contact.DisplayName, query) ||
+                Contains(contact.SearchText, query) ||
                 contact.EmailAddresses.Any(address => Contains(address, query)))
             .ToArray();
     }
@@ -2868,6 +2882,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     }
 
     private int _messageLoadVersion;
+    internal int MessageListContextVersion => _messageLoadVersion;
     private CancellationTokenSource? _messageLoadCancellation;
     private bool _isLoadingMessages;
     public bool IsLoadingMessages
@@ -3030,9 +3045,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             Replace(Folders, refreshed);
             SetSelectedFolder(Folders.FirstOrDefault(folder =>
                 folder.ProviderId == selectedFolderId && folder.MailboxId == selectedMailboxId));
+            var expanded = FolderGroups.ToDictionary(group => group.Mailbox.Id, group => group.IsExpanded);
             Replace(FolderGroups, OrderedMailboxes.Select(mailbox => new MailboxFolderGroup(
                 mailbox,
-                BuildFolderTree(Folders.Where(folder => folder.MailboxId == mailbox.Id)))));
+                BuildFolderTree(Folders.Where(folder => folder.MailboxId == mailbox.Id)))
+                { IsExpanded = expanded.GetValueOrDefault(mailbox.Id, !_collapsedMailboxes.Contains(mailbox.Id)) }));
         }
         else
         {
@@ -3342,6 +3359,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 ? await GetCachedCalendarEventSourceAsync(new(
                     accountId, calendarEvent.CalendarId, calendarEvent.ProviderId))
                 : null;
+            await RefreshDayAgendaAsync();
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -3638,7 +3656,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 {
                     var cached = _store is null ? Contacts.Where(contact => contact.AccountId == owner.Account.AccountId && contact.OwnerAddress == owner.OwnerAddress).ToArray()
                         : await _store.GetWorkspaceItemsAsync<ContactInfo>("contact", owner.CacheId, "all");
-                    return new AccountContactResult(owner, cached.Where(contact => string.IsNullOrWhiteSpace(query) || Contains(contact.DisplayName, query) ||
+                    return new AccountContactResult(owner, cached.Where(contact => string.IsNullOrWhiteSpace(query) || Contains(contact.SearchText, query) ||
                         contact.EmailAddresses.Any(email => Contains(email, query))).ToArray(), null);
                 }
                 var contacts = owner.Mailbox.IsShared
@@ -3652,14 +3670,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                         await _store.ReplaceWorkspaceItemsAsync(
                             "contact", owner.CacheId, "all", contacts,
                             static item => item.ProviderId,
-                            static item => $"{item.DisplayName} {string.Join(' ', item.EmailAddresses)}");
+                            static item => item.SearchText);
                     }
                     else
                     {
                         await _store.UpsertWorkspaceItemsAsync(
                             "contact", owner.CacheId, "all", contacts,
                             static item => item.ProviderId,
-                            static item => $"{item.DisplayName} {string.Join(' ', item.EmailAddresses)}");
+                            static item => item.SearchText);
                     }
                 }
                 return new AccountContactResult(owner, contacts, null);
@@ -3668,7 +3686,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             {
                 return new AccountContactResult(owner, Contacts.Where(contact =>
                     contact.AccountId == owner.Account.AccountId && contact.OwnerAddress == owner.OwnerAddress &&
-                    (string.IsNullOrWhiteSpace(query) || Contains(contact.DisplayName, query) || contact.EmailAddresses.Any(email => Contains(email, query)))).ToArray(), exception.Message);
+                    (string.IsNullOrWhiteSpace(query) || Contains(contact.SearchText, query) || contact.EmailAddresses.Any(email => Contains(email, query)))).ToArray(), exception.Message);
             }
         }));
         if (query != ModuleSearchText) return;
@@ -3771,6 +3789,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     {
         if (person.SavedContact is null)
         {
+            OpenNewContactAsync();
+            ContactName = person.DisplayName;
+            ContactEmails = person.EmailText;
             return Task.CompletedTask;
         }
         _editingContact = person;
@@ -3778,10 +3799,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         SelectedContactOwner = ContactOwners.FirstOrDefault(owner =>
             owner.Account.AccountId == person.SavedContact.AccountId &&
             owner.OwnerAddress == person.SavedContact.OwnerAddress);
+        LoadContactDetails(person.SavedContact.Details);
         ContactName = person.SavedContact.DisplayName;
         ContactEmails = string.Join("; ", person.SavedContact.EmailAddresses);
         IsContactEditorOpen = true;
         RaisePropertyChanged(nameof(IsEditingContact));
+        RaisePropertyChanged(nameof(EditingContact));
         RaisePropertyChanged(nameof(IsConfirmingContactDelete));
         RaisePropertyChanged(nameof(IsContactPaneOpen));
         ((AsyncCommand)SaveContactCommand).Refresh();
@@ -3792,11 +3815,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     {
         _editingContact = null;
         _pendingDeleteContact = null;
-        SelectedContactOwner = ContactOwners.FirstOrDefault();
+        SelectedContactOwner = DefaultContactOwner;
+        LoadContactDetails(null);
         ContactName = "";
         ContactEmails = "";
         IsContactEditorOpen = true;
         RaisePropertyChanged(nameof(IsEditingContact));
+        RaisePropertyChanged(nameof(EditingContact));
         RaisePropertyChanged(nameof(IsConfirmingContactDelete));
         RaisePropertyChanged(nameof(IsContactPaneOpen));
         ((AsyncCommand)SaveContactCommand).Refresh();
@@ -3809,6 +3834,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         _pendingDeleteContact = null;
         IsContactEditorOpen = false;
         RaisePropertyChanged(nameof(IsEditingContact));
+        RaisePropertyChanged(nameof(EditingContact));
         RaisePropertyChanged(nameof(IsConfirmingContactDelete));
         RaisePropertyChanged(nameof(IsContactPaneOpen));
         ((AsyncCommand)SaveContactCommand).Refresh();
@@ -3834,11 +3860,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 .Select(static address => address.Address)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
-            if (addresses.Length == 0)
+            var displayName = ContactDraft.ResolveDisplayName(ContactName, ContactGivenName, ContactSurname);
+            if (addresses.Length == 0 && displayName.Length == 0)
             {
-                throw new InvalidOperationException("Add at least one email address.");
+                throw new InvalidOperationException("Add a name or email address.");
             }
-            var draft = new ContactDraft(account.AccountId, ContactName.Trim(), addresses, owner.OwnerAddress);
+            var draft = new ContactDraft(account.AccountId, displayName, addresses, owner.OwnerAddress, EditedContactDetails());
             if (contact is null)
             {
                 await _workspaceProvider.CreateContactAsync(account, draft);
@@ -3850,6 +3877,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             _editingContact = null;
             IsContactEditorOpen = false;
             RaisePropertyChanged(nameof(IsEditingContact));
+        RaisePropertyChanged(nameof(EditingContact));
             await LoadPeopleAsync();
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -4225,77 +4253,109 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private void ApplyMessageUpdate(MailMessage original, MailMessage updated)
     {
-        var wasSelected = IsCurrentMessage(original);
-        var selectedIndex = SelectedMessages.ToList().FindIndex(message => SameMessage(message, original));
-        var index = Messages.ToList().FindIndex(message => SameMessage(message, original));
-        if (index >= 0)
+        MessageListReconciling?.Invoke();
+        IsReconcilingMessages = true;
+        try
         {
-            Messages[index] = updated;
+            var wasSelected = IsCurrentMessage(original);
+            var selectedIndex = SelectedMessages.ToList().FindIndex(message => SameMessage(message, original));
+            var index = Messages.ToList().FindIndex(message => SameMessage(message, original));
+            if (index >= 0)
+            {
+                Messages[index] = updated;
+            }
+            if (wasSelected)
+            {
+                SelectedMessage = updated;
+            }
+            if (selectedIndex >= 0)
+            {
+                SelectedMessages[selectedIndex] = updated;
+            }
         }
-        if (wasSelected)
+        finally
         {
-            SelectedMessage = updated;
-        }
-        if (selectedIndex >= 0)
-        {
-            SelectedMessages[selectedIndex] = updated;
+            IsReconcilingMessages = false;
+            MessageListReconciled?.Invoke();
         }
     }
 
+    internal bool IsReconcilingMessages { get; private set; }
+    internal event Action? MessageListReconciled;
+    internal event Action? MessageListReconciling;
+
     private void ReconcileMessages(IReadOnlyList<MailMessage> updated)
     {
-        updated = updated
-            .OrderByDescending(static message => message.ReceivedAt)
-            .ThenByDescending(static message => message.ProviderId, StringComparer.Ordinal)
-            .ToArray();
-        var selected = SelectedMessage;
-        var updatedKeys = updated.Select(MessageKey).ToHashSet(StringComparer.Ordinal);
-        for (var index = Messages.Count - 1; index >= 0; index--)
+        var selectedKeys = SelectedMessages.Select(MessageKey).ToHashSet(StringComparer.Ordinal);
+        MessageListReconciling?.Invoke();
+        IsReconcilingMessages = true;
+        try
         {
-            if (!updatedKeys.Contains(MessageKey(Messages[index])))
+            updated = updated
+                .OrderByDescending(static message => message.ReceivedAt)
+                .ThenByDescending(static message => message.ProviderId, StringComparer.Ordinal)
+                .ToArray();
+            var selected = SelectedMessage;
+            var updatedKeys = updated.Select(MessageKey).ToHashSet(StringComparer.Ordinal);
+            for (var index = Messages.Count - 1; index >= 0; index--)
             {
-                Messages.RemoveAt(index);
-            }
-        }
-
-        for (var index = 0; index < updated.Count; index++)
-        {
-            var message = updated[index];
-            if (SameMessage(selected, message) && selected?.Body is not null && message.Body is null)
-            {
-                message = message with { Body = selected.Body };
-            }
-            if (index >= Messages.Count)
-            {
-                Messages.Add(message);
-                continue;
-            }
-
-            if (!SameMessage(Messages[index], message))
-            {
-                var existingIndex = IndexOfMessage(message, index + 1);
-                if (existingIndex < 0)
+                if (!updatedKeys.Contains(MessageKey(Messages[index])))
                 {
-                    Messages.Insert(index, message);
+                    Messages.RemoveAt(index);
+                }
+            }
+
+            for (var index = 0; index < updated.Count; index++)
+            {
+                var message = updated[index];
+                if (SameMessage(selected, message) && selected?.Body is not null && message.Body is null)
+                {
+                    message = message with { Body = selected.Body };
+                }
+                if (index >= Messages.Count)
+                {
+                    Messages.Add(message);
                     continue;
                 }
 
-                Messages.Move(existingIndex, index);
-            }
-
-            if (!Messages[index].HasSameContent(message))
-            {
-                var wasSelected = SameMessage(selected, message);
-                Messages[index] = message;
-                if (wasSelected)
+                if (!SameMessage(Messages[index], message))
                 {
-                    SelectedMessage = message;
+                    var existingIndex = IndexOfMessage(message, index + 1);
+                    if (existingIndex < 0)
+                    {
+                        Messages.Insert(index, message);
+                        continue;
+                    }
+
+                    Messages.Move(existingIndex, index);
+                }
+
+                if (!Messages[index].HasSameContent(message))
+                {
+                    var wasSelected = SameMessage(selected, message);
+                    Messages[index] = message;
+                    if (wasSelected)
+                    {
+                        SelectedMessage = message;
+                    }
                 }
             }
-        }
 
-        var current = selected is null ? null : Messages.FirstOrDefault(message => SameMessage(message, selected));
-        SelectedMessage = current ?? Messages.FirstOrDefault();
+            var current = selected is null ? null : Messages.FirstOrDefault(message => SameMessage(message, selected));
+            SelectedMessage = current ?? Messages.FirstOrDefault();
+            CollectionUpdates.Reconcile(SelectedMessages, Messages.Where(message => selectedKeys.Contains(MessageKey(message))).ToArray(), MessageKey);
+            RaisePropertyChanged(nameof(MailSelectionText));
+            RaisePropertyChanged(nameof(HasMailSelection));
+            ((AsyncCommand)ReplyCommand).Refresh();
+            ((AsyncCommand)ReplyAllCommand).Refresh();
+            ((AsyncCommand)ForwardCommand).Refresh();
+            RefreshMailActionCommands();
+        }
+        finally
+        {
+            IsReconcilingMessages = false;
+            MessageListReconciled?.Invoke();
+        }
     }
 
     private int IndexOfMessage(MailMessage message, int startIndex)
@@ -5419,6 +5479,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(CurrentItemCountText));
         RaisePropertyChanged(nameof(ShowDraftEmptyState));
         RaisePropertyChanged(nameof(SyncIssueCount));
+        RaisePropertyChanged(nameof(HasSyncIssues));
         RaisePropertyChanged(nameof(DraftConflictCount));
         RaisePropertyChanged(nameof(SyncIssueCountText));
         RaisePropertyChanged(nameof(DraftConflictCountText));
@@ -5508,8 +5569,12 @@ public sealed record MailFolderNode(MailFolderItem Item, IReadOnlyList<MailFolde
     public string CountText => Item.CountText;
 }
 
-public sealed record MailboxFolderGroup(Mailbox Mailbox, IReadOnlyList<MailFolderNode> Folders)
+public sealed class MailboxFolderGroup(Mailbox mailbox, IReadOnlyList<MailFolderNode> folders) : ViewModelBase
 {
+    private bool _isExpanded = true;
+    public Mailbox Mailbox => mailbox;
+    public IReadOnlyList<MailFolderNode> Folders => folders;
+    public bool IsExpanded { get => _isExpanded; set => SetProperty(ref _isExpanded, value); }
     public string DisplayName => Mailbox.DisplayName;
     public string Address => Mailbox.Address;
     public string Color => AccountColors.For(Mailbox.Id);
@@ -5721,6 +5786,9 @@ public sealed record PersonEntry(
     DiscoveredPerson? DiscoveredPerson)
 {
     public bool IsSaved => SavedContact is not null;
+    public bool IsDiscovered => !IsSaved;
+    public string DetailsActionText => IsSaved ? "Details" : "Save contact";
+    public string WorkText => string.Join(" · ", new[] { SavedContact?.Details?.JobTitle, SavedContact?.Details?.CompanyName }.Where(value => !string.IsNullOrWhiteSpace(value)));
     public string Identity => SavedContact is { } contact
         ? $"saved\n{contact.AccountId}\n{contact.OwnerAddress}\n{contact.ProviderId}"
         : $"discovered\n{PrimaryEmail}";

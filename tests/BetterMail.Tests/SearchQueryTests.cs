@@ -6,6 +6,14 @@ namespace BetterMail.Tests;
 public sealed class SearchQueryTests
 {
     [Fact]
+    public void SimpleTermsStayReadableWhenOpeningAndApplyingSearchOptions()
+    {
+        Assert.Equal("bob", SearchQuery.Parse("bob").Serialize());
+        Assert.Equal("bob", SearchOptionsWindow.BuildQuery(new Dictionary<string, string> { ["words"] = "bob" }));
+        Assert.Equal(new[] { "quarterly review", "bob" }, SearchQuery.Parse(SearchQuery.Parse("\"quarterly review\" bob").Serialize()).Terms);
+    }
+
+    [Fact]
     public void FormAndTextRoundTripPhrasesEscapesAndDateRanges()
     {
         var parsed = SearchQuery.Parse("\"quarterly review\" type:mail in:{Inbox/Project Alpha} from:{Jamie} date:{>=2026-09-01} date:{<2026-10-01}");

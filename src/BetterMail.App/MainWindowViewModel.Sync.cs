@@ -11,6 +11,10 @@ public sealed partial class MainWindowViewModel
 
     public SyncStep StorageSyncStep { get; } = new("Storage maintenance") { Detail = "Not started" };
 
+    internal void RecordMailSyncOutcome(bool hasMailFailures) =>
+        RecordSyncOutcome(hasMailFailures || SyncSteps.Any(step =>
+            step.Detail == "Failed" || step.Detail.StartsWith("Failed:", StringComparison.Ordinal)));
+
     private async Task RunSyncStepAsync(SyncStep step, Func<Task> action)
     {
         step.Running = true;
@@ -158,6 +162,7 @@ public sealed partial class MainWindowViewModel
         }
         finally
         {
+            RecordMailSyncOutcome(!mailFailures.IsEmpty);
             foreach (var step in SyncSteps.Where(step => step.Running)) { step.Running = false; step.Detail = "Stopped"; }
             Interlocked.Exchange(ref _syncRunning, 0);
             IsSyncing = false;
@@ -351,6 +356,7 @@ public sealed partial class MainWindowViewModel
         catch (Exception error) { WorkspaceSyncStep.Detail = "Failed: " + error.Message; }
         finally
         {
+            RecordSyncOutcome(WorkspaceSyncStep.Detail != "Complete", workspace: true);
             WorkspaceSyncStep.Running = false;
             Interlocked.Exchange(ref _workspaceSyncRunning, 0);
             StartContactPhotoSync();
@@ -368,7 +374,7 @@ public sealed partial class MainWindowViewModel
                 await _store.ReplaceWorkspaceItemsAsync(
                     "contact", account.AccountId, "all", contacts,
                     static item => item.ProviderId,
-                    static item => $"{item.DisplayName} {string.Join(' ', item.EmailAddresses)}");
+                    static item => item.SearchText);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -448,6 +454,7 @@ public sealed partial class MainWindowViewModel
                     static item => item.Name);
                 var notes = new List<NoteInfo>();
                 var complete = true;
+                var notebookIssues = new Dictionary<string, List<string>>(StringComparer.Ordinal);
                 foreach (var notebook in notebooks)
                 {
                     try
@@ -472,9 +479,13 @@ public sealed partial class MainWindowViewModel
                     catch (Exception exception) when (exception is not OperationCanceledException)
                     {
                         complete = false;
-                        issues.Enqueue($"{account.EmailAddress} · Notes · {notebook.Name}: {WorkspaceErrors.Describe(exception)}");
+                        var description = WorkspaceErrors.Describe(exception);
+                        if (!notebookIssues.TryGetValue(description, out var names)) notebookIssues[description] = names = [];
+                        names.Add(notebook.Name);
                     }
                 }
+                foreach (var (description, names) in notebookIssues)
+                    issues.Enqueue($"{account.EmailAddress} · Notes · {string.Join(", ", names)}: {description}");
                 if (complete) await _store.ReplaceWorkspaceItemsAsync(
                     "note", account.AccountId, "all", notes,
                     static item => item.ProviderId,

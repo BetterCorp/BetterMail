@@ -467,6 +467,33 @@
                       AutomationProperties.Name="Add Google account" />
             </StackPanel>
           </Grid>
+          <Border Classes="settingsCard">
+            <StackPanel Spacing="10">
+              <TextBlock Text="Mail sidebar" FontSize="16" FontWeight="SemiBold" />
+              <TextBlock Text="Arrange primary and shared mailboxes together. Choose which mailboxes start collapsed." TextWrapping="Wrap" Opacity="0.7" />
+              <ItemsControl ItemsSource="{Binding SettingsMailboxes}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="app:MailboxLayoutItem">
+                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,6">
+                      <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding Detail}" FontSize="11" Opacity="0.7" TextTrimming="CharacterEllipsis" />
+                      </StackPanel>
+                      <CheckBox Grid.Column="1" Content="Start collapsed" IsChecked="{Binding StartCollapsed}" />
+                      <Button Grid.Column="2" Content="Up" Command="{Binding $parent[UserControl].DataContext.MoveMailboxUpCommand}" CommandParameter="{Binding}" />
+                      <Button Grid.Column="3" Content="Down" Command="{Binding $parent[UserControl].DataContext.MoveMailboxDownCommand}" CommandParameter="{Binding}" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+          <StackPanel Spacing="8">
+            <TextBlock Text="Default account for new contacts" FontWeight="SemiBold" />
+            <ComboBox ItemsSource="{Binding ContactOwners}" SelectedItem="{Binding DefaultContactOwner}" HorizontalAlignment="Stretch" AutomationProperties.Name="Default contact account">
+              <ComboBox.ItemTemplate><DataTemplate x:DataType="app:ContactOwnerOption"><TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" /></DataTemplate></ComboBox.ItemTemplate>
+            </ComboBox>
+          </StackPanel>
           <TextBlock Text="{Binding MailSyncRange, StringFormat='Requested cached history: {0}. Search covers locally cached mail.'}" TextWrapping="Wrap" />
           <ItemsControl ItemsSource="{Binding SyncHealth}">
             <ItemsControl.ItemTemplate>
@@ -512,8 +539,8 @@
                         <TextBlock Text="{Binding ProviderName}" FontSize="11" Foreground="{Binding ProviderColor}" />
                       </StackPanel>
                       <WrapPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                        <Button Classes="command" Content="Move up" Command="{Binding $parent[UserControl].DataContext.MoveAccountUpCommand}" CommandParameter="{Binding Account}" AutomationProperties.Name="Move account up" />
-                        <Button Classes="command" Content="Move down" Command="{Binding $parent[UserControl].DataContext.MoveAccountDownCommand}" CommandParameter="{Binding Account}" AutomationProperties.Name="Move account down" />
+                        <Button Classes="command" Content="Workspace up" Command="{Binding $parent[UserControl].DataContext.MoveAccountUpCommand}" CommandParameter="{Binding Account}" AutomationProperties.Name="Move account up" />
+                        <Button Classes="command" Content="Workspace down" Command="{Binding $parent[UserControl].DataContext.MoveAccountDownCommand}" CommandParameter="{Binding Account}" AutomationProperties.Name="Move account down" />
                         <Button Content="Re-authenticate" Background="#0F6CBD" Foreground="White" Margin="0,0,5,5"
                                 Command="{Binding $parent[UserControl].DataContext.ReauthenticateAccountCommand}"
                                 CommandParameter="{Binding Account}"

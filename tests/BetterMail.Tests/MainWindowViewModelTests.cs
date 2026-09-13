@@ -7,6 +7,78 @@ namespace BetterMail.Tests;
 public sealed class MainWindowViewModelTests
 {
     [Fact]
+    public async Task PrimaryAndSharedMailboxesCanInterleaveAndPersistCollapseDefaults()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-mailbox-layout-" + Guid.NewGuid());
+        try
+        {
+            var vm = new MainWindowViewModel(null, directory, _ => { }, _ => { }, null);
+            var x = new MailAccount("microsoft365", "x", "tenant", "x@example.test", "X", ProviderCapabilities.Mail);
+            var y = x with { AccountId = "y", EmailAddress = "y@example.test", DisplayName = "Y" };
+            vm.Accounts.Add(x); vm.Accounts.Add(y);
+            var boxes = new[] { new Mailbox("x", x.EmailAddress, "X"), new Mailbox("y", y.EmailAddress, "Y"),
+                new Mailbox("x", "shared-x@example.test", "Shared X", IsShared: true),
+                new Mailbox("y", "shared-y@example.test", "Shared Y", IsShared: true) };
+            foreach (var box in boxes) { vm.Mailboxes.Add(box); vm.FolderGroups.Add(new(box, [])); }
+            // Starting order X, shared X, Y, shared Y -> shared X, shared Y, Y, X.
+            foreach (var id in new[] { boxes[2].Id, boxes[3].Id, boxes[3].Id, boxes[1].Id })
+                await ((AsyncCommand<MailboxLayoutItem>)vm.MoveMailboxUpCommand).ExecuteAsync(vm.SettingsMailboxes.Single(item => item.Mailbox.Id == id));
+            Assert.Equal(new[] { boxes[2].Id, boxes[3].Id, boxes[1].Id, boxes[0].Id }, vm.SettingsMailboxes.Select(item => item.Mailbox.Id));
+            Assert.Equal(vm.SettingsMailboxes.Select(item => item.Mailbox.Id), vm.FolderGroups.Select(group => group.Mailbox.Id));
+            vm.SettingsMailboxes.First().StartCollapsed = true;
+            Assert.False(vm.FolderGroups.First().IsExpanded);
+            AppPreferencesStore.Save(directory, new AppPreferences(MailboxOrder: vm.GetMailboxOrderPreferences(), CollapsedMailboxes: vm.GetCollapsedMailboxPreferences()));
+            var preferences = AppPreferencesStore.Load(directory);
+            var restored = new MainWindowViewModel(null, directory, _ => { }, _ => { }, null);
+            restored.Accounts.Add(x); restored.Accounts.Add(y);
+            foreach (var box in boxes) restored.Mailboxes.Add(box);
+            restored.ConfigureMailboxLayout(preferences.MailboxOrder, preferences.CollapsedMailboxes);
+            Assert.Equal(vm.SettingsMailboxes.Select(item => item.Mailbox.Id), restored.SettingsMailboxes.Select(item => item.Mailbox.Id));
+            Assert.True(restored.SettingsMailboxes.First().StartCollapsed);
+            Assert.False(restored.SettingsMailboxes.Last().StartCollapsed);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task DraftQuickDeletionDoesNotWaitForOtherDraftsToSync()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-draft-quick-delete-" + Guid.NewGuid());
+        var provider = new LifecycleDraftProvider { DeleteRelease = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        MainWindowViewModel? vm = null;
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), new string('A', 64));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "account", "tenant", "me@example.test", "Me", ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, "Me");
+            await store.SaveAccountAsync(account, token); await store.SaveMailboxAsync(mailbox, token);
+            vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
+            vm.Accounts.Add(account); vm.Mailboxes.Add(mailbox);
+            var first = new LocalDraft("first", account.AccountId, mailbox.Id, "to@example.test", "", "", "Draft", "Body", [], DateTimeOffset.UtcNow, ProviderDraftId: "remote-first");
+            var second = first with { Id = "second", ProviderDraftId = "remote-second" };
+            await store.SaveLocalDraftAsync(first, token); await store.SaveLocalDraftAsync(second, token);
+            vm.Drafts.Add(first); vm.Drafts.Add(second);
+            var deleting = vm.DeleteDraftQuickAsync(first);
+            Assert.True(vm.IsDraftDeletionPending(first));
+            await deleting.WaitAsync(TimeSpan.FromSeconds(5), token);
+            await vm.DeleteDraftQuickAsync(second).WaitAsync(TimeSpan.FromSeconds(5), token);
+            Assert.False(provider.DeleteRelease.Task.IsCompleted);
+            Assert.DoesNotContain(vm.Drafts, draft => draft.Id == first.Id || draft.Id == second.Id);
+            Assert.True(await store.IsDraftPendingDeletionAsync(first.Id, token));
+            Assert.True(await store.IsDraftPendingDeletionAsync(second.Id, token));
+            provider.DeleteRelease.SetResult();
+            await WaitUntilAsync(() => !vm.IsSyncing, token);
+        }
+        finally
+        {
+            provider.DeleteRelease.TrySetResult();
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
     public async Task UncachedPeopleShowNonBlockingProgressUntilProviderCompletes()
     {
         var token = TestContext.Current.CancellationToken;
@@ -1235,6 +1307,12 @@ public sealed class MainWindowViewModelTests
 
             Assert.True(viewModel.IsGlobalSearchRunning);
             Assert.DoesNotContain(viewModel.GlobalSearchResults, result => result.Title == remote.Subject);
+            viewModel.CloseGlobalSearchCommand.Execute(null);
+            Assert.False(viewModel.IsGlobalSearchOpen);
+            Assert.True(viewModel.SearchCommand.CanExecute(null));
+            viewModel.SearchCommand.Execute(null);
+            Assert.True(viewModel.IsGlobalSearchOpen);
+            await WaitUntilAsync(() => provider.SearchCalls == 2, cancellationToken);
             provider.SearchRelease.SetResult();
             await WaitUntilAsync(() => !viewModel.IsGlobalSearchRunning, cancellationToken);
 
@@ -2263,6 +2341,14 @@ public sealed class MainWindowViewModelTests
             await ((AsyncCommand)viewModel.SaveContactCommand).ExecuteAsync();
             Assert.True(workspace.Created);
             Assert.Contains(viewModel.People, person => person.DisplayName == "Created Person");
+
+            await ((AsyncCommand)viewModel.NewContactCommand).ExecuteAsync();
+            viewModel.SelectedContactOwner = viewModel.ContactOwners.Single(owner => owner.Account.AccountId == good.AccountId);
+            viewModel.ContactGivenName = " Adele ";
+            viewModel.ContactSurname = " Vance ";
+            await ((AsyncCommand)viewModel.SaveContactCommand).ExecuteAsync();
+            Assert.False(viewModel.IsContactEditorOpen);
+            Assert.Contains(viewModel.People, person => person.DisplayName == "Adele Vance");
         }
         finally
         {

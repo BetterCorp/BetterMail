@@ -13,25 +13,11 @@
     <Border x:Name="DriveToolbar" Grid.ColumnSpan="2" Padding="16,12"
             BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1">
       <Grid x:Name="SearchGrid" ColumnDefinitions="*,Auto,Auto,Auto">
-        <TextBox Classes="moduleSearch" x:Name="SearchBox" Grid.Column="0" Text="{Binding SearchQuery}"
-                 PlaceholderText="Search all linked drives"
-                 AutomationProperties.Name="Search every linked drive"
-                 TabIndex="300" />
-        <Button Classes="command" x:Name="SearchButton" Grid.Column="1" Content="Search" Command="{Binding SearchCommand}"
-                AutomationProperties.Name="Search drives" TabIndex="301" Margin="6,0,0,0" />
-        <Button Classes="command" x:Name="ClearSearchButton" Grid.Column="2" Content="Clear" Command="{Binding ClearSearchCommand}"
+        <TextBlock x:Name="WorkspaceTitle" Text="Drive" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center" />
+
+        <Button Classes="command" x:Name="ClearSearchButton" Grid.Column="2" Content="Back to files" IsVisible="{Binding IsSearchMode}" Command="{Binding ClearSearchCommand}"
                 AutomationProperties.Name="Clear drive search" TabIndex="302" Margin="4,0,0,0" />
-        <ComboBox x:Name="AccountFilter" Grid.Column="3" ItemsSource="{Binding AccountFilters}"
-                  SelectedItem="{Binding SelectedAccountFilter}"
-                  HorizontalAlignment="Right" MinWidth="190"
-                  AutomationProperties.Name="Filter drive search by account"
-                  TabIndex="303">
-          <ComboBox.ItemTemplate>
-            <DataTemplate x:DataType="app:DriveAccountFilter">
-              <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
-            </DataTemplate>
-          </ComboBox.ItemTemplate>
-        </ComboBox>
+        <Button x:Name="AccountFilter" Grid.Column="3" Content="Refresh" Command="{Binding RefreshCommand}" AutomationProperties.Name="Refresh Drive" />
       </Grid>
     </Border>
 

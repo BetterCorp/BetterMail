@@ -22,7 +22,7 @@ public sealed record MailAction(
     bool SourceWasUnread = false,
     bool SendAttempted = false,
     bool? ReadValue = null, bool? FlagValue = null, bool? PinValue = null,
-    bool? PreviousRead = null, bool? PreviousFlagged = null, bool? PreviousPinned = null)
+    bool? PreviousRead = null, bool? PreviousFlagged = null, bool? PreviousPinned = null, int FailureCount = 0)
 {
     public bool CanCancel => !Running && !Accepted && !SendAttempted;
     public bool NeedsSendReview => Kind == MailActionKind.Send && SendAttempted && !Running && !Accepted;

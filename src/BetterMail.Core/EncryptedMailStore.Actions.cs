@@ -157,7 +157,7 @@ public sealed partial class EncryptedMailStore
             var actions = await ReadActionsAsync(connection, null, cancellationToken).ConfigureAwait(false);
             var action = actions.FirstOrDefault(action => action.Id == id && !action.Accepted && !action.Running && !action.SendAttempted);
             if (action is null) return null;
-            action = action with { Running = true, Error = null };
+            action = action with { Running = true, FailureCount = Math.Max(action.FailureCount, action.Error is null ? 0 : 1), Error = null };
             await WriteActionAsync(connection, null, action, cancellationToken).ConfigureAwait(false);
             return action;
         }, cancellationToken);
@@ -170,7 +170,7 @@ public sealed partial class EncryptedMailStore
                 .FirstOrDefault(action => action.Id == id && !action.Accepted);
             if (action is not null)
             {
-                await WriteActionAsync(connection, transaction, action with { Running = false, Error = error }, cancellationToken).ConfigureAwait(false);
+                await WriteActionAsync(connection, transaction, action with { Running = false, Error = error, FailureCount = action.FailureCount + 1 }, cancellationToken).ConfigureAwait(false);
                 if (action.Kind == MailActionKind.Move && action.SourceFolderId is not null)
                 {
                     // Follow-up moves cannot run until this failure is recovered. Restore
@@ -200,7 +200,7 @@ public sealed partial class EncryptedMailStore
         {
             var action = (await ReadActionsAsync(connection, null, cancellationToken).ConfigureAwait(false))
                 .Single(action => action.Id == "send:" + draftId && !action.Accepted);
-            await WriteActionAsync(connection, null, action with { SendAttempted = false, Running = false, Error = error }, cancellationToken).ConfigureAwait(false);
+            await WriteActionAsync(connection, null, action with { SendAttempted = false, Running = false, Error = error, FailureCount = action.FailureCount + 1 }, cancellationToken).ConfigureAwait(false);
         }, cancellationToken);
 
     public Task<bool> ReturnUnconfirmedSendToDraftAsync(string actionId, bool clearProviderMapping = false, CancellationToken cancellationToken = default) =>

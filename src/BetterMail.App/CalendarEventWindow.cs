@@ -25,44 +25,63 @@ internal sealed partial class CalendarEventWindow : Window
         MinWidth = 380;
         MinHeight = 280;
 
-        var details = new StackPanel { Margin = new Thickness(24), Spacing = 10 };
-        Add(details, calendarEvent.Subject, 24, FontWeight.SemiBold);
-        Add(details, calendarEvent.TimeText);
-        Add(details, $"Calendar: {source.Account.EmailAddress} / {source.Calendar.Name}");
-        AddIf(details, "Location", calendarEvent.Location);
-        AddIf(details, "Organizer", calendarEvent.Organizer?.ToString());
-        AddIf(details, "Attendees", string.Join(", ", (calendarEvent.Attendees ?? [])
-            .Select(static attendee => attendee.Address.ToString())));
-        Add(details, $"Availability: {AvailabilityText(calendarEvent.Availability)}");
-        if (calendarEvent.IsReminderOn)
-        {
-            Add(details, $"Reminder: {calendarEvent.ReminderMinutesBeforeStart} minutes before");
-        }
-        if (calendarEvent.Recurrence is { } recurrence)
-        {
-            Add(details, $"Recurrence: {recurrence.PatternType}, every {recurrence.Interval}");
-        }
-        AddIf(details, "Description", PlainText(calendarEvent.Body, calendarEvent.BodyIsHtml));
+        Width = 560;
+        Height = 640;
+        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto") };
+        var heading = new StackPanel { Spacing = 8, Margin = new Thickness(24, 20, 24, 18) };
+        Add(heading, source.Calendar.Name, 12);
+        Add(heading, calendarEvent.Subject, 24, FontWeight.SemiBold);
+        if (calendarEvent.IsCancelled) Add(heading, "Cancelled", 14, FontWeight.SemiBold);
+        Add(heading, calendarEvent.StartsAt.ToLocalTime().ToString("dddd, d MMMM yyyy"), 15);
+        Add(heading, calendarEvent.IsAllDay ? "All day" :
+            $"{calendarEvent.StartsAt.ToLocalTime():HH:mm} – {calendarEvent.EndsAt.ToLocalTime():HH:mm} · {(calendarEvent.EndsAt - calendarEvent.StartsAt).TotalMinutes:0} min", 15);
+        var header = new Border { BorderBrush = Brush.Parse(source.Calendar.Color), BorderThickness = new Thickness(4, 0, 0, 0), Child = heading };
+        root.Children.Add(header);
 
-        var actions = new StackPanel
+        var details = new StackPanel { Margin = new Thickness(24, 4, 24, 20), Spacing = 18 };
+        if (!calendarEvent.IsCancelled && FindJoinUri(calendarEvent) is { } join)
         {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
-            Margin = new Thickness(0, 8, 0, 0)
-        };
-        if (FindJoinUri(calendarEvent) is { } join)
-        {
-            actions.Children.Add(LinkButton("Join meeting", join));
+            var joinButton = LinkButton("Join meeting", join);
+            joinButton.Classes.Add("primary");
+            joinButton.HorizontalAlignment = HorizontalAlignment.Left;
+            details.Children.Add(joinButton);
         }
-        if (HttpUri(calendarEvent.WebLink) is { } webLink)
+        Detail(details, "LOCATION", calendarEvent.Location);
+        Detail(details, "ORGANIZER", calendarEvent.Organizer?.ToString());
+        var attendees = calendarEvent.Attendees ?? [];
+        if (attendees.Count > 0)
         {
-            actions.Children.Add(LinkButton("Open in Outlook", webLink));
+            var guests = new StackPanel { Spacing = 7 };
+            Add(guests, $"ATTENDEES · {attendees.Count}", 11, FontWeight.SemiBold);
+            foreach (var attendee in attendees) Add(guests, attendee.Address.ToString(), 13);
+            details.Children.Add(guests);
         }
-        if (actions.Children.Count > 0)
-        {
-            details.Children.Add(actions);
-        }
-        Content = new ScrollViewer { Content = details };
+        Detail(details, "DETAILS", PlainText(calendarEvent.Body, calendarEvent.BodyIsHtml));
+        var metadata = new StackPanel { Spacing = 6 };
+        Add(metadata, $"{AvailabilityText(calendarEvent.Availability)} · {source.Account.EmailAddress}", 12);
+        if (calendarEvent.IsReminderOn) Add(metadata, $"Reminder {calendarEvent.ReminderMinutesBeforeStart} minutes before", 12);
+        if (calendarEvent.Recurrence is { } recurrence) Add(metadata, $"Repeats: {recurrence.PatternType}, every {recurrence.Interval}", 12);
+        details.Children.Add(metadata);
+        var scroll = new ScrollViewer { Content = details };
+        Grid.SetRow(scroll, 1);
+        root.Children.Add(scroll);
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Margin = new Thickness(20, 12) };
+        if (HttpUri(calendarEvent.WebLink) is { } webLink) actions.Children.Add(LinkButton("Open in calendar", webLink));
+        var close = new Button { Content = "Close" };
+        close.Click += (_, _) => Close();
+        actions.Children.Add(close);
+        Grid.SetRow(actions, 2);
+        root.Children.Add(actions);
+        Content = root;
+    }
+
+    private static void Detail(StackPanel target, string label, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return;
+        var section = new StackPanel { Spacing = 6 };
+        Add(section, label, 11, FontWeight.SemiBold);
+        Add(section, value, 14);
+        target.Children.Add(section);
     }
 
     public CalendarEventSource Source { get; }
@@ -97,7 +116,7 @@ internal sealed partial class CalendarEventWindow : Window
 
     private static Uri? HttpUri(string? value) =>
         Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
-        uri.Scheme is "http" or "https" ? uri : null;
+        uri.Scheme == "https" ? uri : null;
 
     private static Button LinkButton(string text, Uri uri)
     {
