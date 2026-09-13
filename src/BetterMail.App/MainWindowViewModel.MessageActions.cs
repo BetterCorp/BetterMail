@@ -38,32 +38,70 @@ public sealed partial class MainWindowViewModel
         BusyActions.Any(action => action.Kind is MailActionKind.Move or MailActionKind.UpdateState && ActionMatches(action, message));
     private static bool ActionMatches(MailAction action, MailMessage message) => action.MailboxId == message.MailboxId &&
         (action.ProviderId == message.ProviderId || action.ItemId == message.ProviderId || (action.PreviousProviderIds ?? []).Contains(message.ProviderId));
-    private int _mailSyncFailureStreak;
-    private int _workspaceFailureStreak;
-    public int SyncSeverity => Math.Max(BusySeverity, Math.Min(2, Math.Max(_mailSyncFailureStreak, _workspaceFailureStreak)));
-    private static string BadgeBackground(int severity) => severity switch { 2 => "#24D13438", 1 => "#24D98200", _ => "#208A9AA9" };
-    private static string BadgeForeground(int severity) => severity switch { 2 => "#E45155", 1 => "#D98200", _ => "#8297AD" };
-    public string SyncBadgeBackground => BadgeBackground(SyncSeverity);
-    public string SyncBadgeForeground => BadgeForeground(SyncSeverity);
+    private bool _busyOutcomeInitialized;
+    internal void InitializeBusyOutcome(IReadOnlyList<MailAction> actions)
+    {
+        if (_busyOutcomeInitialized) return;
+        _busyOutcomeInitialized = true;
+        var failed = actions.Where(action => action.Error is not null || action.IsRetryPaused || action.NeedsSendReview).ToArray();
+        if (failed.Length == 0) return;
+        _failedBusyAtPreviousEnd = failed.Select(action => action.Id).ToHashSet();
+        _completedBusySeverity = failed.Any(action => action.IsRetryPaused || action.NeedsSendReview) ? 2 : 1;
+        _syncSeverity = _completedBusySeverity;
+        MailActionStateChanged();
+    }
+
+    private int _syncSeverity;
+    private int _completedBusySeverity;
+    private bool _workspaceWarning;
+    private HashSet<string> _failedBusyAtPreviousEnd = [];
+    public int SyncSeverity => Math.Max(_syncSeverity, _workspaceWarning ? 1 : 0);
+    public int BusySeverity => _completedBusySeverity;
+    public bool SyncIsWarning => SyncSeverity == 1;
+    public bool SyncNeedsAttention => SyncSeverity == 2;
+    public bool SyncIsInformation => SyncSeverity == 0 && HasOutbox;
+    public bool BusyIsWarning => BusySeverity == 1;
+    public bool BusyNeedsAttention => BusySeverity == 2;
+
+    internal void BeginSyncOutcome()
+    {
+        _workspaceWarning = false;
+        // Red is latched until a completed sync empties Busy. Orange survives the retry run.
+        _syncSeverity = _completedBusySeverity == 2 ? 2 : HasOutbox ? _completedBusySeverity : 0;
+        MailActionStateChanged();
+    }
+
     internal void RecordSyncOutcome(bool failed, bool workspace = false)
     {
-        if (workspace) _workspaceFailureStreak = failed ? Math.Min(2, _workspaceFailureStreak + 1) : 0;
-        else _mailSyncFailureStreak = failed ? Math.Min(2, _mailSyncFailureStreak + 1) : 0;
+        if (workspace)
+        {
+            // Background workspace failures warn, but do not turn normal syncing red.
+            _workspaceWarning = failed;
+        }
+        else
+        {
+            var failedBusy = BusyActions.Where(action => action.Error is not null || action.IsRetryPaused || action.NeedsSendReview)
+                .Select(action => action.Id).ToHashSet();
+            var stillStuck = failedBusy.Overlaps(_failedBusyAtPreviousEnd);
+            _completedBusySeverity = HasOutbox && (_completedBusySeverity == 2 || stillStuck) ? 2
+                : failedBusy.Count > 0 ? 1 : 0;
+            _failedBusyAtPreviousEnd = failedBusy;
+            _syncSeverity = Math.Max(_completedBusySeverity, failed || _workspaceWarning ? 1 : 0);
+        }
         MailActionStateChanged();
     }
     public bool HasSyncIssues => SyncIssueCount > 0;
-    public int BusySeverity => BusyActions.Any(action => action.FailureCount >= 2 || action.NeedsSendReview) ? 2
-        : BusyActions.Any(action => action.FailureCount > 0 || action.Error is not null) ? 1 : 0;
-    public string BusyBadgeBackground => BusySeverity switch { 2 => "#24D13438", 1 => "#24D98200", _ => "#208A9AA9" };
-    public string BusyBadgeForeground => BusySeverity switch { 2 => "#E45155", 1 => "#D98200", _ => "#8297AD" };
     private void MailActionStateChanged()
     {
+        if (IsSyncing && _syncSeverity == 0 && BusyActions.Any(action => action.Error is not null || action.NeedsSendReview || action.IsRetryPaused))
+            _syncSeverity = 1;
         RaisePropertyChanged(nameof(SyncSeverity));
-        RaisePropertyChanged(nameof(SyncBadgeBackground));
-        RaisePropertyChanged(nameof(SyncBadgeForeground));
+        RaisePropertyChanged(nameof(SyncIsWarning));
+        RaisePropertyChanged(nameof(SyncNeedsAttention));
+        RaisePropertyChanged(nameof(SyncIsInformation));
         RaisePropertyChanged(nameof(BusySeverity));
-        RaisePropertyChanged(nameof(BusyBadgeBackground));
-        RaisePropertyChanged(nameof(BusyBadgeForeground));
+        RaisePropertyChanged(nameof(BusyIsWarning));
+        RaisePropertyChanged(nameof(BusyNeedsAttention));
         _mailActionVersion++;
         RaisePropertyChanged(nameof(MailActionVersion));
     }

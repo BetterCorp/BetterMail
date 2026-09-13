@@ -68,6 +68,7 @@ public sealed partial class MainWindowViewModel
         }
 
         StopContactPhotoSync();
+        BeginSyncOutcome();
         IsSyncing = true;
         Status = "Syncing mail...";
         Error = null;

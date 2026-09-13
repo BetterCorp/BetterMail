@@ -29,6 +29,10 @@ internal static partial class Program
             window.Position = new PixelPoint(0, 0);
             foreach (var theme in new[] { ThemeVariant.Light, ThemeVariant.Dark })
             {
+                var rows = vm.BusyActions.ToArray();
+                vm.BusyActions.Clear();
+                typeof(MainWindowViewModel).GetMethod("RecordSyncOutcome", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(vm, [false, false]);
+                foreach (var row in rows) vm.BusyActions.Add(row);
                 Application.Current!.RequestedThemeVariant = theme;
                 await Task.Delay(700);
                 if (!window.GetVisualDescendants().OfType<SelectableTextBlock>().Any(text => text.Text == "The specified object was not found in the store."))
@@ -37,6 +41,18 @@ internal static partial class Program
                     "tools/BetterMail.UiPreview/capture.py", Path.Combine(output, "busy-" + theme.ToString().ToLowerInvariant() + ".png"), "1200", "900" } })!;
                 await capture.WaitForExitAsync();
                 if (capture.ExitCode != 0) throw new InvalidOperationException("Busy capture failed.");
+                foreach (var (state, colour) in new[] { ("orange", "#D98200"), ("red", "#E45155") })
+                {
+                    typeof(MainWindowViewModel).GetMethod("RecordSyncOutcome", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(vm, [false, false]);
+                    await Task.Delay(200);
+                    foreach (var name in new[] { "SyncStatusButton", "BusyNavigationButton" })
+                        if (window.FindControl<Button>(name)!.Foreground is not Avalonia.Media.ISolidColorBrush brush || brush.Color != Avalonia.Media.Color.Parse(colour))
+                            throw new InvalidOperationException(name + " did not show " + state);
+                    using var coloured = Process.Start(new ProcessStartInfo("python3") { ArgumentList = {
+                        "tools/BetterMail.UiPreview/capture.py", Path.Combine(output, "busy-" + theme.ToString().ToLowerInvariant() + "-" + state + ".png"), "1200", "900" } })!;
+                    await coloured.WaitForExitAsync();
+                    if (coloured.ExitCode != 0) throw new InvalidOperationException("Colour capture failed.");
+                }
             }
         }
         finally { window.Close(); Directory.Delete(directory, true); }

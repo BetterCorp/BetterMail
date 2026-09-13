@@ -202,14 +202,21 @@
         </Grid>
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
-          <Button x:Name="SyncStatusButton" Content="{Binding SyncIcon}" Click="SyncStatusClicked" Background="{Binding SyncBadgeBackground}" CornerRadius="12"
-                  Foreground="{Binding SyncBadgeForeground}" FontSize="17" ToolTip.Tip="Sync status (F9 to sync)"
+          <Button x:Name="SyncStatusButton" Content="{Binding SyncIcon}" Click="SyncStatusClicked" Background="Transparent" Classes.information="{Binding SyncIsInformation}" Classes.warning="{Binding SyncIsWarning}" Classes.attention="{Binding SyncNeedsAttention}"
+                  FontSize="17" ToolTip.Tip="Sync status (F9 to sync)"
                   AutomationProperties.Name="Sync mail and view progress" TabIndex="2">
+            <Button.Styles>
+              <Style Selector="Button"><Setter Property="Foreground" Value="{DynamicResource BetterMailTextBrush}" /></Style>
+              <Style Selector="Button.information"><Setter Property="Foreground" Value="{DynamicResource BetterMailAccentBrush}" /></Style>
+              <Style Selector="Button.warning"><Setter Property="Foreground" Value="#D98200" /></Style>
+              <Style Selector="Button.attention"><Setter Property="Foreground" Value="#E45155" /></Style>
+            </Button.Styles>
             <Button.Flyout>
               <Flyout Placement="BottomEdgeAlignedRight">
                 <StackPanel Width="360" Spacing="12">
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Text="Sync activity" FontSize="17" FontWeight="SemiBold" />
+
                     <Button Grid.Column="1" Classes="command" Content="Sync now" Command="{Binding SyncCommand}" />
                   </Grid>
                   <StackPanel DataContext="{Binding WorkspaceSyncStep}" Spacing="4">
@@ -420,13 +427,15 @@
             </Button>
             <Button Classes="folder" Classes.selected="{Binding IsOutboxView}"
                     Command="{Binding ShowOutboxCommand}" Click="FolderSelectedClicked" IsVisible="{Binding HasOutbox}"
-                    AutomationProperties.Name="Open Busy">
-              <Border Background="{Binding BusyBadgeBackground}" CornerRadius="10" Padding="10,4" HorizontalAlignment="Left">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <TextBlock Text="Busy" Foreground="{Binding BusyBadgeForeground}" />
-                  <TextBlock Text="{Binding OutboxCountText}" Foreground="{Binding BusyBadgeForeground}" FontWeight="SemiBold" />
-                </StackPanel>
-              </Border>
+                    x:Name="BusyNavigationButton" HorizontalAlignment="Stretch" AutomationProperties.Name="Open Busy" Classes.warning="{Binding BusyIsWarning}" Classes.attention="{Binding BusyNeedsAttention}">
+              <Button.Styles>
+                <Style Selector="Button.warning"><Setter Property="Foreground" Value="#D98200" /></Style>
+                <Style Selector="Button.attention"><Setter Property="Foreground" Value="#E45155" /></Style>
+              </Button.Styles>
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="Busy" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{Binding OutboxCountText}" FontWeight="SemiBold" Margin="6,0,1,0" VerticalAlignment="Center" />
+              </Grid>
             </Button>
             <Button Classes="folder" Classes.selected="{Binding IsSyncIssuesView}" IsVisible="{Binding HasSyncIssues}"
                     Command="{Binding ShowSyncIssuesCommand}" Click="FolderSelectedClicked" AutomationProperties.Name="Open Sync Issues">

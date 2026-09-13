@@ -125,6 +125,7 @@ public sealed partial class MainWindowViewModel
     {
         if (_store is null) return;
         var actions = await _store.GetMailActionsAsync();
+        InitializeBusyOutcome(actions);
         foreach (var id in _busyChecks.Keys.Except(actions.Select(action => action.Id)).ToArray()) _busyChecks.Remove(id);
         CollectionUpdates.Reconcile(BusyActions, actions.Select(action => action with { StatusCheckDetails = _busyChecks.GetValueOrDefault(action.Id) }).ToArray(), static action => action.Id);
         RaiseDraftState();
