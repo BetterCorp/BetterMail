@@ -124,7 +124,7 @@ public sealed partial class MainWindowViewModel
     }
 
     private IReadOnlyList<SearchAccountFilter> _queryAccounts = [];
-    private bool QueryAccountMatches(string accountId) => _queryAccounts.Count == 0 || _queryAccounts.Any(item => item.AccountId == accountId && item.MailboxId is null);
+    private bool QueryAccountMatches(string accountId) => _queryAccounts.Count == 0 || _queryAccounts.Any(item => item.AccountId == accountId);
     private bool QueryMailboxMatches(Mailbox mailbox) => _queryAccounts.Count == 0 || _queryAccounts.Any(item =>
         item.MailboxId is { } id ? mailbox.Id == id : mailbox.AccountId == item.AccountId);
 
@@ -155,10 +155,8 @@ public sealed partial class MainWindowViewModel
 
     private async Task<IReadOnlyList<T>> SearchSelectedWorkspaceCacheAsync<T>(string kind, string text, int limit, CancellationToken token)
     {
-        if (_queryAccounts.Count == 0) return await _store!.SearchWorkspaceItemsAsync<T>(kind, text, limit, null, token);
-        var ids = _queryAccounts.Where(item => item.MailboxId is null).Select(item => item.AccountId!).Distinct().ToArray();
-        var results = await Task.WhenAll(ids.Select(id => _store!.SearchWorkspaceItemsAsync<T>(kind, text, limit, id, token)));
-        return results.SelectMany(items => items).Take(limit).ToArray();
+        var ids = _queryAccounts.Count == 0 ? null : _queryAccounts.Select(item => item.AccountId!).Distinct().ToArray();
+        return await _store!.SearchWorkspaceItemsAsync<T>(kind, text, limit, null, token, ids);
     }
 }
 

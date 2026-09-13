@@ -902,8 +902,11 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
         string query,
         int limit = 200,
         string? accountId = null,
-        CancellationToken cancellationToken = default) =>
-        QueryWorkspaceItemsAsync<T>(kind, accountId, null, query, limit, cancellationToken);
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<string>? accountIds = null) =>
+        QueryWorkspaceItemsAsync<T>(kind, accountId, null, query, limit, cancellationToken,
+            accountIds is null ? "" : "AND account_id IN (SELECT value FROM json_each($accounts))",
+            ("$accounts", JsonSerializer.Serialize(accountIds)));
 
     public Task GarbageCollectWorkspaceAsync(
         string accountId,

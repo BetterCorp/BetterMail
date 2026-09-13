@@ -6,6 +6,40 @@ namespace BetterMail.Tests;
 public sealed class AdvancedSearchTests
 {
     [Fact]
+    public async Task WorkspaceSearchIncludesSharedParentAndLimitsAcrossAllAccounts()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-account-search-" + Guid.NewGuid());
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), new string('C', 64));
+            await store.InitializeAsync(token);
+            var vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null);
+            foreach (var id in new[] { "a", "b", "c" })
+            {
+                var account = new MailAccount("microsoft365", id, "tenant", id + "@example.test", id, ProviderCapabilities.Mail | ProviderCapabilities.Files);
+                vm.Accounts.Add(account);
+                var files = Enumerable.Range(0, id == "a" ? 60 : 1).Select(i => new CloudFile(id + i, "Budget", 1, null, id)).ToArray();
+                await store.UpsertWorkspaceItemsAsync("drive-file", id, "all", files, file => file.ProviderId, file => file.Name, token);
+            }
+            var combined = await store.SearchWorkspaceItemsAsync<CloudFile>("drive-file", "Budget", 40, cancellationToken: token, accountIds: ["a", "b"]);
+            Assert.Equal(40, combined.Count);
+            Assert.Contains(combined, file => file.AccountId == "b");
+            Assert.DoesNotContain(combined, file => file.AccountId == "c");
+            var reversed = await store.SearchWorkspaceItemsAsync<CloudFile>("drive-file", "Budget", 40, cancellationToken: token, accountIds: ["b", "a"]);
+            Assert.Equal(combined.Select(file => file.ProviderId), reversed.Select(file => file.ProviderId));
+            var shared = new Mailbox("b", "team@example.test", "Team", IsShared: true);
+            vm.Mailboxes.Add(shared);
+            vm.SearchText = "Budget type:mail type:drive account:" + shared.Id;
+            await ((AsyncCommand)vm.SearchCommand).ExecuteAsync();
+            Assert.Null(vm.SearchError);
+            Assert.Contains(vm.GlobalSearchResults, result => result.Value is CloudFile { AccountId: "b" });
+            Assert.DoesNotContain(vm.GlobalSearchResults, result => result.Value is CloudFile { AccountId: "a" or "c" });
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
     public void EmptySearchFocusKeepsAdvancedFilterReachable()
     {
         var vm = new MainWindowViewModel(null, Path.GetTempPath(), _ => { }, _ => { }, null);
