@@ -793,7 +793,10 @@ public sealed partial class MainWindow : Window
         var previewViewModel = new ConversationThreadViewModel(
             loadMessage: message => viewModel.GetCachedMessageAsync(message),
             openDraft: viewModel.OpenLocalDraftAsync,
-            action: viewModel.HandlePreviewActionAsync,
+            action: request => viewModel.HandlePreviewActionAsync(request with
+            {
+                Accepted = () => { if (viewModel.ShouldClosePreview(request.Action)) window?.Close(); }
+            }),
             moveFolders: viewModel.MoveFoldersFor,
             showActions: true,
             loadAttachments: message => viewModel.GetAttachmentsAsync(message),

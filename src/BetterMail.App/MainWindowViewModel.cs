@@ -4028,7 +4028,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     internal static bool CanMoveMessagesToFolder(IReadOnlyList<MailMessage> messages, MailFolderItem folder) =>
         messages.Count > 0 && messages.All(message => message.MailboxId == folder.MailboxId);
 
-    internal async Task MoveSnapshotToFolderAsync(IReadOnlyList<MailMessage> messages, MailFolderItem folder)
+    internal async Task MoveSnapshotToFolderAsync(IReadOnlyList<MailMessage> messages, MailFolderItem folder, Action? accepted = null)
     {
         // The picker keeps the identities selected when it opened, but sync may have
         // replaced their contents (or removed them) while the user chose a folder.
@@ -4040,7 +4040,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         }
         var destination = Folders.FirstOrDefault(item => item.MailboxId == folder.MailboxId && item.ProviderId == folder.ProviderId);
         if (destination is not null && CanMoveMessagesToFolder(current, destination))
-            await MoveMessagesAsync(current, destination.ProviderId, $"Moving to {destination.DisplayName}...", $"Moved to {destination.DisplayName}");
+            await MoveMessagesAsync(current, destination.ProviderId, $"Moving to {destination.DisplayName}...", $"Moved to {destination.DisplayName}", accepted);
     }
 
     internal Task MoveSelectionToFolderAsync(MailFolderItem folder) =>
@@ -4054,7 +4054,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         IReadOnlyList<MailMessage> messages,
         string destinationFolderId,
         string actionStatus,
-        string successStatus)
+        string successStatus, Action? accepted = null)
     {
         if (messages.Count == 0 || _provider is null || _store is null) return;
         messages = messages.Where(message =>
@@ -4079,6 +4079,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                     ?? new MailFolder(mailbox.Id, destinationFolderId, destinationFolderId, 0, 0);
                 var action = await _store.QueueMoveAsync(account, message, destination);
                 ShowQueuedAction(action);
+                accepted?.Invoke();
             }
             await feedback;
             // Evaluate today's selection, not the selection from before the asynchronous queue writes.
@@ -5074,7 +5075,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         return ReplyToAsync(message);
     }
 
-    private async Task ReplyToAsync(MailMessage message)
+    private async Task ReplyToAsync(MailMessage message, Action? accepted = null)
     {
         var attachments = await LoadComposeSourceAttachmentsAsync(message, includeFiles: false);
         if (attachments is null)
@@ -5090,7 +5091,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             MailboxId: mailboxId,
             IsHtml: true,
             Intent: ComposeIntent.Reply,
-            ConversationIdentity: BetterMail.Core.ConversationThread.ThreadIdentity(message)));
+            ConversationIdentity: BetterMail.Core.ConversationThread.ThreadIdentity(message)), accepted);
     }
 
     private Task ReplyAllAsync()
@@ -5099,7 +5100,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         return ReplyAllToAsync(message);
     }
 
-    private async Task ReplyAllToAsync(MailMessage message)
+    private async Task ReplyAllToAsync(MailMessage message, Action? accepted = null)
     {
         var recipients = MailReplyRecipients.ReplyAll(
             message,
@@ -5126,7 +5127,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             MailboxId: mailboxId,
             IsHtml: true,
             Intent: ComposeIntent.ReplyAll,
-            ConversationIdentity: BetterMail.Core.ConversationThread.ThreadIdentity(message)));
+            ConversationIdentity: BetterMail.Core.ConversationThread.ThreadIdentity(message)), accepted);
     }
 
     private Task ForwardAsync()
@@ -5135,7 +5136,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         return ForwardMessageAsync(message);
     }
 
-    private async Task ForwardMessageAsync(MailMessage message)
+    private async Task ForwardMessageAsync(MailMessage message, Action? accepted = null)
     {
         var attachments = await LoadComposeSourceAttachmentsAsync(message, includeFiles: true);
         if (attachments is null)
@@ -5155,7 +5156,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 .ToArray(),
             IsHtml: true,
             Intent: ComposeIntent.Forward,
-            ConversationIdentity: BetterMail.Core.ConversationThread.ThreadIdentity(message)));
+            ConversationIdentity: BetterMail.Core.ConversationThread.ThreadIdentity(message)), accepted);
     }
 
     private async Task<IReadOnlyList<MailAttachment>?> LoadComposeSourceAttachmentsAsync(
@@ -5223,7 +5224,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             ? subject
             : string.IsNullOrWhiteSpace(subject) ? prefix : $"{prefix} {subject}";
 
-    private Task RequestComposeAsync(ComposeRequest request)
+    private Task RequestComposeAsync(ComposeRequest request, Action? accepted = null)
     {
         if (Accounts.Count == 0)
         {
@@ -5245,7 +5246,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             }
         }
 
-        ComposeRequested?.Invoke(request);
+        if (ComposeRequested is { } openCompose)
+        {
+            openCompose(request);
+            accepted?.Invoke();
+        }
         return Task.CompletedTask;
     }
 
@@ -5453,19 +5458,19 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     internal Task HandlePreviewActionAsync(ConversationActionRequest request) => request.Action switch
     {
-        ConversationAction.Reply => ReplyToAsync(request.Message),
-        ConversationAction.ReplyAll => ReplyAllToAsync(request.Message),
-        ConversationAction.Forward => ForwardMessageAsync(request.Message),
-        ConversationAction.Archive => MoveMessagesAsync([request.Message], "archive", "Archiving...", "Archived"),
-        ConversationAction.Delete => MoveMessagesAsync([request.Message], "deleteditems", "Moving to Deleted Items...", "Moved to Deleted Items"),
-        ConversationAction.Junk => MoveMessagesAsync([request.Message], "junkemail", "Moving to Junk Email...", "Moved to Junk Email"),
-        ConversationAction.NotJunk => MoveMessagesAsync([request.Message], "inbox", "Moving to Inbox...", "Marked as not junk"),
-        ConversationAction.ToggleRead => ToggleReadMessagesAsync([request.Message]),
-        ConversationAction.ToggleFlag => ToggleFlagMessagesAsync([request.Message]),
-        ConversationAction.TogglePin => TogglePinMessagesAsync([request.Message]),
+        ConversationAction.Reply => ReplyToAsync(request.Message, request.Accepted),
+        ConversationAction.ReplyAll => ReplyAllToAsync(request.Message, request.Accepted),
+        ConversationAction.Forward => ForwardMessageAsync(request.Message, request.Accepted),
+        ConversationAction.Archive => MoveMessagesAsync([request.Message], "archive", "Archiving...", "Archived", request.Accepted),
+        ConversationAction.Delete => MoveMessagesAsync([request.Message], "deleteditems", "Moving to Deleted Items...", "Moved to Deleted Items", request.Accepted),
+        ConversationAction.Junk => MoveMessagesAsync([request.Message], "junkemail", "Moving to Junk Email...", "Moved to Junk Email", request.Accepted),
+        ConversationAction.NotJunk => MoveMessagesAsync([request.Message], "inbox", "Moving to Inbox...", "Marked as not junk", request.Accepted),
+        ConversationAction.ToggleRead => QueueMessageStateChangesAsync([request.Message], read: !request.Message.IsRead, accepted: request.Accepted),
+        ConversationAction.ToggleFlag => QueueMessageStateChangesAsync([request.Message], flagged: !request.Message.IsFlagged, accepted: request.Accepted),
+        ConversationAction.TogglePin => QueueMessageStateChangesAsync([request.Message], pinned: !request.Message.IsPinned, accepted: request.Accepted),
         ConversationAction.ViewHeaders => ViewHeadersAsync(request.Message),
         ConversationAction.Move when request.Destination is not null =>
-            MoveSnapshotToFolderAsync([request.Message], request.Destination),
+            MoveSnapshotToFolderAsync([request.Message], request.Destination, request.Accepted),
         _ => Task.CompletedTask
     };
 

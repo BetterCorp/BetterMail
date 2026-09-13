@@ -123,3 +123,15 @@ The next-event chip opens today's cached agenda with a live Now marker, past/cur
 | Event preview | [Light](screenshots/event-details-light.png) · [Dark](screenshots/event-details-dark.png) |
 
 All examples use fictional data from the offline native preview. Regression tests cover persisted retry counts, badge recovery, default contact ownership, safe partial updates, richer contact search, cached agenda boundaries, selection-dependent updates and keyboard-accessible thread headers.
+
+### Separate mail window actions
+
+**Settings → Mail & notifications → Separate mail windows** provides independent **Stay open** / **Close** choices for Reply, Reply all, Forward, Archive, Delete, Move, junk status, read status, flag and pin. Existing profiles default to Stay open. Close happens after a move/state action is durably queued, before the main-window feedback animation or provider sync finishes. Reply/forward closes the source preview after the composer opens. Cancelling a folder picker or rejecting an action keeps the preview open. Pending work and retry failures remain available in the main window.
+
+The pending-action line is anchored to the bottom of the entire conversation header in both the reading pane and separate previews.
+
+| Change | Preview |
+| --- | --- |
+| Window action settings (light) | [Screenshot](screenshots/preview-action-settings-light.png) |
+| Window action settings (dark) | [Screenshot](screenshots/preview-action-settings-dark.png) |
+| Thread header pending action | [Screenshot](screenshots/thread-action-bottom-light.png) |

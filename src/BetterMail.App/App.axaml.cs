@@ -130,6 +130,7 @@ public sealed partial class App : Application
         viewModel.DefaultMailPromptShown = preferences.DefaultMailPromptShown;
         viewModel.MailSyncRange = preferences.MailSyncRange;
         viewModel.ConfigureMailQuickActions(preferences.MailQuickActions);
+        viewModel.ConfigurePreviewActions(preferences.ClosePreviewAfterActions);
         viewModel.ConfigureAccountOrder(preferences.AccountOrder);
         viewModel.DefaultContactOwnerId = preferences.DefaultContactOwnerId;
         viewModel.ConfigureMailboxLayout(preferences.MailboxOrder, preferences.CollapsedMailboxes);
@@ -145,6 +146,7 @@ public sealed partial class App : Application
                 nameof(MainWindowViewModel.DefaultMailPromptShown) or
                 nameof(MainWindowViewModel.MailSyncRange) or
                 nameof(MainWindowViewModel.MailQuickActionsVersion) or
+                nameof(MainWindowViewModel.PreviewActionsVersion) or
                 nameof(MainWindowViewModel.SenderPreferencesVersion) or
                 nameof(MainWindowViewModel.AccountOrderVersion) or
                 nameof(MainWindowViewModel.ContactImagesEnabled) or
@@ -168,7 +170,8 @@ public sealed partial class App : Application
                     PeopleCardView: viewModel.PeopleCardView,
                     MailboxOrder: viewModel.GetMailboxOrderPreferences(),
                     CollapsedMailboxes: viewModel.GetCollapsedMailboxPreferences(),
-                    DefaultContactOwnerId: viewModel.DefaultContactOwnerId));
+                    DefaultContactOwnerId: viewModel.DefaultContactOwnerId,
+                    ClosePreviewAfterActions: viewModel.GetClosePreviewActions()));
             }
         };
         viewModel.ConfigureSenderPreferences(

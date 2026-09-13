@@ -94,7 +94,7 @@ public sealed partial class MainWindowViewModel
     }
 
     private async Task QueueMessageStateChangesAsync(IReadOnlyList<MailMessage> messages,
-        bool? read = null, bool? flagged = null, bool? pinned = null)
+        bool? read = null, bool? flagged = null, bool? pinned = null, Action? accepted = null)
     {
         if (_store is null || messages.Count == 0) return;
         BeginMessageFeedback(messages);
@@ -107,6 +107,7 @@ public sealed partial class MainWindowViewModel
                 var action = await _store.QueueMessageStateAsync(account, message, read, flagged, pinned);
                 ShowQueuedAction(action);
                 ApplyMessageStateUpdate(message, isRead: read, isFlagged: flagged, isPinned: pinned);
+                accepted?.Invoke();
             }
             Status = "Message update queued";
             _ = SyncAsync();
