@@ -2341,6 +2341,14 @@ public sealed class MainWindowViewModelTests
             await ((AsyncCommand)viewModel.SaveContactCommand).ExecuteAsync();
             Assert.True(workspace.Created);
             Assert.Contains(viewModel.People, person => person.DisplayName == "Created Person");
+
+            await ((AsyncCommand)viewModel.NewContactCommand).ExecuteAsync();
+            viewModel.SelectedContactOwner = viewModel.ContactOwners.Single(owner => owner.Account.AccountId == good.AccountId);
+            viewModel.ContactGivenName = " Adele ";
+            viewModel.ContactSurname = " Vance ";
+            await ((AsyncCommand)viewModel.SaveContactCommand).ExecuteAsync();
+            Assert.False(viewModel.IsContactEditorOpen);
+            Assert.Contains(viewModel.People, person => person.DisplayName == "Adele Vance");
         }
         finally
         {

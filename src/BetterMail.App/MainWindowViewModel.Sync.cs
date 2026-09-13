@@ -11,6 +11,10 @@ public sealed partial class MainWindowViewModel
 
     public SyncStep StorageSyncStep { get; } = new("Storage maintenance") { Detail = "Not started" };
 
+    internal void RecordMailSyncOutcome(bool hasMailFailures) =>
+        RecordSyncOutcome(hasMailFailures || SyncSteps.Any(step =>
+            step.Detail == "Failed" || step.Detail.StartsWith("Failed:", StringComparison.Ordinal)));
+
     private async Task RunSyncStepAsync(SyncStep step, Func<Task> action)
     {
         step.Running = true;
@@ -158,7 +162,7 @@ public sealed partial class MainWindowViewModel
         }
         finally
         {
-            RecordSyncOutcome(!mailFailures.IsEmpty || SyncSteps.Any(step => step.Detail.StartsWith("Failed:", StringComparison.Ordinal)));
+            RecordMailSyncOutcome(!mailFailures.IsEmpty);
             foreach (var step in SyncSteps.Where(step => step.Running)) { step.Running = false; step.Detail = "Stopped"; }
             Interlocked.Exchange(ref _syncRunning, 0);
             IsSyncing = false;

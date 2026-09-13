@@ -141,6 +141,26 @@ public sealed class Microsoft365WorkspaceProviderTests
                 Account, draft with { AccountId = "another-account" }));
     }
 
+    [Theory]
+    [InlineData("", " Adele ", null, "Adele")]
+    [InlineData("", null, " Vance ", "Vance")]
+    [InlineData(" ", " Adele ", " Vance ", "Adele Vance")]
+    [InlineData(" Preferred ", "Adele", "Vance", "Preferred")]
+    public void ContactNamesDoNotRequireAnEmailOrSeparateDisplayName(string name, string? first, string? last, string expected)
+    {
+        var draft = new ContactDraft(Account.AccountId, name, [], Details: new(GivenName: first, Surname: last));
+        var payload = JsonSerializer.SerializeToElement(Microsoft365WorkspaceProvider.BuildContactPayload(Account, draft));
+        Assert.Equal(expected, payload.GetProperty("displayName").GetString());
+        Assert.Empty(payload.GetProperty("emailAddresses").EnumerateArray());
+    }
+
+    [Fact]
+    public void ContactWithoutAnyNameOrEmailIsStillRejected()
+    {
+        var draft = new ContactDraft(Account.AccountId, " ", [], Details: new(GivenName: " ", Surname: " "));
+        Assert.Throws<ArgumentException>(() => Microsoft365WorkspaceProvider.BuildContactPayload(Account, draft));
+    }
+
     [Fact]
     public void MapsContactToItsAccount()
     {

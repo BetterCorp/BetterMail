@@ -354,7 +354,12 @@ public sealed record ContactDraft(
     string AccountId,
     string DisplayName,
     IReadOnlyList<string> EmailAddresses,
-    string? OwnerAddress = null, ContactDetails? Details = null);
+    string? OwnerAddress = null, ContactDetails? Details = null)
+{
+    public static string ResolveDisplayName(string? displayName, string? givenName, string? surname) =>
+        !string.IsNullOrWhiteSpace(displayName) ? displayName.Trim() :
+        string.Join(" ", new[] { givenName?.Trim(), surname?.Trim() }.Where(part => !string.IsNullOrEmpty(part)));
+}
 
 public sealed record ContactDetails(
     string? GivenName = null,

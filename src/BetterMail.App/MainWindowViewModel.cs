@@ -3860,11 +3860,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 .Select(static address => address.Address)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
-            if (addresses.Length == 0 && string.IsNullOrWhiteSpace(ContactName))
+            var displayName = ContactDraft.ResolveDisplayName(ContactName, ContactGivenName, ContactSurname);
+            if (addresses.Length == 0 && displayName.Length == 0)
             {
                 throw new InvalidOperationException("Add a name or email address.");
             }
-            var draft = new ContactDraft(account.AccountId, ContactName.Trim(), addresses, owner.OwnerAddress, EditedContactDetails());
+            var draft = new ContactDraft(account.AccountId, displayName, addresses, owner.OwnerAddress, EditedContactDetails());
             if (contact is null)
             {
                 await _workspaceProvider.CreateContactAsync(account, draft);

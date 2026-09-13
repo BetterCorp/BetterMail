@@ -66,6 +66,30 @@ public sealed class WorkspaceInteractionTests
     }
 
     [Fact]
+    public async Task FailedSyncStepsEscalateTheBadgeUntilASuccessfulRetry()
+    {
+        var vm = new MainWindowViewModel(null, Path.GetTempPath(), _ => { }, _ => { }, null);
+        var step = new SyncStep("Draft reconciliation");
+        vm.SyncSteps.Add(step);
+        var run = typeof(MainWindowViewModel).GetMethod("RunSyncStepAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        for (var attempt = 1; attempt <= 2; attempt++)
+        {
+            Func<Task> fail = () => Task.FromException(new InvalidOperationException("Sync failed"));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => (Task)run.Invoke(vm, [step, fail])!);
+            Assert.False(step.Running);
+            vm.RecordMailSyncOutcome(false);
+            Assert.Equal(attempt, vm.SyncSeverity);
+        }
+        Func<Task> succeed = () => Task.CompletedTask;
+        await (Task)run.Invoke(vm, [step, succeed])!;
+        vm.RecordMailSyncOutcome(false);
+        Assert.Equal(0, vm.SyncSeverity);
+        step.Detail = "Failed: cache could not be refreshed";
+        vm.RecordMailSyncOutcome(false);
+        Assert.Equal(1, vm.SyncSeverity);
+    }
+
+    [Fact]
     public void BadgesEscalateAndResetOnlyWhenTheirWorkRecovers()
     {
         var vm = new MainWindowViewModel(null, Path.GetTempPath(), _ => { }, _ => { }, null);

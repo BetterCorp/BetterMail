@@ -749,7 +749,8 @@ public sealed partial class Microsoft365WorkspaceProvider(
     internal static object BuildContactPayload(MailAccount account, ContactDraft draft)
     {
         _ = ContactEndpoint(account, draft.AccountId, ownerAddress: draft.OwnerAddress);
-        if (string.IsNullOrWhiteSpace(draft.DisplayName) && draft.EmailAddresses.Count == 0)
+        var displayName = ContactDraft.ResolveDisplayName(draft.DisplayName, draft.Details?.GivenName, draft.Details?.Surname);
+        if (displayName.Length == 0 && draft.EmailAddresses.Count == 0)
         {
             throw new ArgumentException("A contact needs a name or email address.", nameof(draft));
         }
@@ -760,9 +761,9 @@ public sealed partial class Microsoft365WorkspaceProvider(
 
         var payload = new Dictionary<string, object?>
         {
-            ["displayName"] = draft.DisplayName.Trim(),
+            ["displayName"] = displayName,
             ["emailAddresses"] = draft.EmailAddresses.Distinct(StringComparer.OrdinalIgnoreCase)
-                .Select(address => new { name = draft.DisplayName.Trim(), address }).ToArray()
+                .Select(address => new { name = displayName, address }).ToArray()
         };
         // Null means unchanged/unknown; only explicitly supplied details are patched.
         if (draft.Details is { } details)
