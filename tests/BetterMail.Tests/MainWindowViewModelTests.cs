@@ -6,6 +6,69 @@ namespace BetterMail.Tests;
 
 public sealed class MainWindowViewModelTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BusyProcessorAutomaticallyRepairsAndRetriesMissingMessageOnce(bool retryFails)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-auto-recover-" + Guid.NewGuid());
+        var token = TestContext.Current.CancellationToken;
+        try
+        {
+            var path = Path.Combine(directory, "mail.db");
+            var key = new string('A', 64);
+            await using var store = new EncryptedMailStore(path, key);
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "account", "tenant", "alex@example.test", "Alex", ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+            var original = Message(mailbox.Id, "inbox", "Example", "Body") with { ProviderId = "old", InternetMessageId = "<identity@example.test>", IsRead = true };
+            await store.ApplySyncPageAsync("seed", new([original], null, false), token);
+            var action = await store.QueueMoveAsync(account, original, new(mailbox.Id, "archive", "Archive", 0, 0), token);
+            var provider = System.Reflection.DispatchProxy.Create<IMailProvider, RecoveryMailProvider>();
+            var fake = (RecoveryMailProvider)(object)provider;
+            fake.Message = original with { ProviderId = "new" };
+            fake.RetryFails = retryFails;
+            var vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
+            vm.Accounts.Add(account); vm.Mailboxes.Add(mailbox);
+            await (Task)typeof(MainWindowViewModel).GetMethod("ProcessMailActionsAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(vm, null)!;
+            Assert.Equal(new[] { "old", "new" }, fake.Moves);
+            var recovered = (await store.GetMailActionAsync(action.Id, token))!;
+            Assert.True(recovered.AutomaticRecoveryAttempted);
+            Assert.Equal(!retryFails, recovered.Accepted);
+            Assert.Equal(retryFails, recovered.IsRetryPaused);
+            await using var reopened = new EncryptedMailStore(path, key);
+            await reopened.InitializeAsync(token);
+            Assert.Null(await reopened.ClaimAutomaticRecoveryAsync(action.Id, token));
+            if (retryFails) Assert.Null(await reopened.StartMailActionAsync(action.Id, token));
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    public class RecoveryMailProvider : System.Reflection.DispatchProxy
+    {
+        public MailMessage Message = null!;
+        public bool RetryFails;
+        public List<string> Moves = [];
+        protected override object? Invoke(System.Reflection.MethodInfo? method, object?[]? args)
+        {
+            if (method!.Name == "MoveMessageWithResultAsync")
+            {
+                var id = (string)args![2]!;
+                Moves.Add(id);
+                return id == "old" || RetryFails
+                    ? Task.FromException<(string, string)>(new HttpRequestException("Object not found", null, System.Net.HttpStatusCode.NotFound))
+                    : Task.FromResult((id, "archive"));
+            }
+            return method.Name switch
+            {
+                "GetMessageAsync" => (string)args![2]! == "new" ? Task.FromResult(Message)
+                    : Task.FromException<MailMessage>(new HttpRequestException("Object not found", null, System.Net.HttpStatusCode.NotFound)),
+                "SearchMessagesAsync" => Task.FromResult<IReadOnlyList<MailMessage>>([Message]),
+                _ => throw new InvalidOperationException("Unexpected provider operation: " + method.Name)
+            };
+        }
+    }
+
     [Fact]
     public async Task PrimaryAndSharedMailboxesCanInterleaveAndPersistCollapseDefaults()
     {

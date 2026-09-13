@@ -840,10 +840,12 @@
                       <TextBlock Text="{Binding RetryHistory}" IsVisible="{Binding HasFailure}" FontSize="11" Opacity="0.7" TextWrapping="Wrap" />
                       <SelectableTextBlock Text="{Binding FailureDetails}" TextWrapping="Wrap" FontSize="12" />
                       <TextBlock Text="{Binding RecoveryGuidance}" IsVisible="{Binding HasFailure}" TextWrapping="Wrap" FontSize="12" />
+                      <TextBlock Text="{Binding AutomaticRecoveryDetails}" IsVisible="{Binding HasAutomaticRecoveryDetails}" TextWrapping="Wrap" FontSize="12" />
                       <SelectableTextBlock Text="{Binding StatusCheckDetails}" IsVisible="{Binding HasStatusCheck}" TextWrapping="Wrap" FontSize="12" FontWeight="SemiBold" />
                     </StackPanel>
                     <WrapPanel Grid.Row="4" Grid.ColumnSpan="2">
                       <Button Content="Check status" Margin="0,0,8,0" Command="{Binding $parent[Window].DataContext.CheckBusyActionCommand}" CommandParameter="{Binding}" />
+                      <Button Content="Recover and retry" Margin="0,0,8,0" IsVisible="{Binding CanRecover}" Command="{Binding $parent[Window].DataContext.RecoverBusyActionCommand}" CommandParameter="{Binding}" />
                       <Button Content="Retry" Margin="0,0,8,0" IsEnabled="{Binding CanRetry}" Command="{Binding $parent[Window].DataContext.RetryBusyActionCommand}" CommandParameter="{Binding}" />
                     <Button Content="Cancel" HorizontalAlignment="Right"
                             Command="{Binding $parent[Window].DataContext.CancelBusyActionCommand}"

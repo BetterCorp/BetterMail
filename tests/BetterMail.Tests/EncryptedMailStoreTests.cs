@@ -43,10 +43,12 @@ public sealed class EncryptedMailStoreTests
     public class BusyDiagnosticProvider : System.Reflection.DispatchProxy
     {
         public MailMessage Result = null!;
+        public IReadOnlyList<MailMessage>? Results;
         protected override object? Invoke(System.Reflection.MethodInfo? method, object?[]? args) => method!.Name switch
         {
+            "GetMessageAsync" when (string)args![2]! == Result.ProviderId => Task.FromResult(Result),
             "GetMessageAsync" => Task.FromException<MailMessage>(new HttpRequestException("Missing", null, System.Net.HttpStatusCode.NotFound)),
-            "SearchMessagesAsync" => Task.FromResult<IReadOnlyList<MailMessage>>([Result]),
+            "SearchMessagesAsync" => Task.FromResult<IReadOnlyList<MailMessage>>(Results ?? [Result]),
             _ => throw new InvalidOperationException("Status check must not mutate the provider: " + method.Name)
         };
     }
@@ -79,6 +81,112 @@ public sealed class EncryptedMailStoreTests
             Assert.NotNull(await store.StartMailActionAsync(action.Id, token));
             await store.FailMailActionAsync(action.Id, "Offline again", token);
             Assert.Null(await store.StartMailActionAsync(action.Id, token));
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RecoveryRemapsQueuedChainAndRecognizesAlreadyMovedMail(bool alreadyMoved)
+    {
+        await WithStoreAsync(async (store, token) =>
+        {
+            var account = new MailAccount("microsoft365", "account", "tenant", "alex@example.test", "Alex", ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+            var message = Message(mailbox.Id, "old", "Subject", "Full body") with { InternetMessageId = "<identity@example.test>" };
+            await store.ApplySyncPageAsync("seed", new([message], null, false), token);
+            var first = await store.QueueMoveAsync(account, message, new(mailbox.Id, "archive", "Archive", 0, 0), token);
+            await store.StartMailActionAsync(first.Id, token);
+            var later = await store.QueueMoveAsync(account, message with { FolderId = "archive" }, new(mailbox.Id, "done", "Done", 0, 0), token);
+            await store.FailMailActionAsync(first.Id, "Missing", token);
+            var provider = System.Reflection.DispatchProxy.Create<IMailProvider, BusyDiagnosticProvider>();
+            ((BusyDiagnosticProvider)(object)provider).Result = message with { ProviderId = "new", FolderId = alreadyMoved ? "archive" : "actual-source" };
+            await new MailActionDiagnostics(store, provider).RecoverAsync(account, mailbox, first.Id, token);
+            Assert.Null(await store.GetMessageAsync(mailbox.Id, "old", token));
+            Assert.Equal("Full body", (await store.GetMessageAsync(mailbox.Id, "new", token))!.Body);
+            Assert.Equal("done", (await store.GetMessageAsync(mailbox.Id, "new", token))!.FolderId);
+            var repaired = (await store.GetMailActionAsync(first.Id, token))!;
+            Assert.Equal(alreadyMoved, repaired.Accepted);
+            Assert.Equal(1, repaired.FailureCount);
+            Assert.Equal("new", repaired.ProviderId);
+            Assert.Contains("old", repaired.PreviousProviderIds!);
+            Assert.Equal("new", (await store.GetMailActionAsync(later.Id, token))!.ProviderId);
+            // A late sync for the obsolete ID must not resurrect the old row.
+            await store.ApplySyncPageAsync("stale", new([message], null, false), token);
+            Assert.Null(await store.GetMessageAsync(mailbox.Id, "old", token));
+            if (alreadyMoved) Assert.NotNull(await store.StartMailActionAsync(later.Id, token));
+            else
+            {
+                Assert.Null(await store.StartMailActionAsync(later.Id, token));
+                Assert.True(await store.CancelMailActionAsync(later.Id, token));
+                Assert.True(await store.CancelMailActionAsync(first.Id, token));
+                Assert.Equal("actual-source", (await store.GetMessageAsync(mailbox.Id, "new", token))!.FolderId);
+            }
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AutomaticRecoveryIsClaimedOnceAndFailedRepairedAttemptPauses(bool ambiguous)
+    {
+        await WithStoreAsync(async (store, token) =>
+        {
+            var account = new MailAccount("microsoft365", "account", "tenant", "alex@example.test", "Alex", ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+            var message = Message(mailbox.Id, "old", "Subject", "Body") with { InternetMessageId = "<identity@example.test>" };
+            await store.ApplySyncPageAsync("seed", new([message], null, false), token);
+            var action = await store.QueueMoveAsync(account, message, new(mailbox.Id, "archive", "Archive", 0, 0), token);
+            await store.StartMailActionAsync(action.Id, token);
+            await store.FailMailActionAsync(action.Id, "The specified object was not found in the store.", token);
+            var provider = System.Reflection.DispatchProxy.Create<IMailProvider, BusyDiagnosticProvider>();
+            ((BusyDiagnosticProvider)(object)provider).Result = message with { ProviderId = "new" };
+            if (ambiguous)
+            {
+                var fake = (BusyDiagnosticProvider)(object)provider;
+                fake.Results = [fake.Result, fake.Result with { ProviderId = "another" }];
+            }
+            var service = new MailActionDiagnostics(store, provider);
+            Assert.Equal(!ambiguous, await service.TryAutomaticRecoveryAsync(account, mailbox, action.Id, token));
+            Assert.False(await service.TryAutomaticRecoveryAsync(account, mailbox, action.Id, token));
+            if (ambiguous)
+            {
+                Assert.Null(await store.StartMailActionAsync(action.Id, token));
+                Assert.Contains("No unique exact identity", (await store.GetMailActionAsync(action.Id, token))!.AutomaticRecoveryDetails!);
+                return;
+            }
+            var attempt = await store.StartMailActionAsync(action.Id, token);
+            Assert.Equal("new", attempt!.ProviderId);
+            await store.FailMailActionAsync(action.Id, "Still not found", token);
+            Assert.Null(await store.StartMailActionAsync(action.Id, token));
+            Assert.False(await service.TryAutomaticRecoveryAsync(account, mailbox, action.Id, token));
+            Assert.True((await store.GetMailActionAsync(action.Id, token))!.IsRetryPaused);
+        });
+    }
+
+    [Fact]
+    public async Task RecoveryRejectsEditedActionAndAmbiguousServerMatches()
+    {
+        await WithStoreAsync(async (store, token) =>
+        {
+            var account = new MailAccount("microsoft365", "account", "tenant", "alex@example.test", "Alex", ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+            var message = Message(mailbox.Id, "old", "Subject", "Body") with { InternetMessageId = "<identity@example.test>" };
+            await store.ApplySyncPageAsync("seed", new([message], null, false), token);
+            var action = await store.QueueMoveAsync(account, message, new(mailbox.Id, "archive", "Archive", 0, 0), token);
+            await store.StartMailActionAsync(action.Id, token);
+            await store.FailMailActionAsync(action.Id, "Missing", token);
+            var expected = (await store.GetMailActionAsync(action.Id, token))!;
+            var verified = message with { ProviderId = "new" };
+            var provider = System.Reflection.DispatchProxy.Create<IMailProvider, BusyDiagnosticProvider>();
+            var fake = (BusyDiagnosticProvider)(object)provider;
+            fake.Result = verified;
+            fake.Results = [verified, verified with { ProviderId = "copy" }];
+            await Assert.ThrowsAsync<InvalidOperationException>(() => new MailActionDiagnostics(store, provider).RecoverAsync(account, mailbox, action.Id, token));
+            Assert.Equal("old", (await store.GetMailActionAsync(action.Id, token))!.ProviderId);
+            await store.QueueMoveAsync(account, message, new(mailbox.Id, "different", "Different", 0, 0), token);
+            Assert.False(await store.RecoverMailActionAsync(expected, verified, message.InternetMessageId, token));
+            Assert.Null(await store.GetMessageAsync(mailbox.Id, "new", token));
         });
     }
 
