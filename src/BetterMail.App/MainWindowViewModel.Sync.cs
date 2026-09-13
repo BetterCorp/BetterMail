@@ -351,6 +351,7 @@ public sealed partial class MainWindowViewModel
                 }
             });
             await RefreshNextCalendarEventAsync();
+            if (TasksWorkspace is not null) await TasksWorkspace.ReloadFromCacheAsync();
             WorkspaceSyncStep.Detail = issues.IsEmpty ? "Complete" : "Completed with issues: " + string.Join("; ", issues);
         }
         catch (Exception error) { WorkspaceSyncStep.Detail = "Failed: " + error.Message; }

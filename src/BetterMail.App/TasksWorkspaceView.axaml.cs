@@ -203,6 +203,7 @@ public sealed partial class TasksWorkspaceView : UserControl
         }
         var command = args.Key switch
         {
+            Key.F5 => viewModel.RefreshCommand,
             Key.N when args.KeyModifiers.HasFlag(KeyModifiers.Control) => viewModel.NewTaskCommand,
             Key.Enter when viewModel.SelectedTask is not null && !viewModel.IsEditorOpen => viewModel.EditTaskCommand,
             Key.Delete => viewModel.RequestDeleteCommand,

@@ -21,6 +21,55 @@ public sealed class TasksWorkspaceViewModelTests
     };
 
     [Fact]
+    public async Task SyncedCacheUpdatesTasksWithoutResettingNavigationOrEditor()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-task-cache-" + Guid.NewGuid());
+        var token = TestContext.Current.CancellationToken;
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), new string('D', 64));
+            await store.InitializeAsync(token);
+            await store.SaveAccountAsync(AccountA, token);
+            var vm = new TasksWorkspaceViewModel(new FakeTasksProvider(), [AccountA], store);
+            await vm.UpdateAccountsAsync([AccountA], token);
+            var group = Assert.Single(vm.AccountGroups);
+            var list = Assert.Single(group.Lists);
+            await vm.SelectListAsync(list);
+            var original = Assert.Single(vm.VisibleTasks);
+            vm.SelectedTask = original;
+            await vm.OpenEditTaskAsync(original);
+            vm.EditorTitle = "Unsaved local title";
+            var remote = original.Info with { Title = "Changed on another client", IsComplete = true };
+            var added = remote with { ProviderId = "new-task", Title = "Added remotely" };
+            await store.ReplaceWorkspaceItemsAsync("task", AccountA.AccountId, list.Info.ProviderId,
+                new[] { remote, added }, task => task.ProviderId, task => task.Title, token);
+
+            await vm.ReloadFromCacheAsync(token);
+
+            Assert.Same(group, Assert.Single(vm.AccountGroups));
+            Assert.Same(list, vm.SelectedList);
+            Assert.Equal(2, vm.VisibleTasks.Count);
+            Assert.Equal(remote, vm.SelectedTask!.Info);
+            Assert.True(vm.IsEditorOpen);
+            Assert.Equal("Unsaved local title", vm.EditorTitle);
+            Assert.False(vm.IsLoading);
+            var selected = vm.SelectedTask;
+            await vm.ReloadFromCacheAsync(token);
+            Assert.Same(selected, vm.SelectedTask);
+
+            await ((AsyncCommand)vm.CloseEditorCommand).ExecuteAsync();
+            await store.ReplaceWorkspaceItemsAsync("task", AccountA.AccountId, list.Info.ProviderId,
+                new[] { added }, task => task.ProviderId, task => task.Title, token);
+            // Reopening with unchanged accounts must consume the updated cache too.
+            await vm.UpdateAccountsAsync([AccountA], token);
+            Assert.Equal(added, Assert.Single(vm.VisibleTasks).Info);
+            Assert.Null(vm.SelectedTask);
+            Assert.Same(list, vm.SelectedList);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
     public async Task UnchangedAccountsRetainLoadedNavigation()
     {
         var vm = new TasksWorkspaceViewModel(new FakeTasksProvider(), [AccountA]);

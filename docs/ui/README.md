@@ -180,3 +180,6 @@ Run `dotnet run --project tools/BetterMail.UiPreview -c Release -- /tmp/betterma
 ![Notes status](screenshots/notes-limit-dark.png)
 ![Signature settings](screenshots/signature-settings-dark.png)
 ![Default reply](screenshots/default-reply-settings-dark.png)
+
+
+Task refresh follow-up: F5 remains available for an explicit refresh. On workspace sync completion, To Do reads the updated local cache and reconciles rows without clearing navigation or changing editor fields. Reopening the module with unchanged accounts also consumes the cache. Regression coverage verifies remote additions, updates and removals while preserving selection and unsaved edits.
