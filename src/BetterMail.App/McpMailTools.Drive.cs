@@ -42,6 +42,15 @@ internal sealed partial class McpMailTools
         return new { items = items.Skip(offset).Take(size).ToArray(), nextOffset = offset + size < items.Count ? (int?)(offset + size) : null };
     });
 
+    [McpServerTool(Name = "search_drive", ReadOnly = true), Description("Search files in one explicitly allowed Drive account using the provider search. Page with offset/limit; restart after collection changes. Use returned item IDs with get_drive_item before downloads or changes.")]
+    public Task<object> SearchDrive(string accountKey, string query, int offset = 0, int limit = 50) => DraftToolCall<object>(async () =>
+    {
+        var account = await DriveAccountAsync(accountKey);
+        var files = await Files.SearchFilesAsync(account, query);
+        AuthorizeDrive(accountKey);
+        return WorkspacePage(files, offset, limit);
+    });
+
     [McpServerTool(Name = "get_drive_item", ReadOnly = true), Description("Read current Drive file/folder metadata, including the ETag needed for downloads and content replacement. Use itemId=root for root metadata.")]
     public Task<CloudDriveItem> GetDriveItem(string accountKey, string itemId) => DraftToolCall(async () =>
     {

@@ -18,6 +18,19 @@ public sealed partial class EncryptedMailStore
         foreach (var action in actions.Where(static action => action.Running))
             await WriteActionAsync(connection, null, action with { Running = false }, cancellationToken).ConfigureAwait(false);
 
+        // Reproject older failed actions which previous versions restored to their source.
+        foreach (var move in actions.Where(action => action.Kind == MailActionKind.Move)
+            .GroupBy(action => (action.MailboxId, action.ItemId))
+            .Where(group => group.Any(action => !action.Accepted)).Select(group => group.Last()))
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE messages SET folder_id = $folder WHERE mailbox_id = $mailbox AND provider_id = $provider;";
+            command.Parameters.AddWithValue("$folder", move.DestinationId!);
+            command.Parameters.AddWithValue("$mailbox", move.MailboxId);
+            command.Parameters.AddWithValue("$provider", move.ProviderId!);
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         // Existing outbox payloads and acceptance markers remain in local_drafts.
         var sends = new List<MailAction>();
         await using (var command = connection.CreateCommand())
@@ -96,9 +109,9 @@ public sealed partial class EncryptedMailStore
         var actions = await ReadActionsAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         var related = actions.Where(action => action.Kind == MailActionKind.Move && MatchesMessage(action, message)).ToArray();
         var last = related.LastOrDefault();
-        if (last is { Error: null } && last.DestinationId == destination.ProviderId) return last;
+        if (last is not null && last.DestinationId == destination.ProviderId) return last;
         var action = last is { Running: false, Accepted: false }
-            ? last with { DestinationId = destination.ProviderId, DestinationName = destination.DisplayName, Error = null }
+            ? last with { DestinationId = destination.ProviderId, DestinationName = destination.DisplayName, Error = null, RetryAuthorizedAtFailureCount = last.FailureCount }
             : new MailAction(Guid.NewGuid().ToString("N"), account.AccountId, message.MailboxId,
                 last?.ItemId ?? message.ProviderId, MailActionKind.Move, message.Subject, DateTimeOffset.UtcNow,
                 last?.ProviderId ?? message.ProviderId, destination.ProviderId, destination.DisplayName,
@@ -124,8 +137,7 @@ public sealed partial class EncryptedMailStore
             if (action.Kind == MailActionKind.Move)
             {
                 var previous = related.Length > 1 ? related[^2] : null;
-                var failed = related.FirstOrDefault(candidate => candidate.Id != action.Id && !candidate.Accepted && candidate.Error is not null);
-                var folder = failed?.SourceFolderId ?? previous?.DestinationId ?? action.SourceFolderId;
+                var folder = previous?.DestinationId ?? action.SourceFolderId;
                 if (folder is null) return false;
                 command.CommandText = "UPDATE messages SET folder_id = $folder, is_read = $read WHERE mailbox_id = $mailbox AND provider_id = $provider;";
                 command.Parameters.AddWithValue("$folder", folder);
@@ -156,10 +168,24 @@ public sealed partial class EncryptedMailStore
         {
             var actions = await ReadActionsAsync(connection, null, cancellationToken).ConfigureAwait(false);
             var action = actions.FirstOrDefault(action => action.Id == id && !action.Accepted && !action.Running && !action.SendAttempted);
-            if (action is null) return null;
-            action = action with { Running = true, FailureCount = Math.Max(action.FailureCount, action.Error is null ? 0 : 1), Error = null };
+            if (action is null || action.IsRetryPaused) return null;
+            if (actions.TakeWhile(candidate => candidate.Id != id).Any(candidate =>
+                candidate.MailboxId == action.MailboxId && candidate.ItemId == action.ItemId && !candidate.Accepted)) return null;
+            action = action with { Running = true, LastAttemptAt = DateTimeOffset.UtcNow, LastError = action.Error ?? action.LastError, FailureCount = Math.Max(action.FailureCount, action.Error is null ? 0 : 1), Error = null };
             await WriteActionAsync(connection, null, action, cancellationToken).ConfigureAwait(false);
             return action;
+        }, cancellationToken);
+
+    public Task<bool> RetryMailActionAsync(string id, CancellationToken cancellationToken = default) =>
+        WithLockAsync(async connection =>
+        {
+            var actions = await ReadActionsAsync(connection, null, cancellationToken).ConfigureAwait(false);
+            var action = actions.FirstOrDefault(candidate => candidate.Id == id);
+            if (action is not { CanRetry: true }) return false;
+            if (actions.TakeWhile(candidate => candidate.Id != id).Any(candidate =>
+                candidate.MailboxId == action.MailboxId && candidate.ItemId == action.ItemId && !candidate.Accepted)) return false;
+            await WriteActionAsync(connection, null, action with { RetryAuthorizedAtFailureCount = action.FailureCount }, cancellationToken).ConfigureAwait(false);
+            return true;
         }, cancellationToken);
 
     public Task FailMailActionAsync(string id, string error, CancellationToken cancellationToken = default) =>
@@ -170,19 +196,9 @@ public sealed partial class EncryptedMailStore
                 .FirstOrDefault(action => action.Id == id && !action.Accepted);
             if (action is not null)
             {
-                await WriteActionAsync(connection, transaction, action with { Running = false, Error = error, FailureCount = action.FailureCount + 1 }, cancellationToken).ConfigureAwait(false);
-                if (action.Kind == MailActionKind.Move && action.SourceFolderId is not null)
-                {
-                    // Follow-up moves cannot run until this failure is recovered. Restore
-                    // the actual source even if a newer destination was optimistically shown.
-                    await using var command = connection.CreateCommand();
-                    command.Transaction = transaction;
-                    command.CommandText = "UPDATE messages SET folder_id = $folder WHERE mailbox_id = $mailbox AND provider_id = $provider;";
-                    command.Parameters.AddWithValue("$folder", action.SourceFolderId);
-                    command.Parameters.AddWithValue("$mailbox", action.MailboxId);
-                    command.Parameters.AddWithValue("$provider", action.ProviderId!);
-                    await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-                }
+                await WriteActionAsync(connection, transaction, action with { Running = false, Error = error, LastError = error, LastFailureAt = DateTimeOffset.UtcNow, FailureCount = action.FailureCount + 1 }, cancellationToken).ConfigureAwait(false);
+                // Pending moves retain their destination projection even after failure.
+                // SourceFolderId remains the cancellation/remote execution provenance.
             }
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }, cancellationToken);
@@ -200,7 +216,7 @@ public sealed partial class EncryptedMailStore
         {
             var action = (await ReadActionsAsync(connection, null, cancellationToken).ConfigureAwait(false))
                 .Single(action => action.Id == "send:" + draftId && !action.Accepted);
-            await WriteActionAsync(connection, null, action with { SendAttempted = false, Running = false, Error = error, FailureCount = action.FailureCount + 1 }, cancellationToken).ConfigureAwait(false);
+            await WriteActionAsync(connection, null, action with { SendAttempted = false, Running = false, Error = error, LastError = error, LastFailureAt = DateTimeOffset.UtcNow, FailureCount = action.FailureCount + 1 }, cancellationToken).ConfigureAwait(false);
         }, cancellationToken);
 
     public Task<bool> ReturnUnconfirmedSendToDraftAsync(string actionId, bool clearProviderMapping = false, CancellationToken cancellationToken = default) =>

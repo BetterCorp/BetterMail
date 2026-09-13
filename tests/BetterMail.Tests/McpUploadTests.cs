@@ -9,6 +9,33 @@ namespace BetterMail.Tests;
 public sealed class McpUploadTests
 {
     [Fact]
+    public async Task CapabilitiesExplainAttachmentWorkflowAndReportRegisteredTools()
+    {
+        await WithStore((store, tools, draft, files) =>
+        {
+            var capabilities = JsonSerializer.SerializeToElement(tools.GetCapabilities());
+            Assert.True(capabilities.GetProperty("AllowWrites").GetBoolean());
+            var names = capabilities.GetProperty("registeredTools").EnumerateArray().Select(item => item.GetString()).ToArray();
+            Assert.Contains("begin_attachment_upload", names);
+            Assert.Contains("upload_attachment_chunk", names);
+            Assert.Contains("complete_attachment_upload", names);
+            Assert.Contains("get_capabilities", names);
+            Assert.Equal(names.Length, names.Distinct().Count());
+            var registered = typeof(McpMailTools).GetMethods().Select(method =>
+                Attribute.GetCustomAttribute(method, typeof(ModelContextProtocol.Server.McpServerToolAttribute)))
+                .OfType<ModelContextProtocol.Server.McpServerToolAttribute>().Select(attribute => attribute.Name).Order(StringComparer.Ordinal);
+            Assert.Equal(registered, names);
+            var usage = capabilities.GetProperty("usage");
+            Assert.Contains("same endpoint", usage.GetProperty("discovery").GetString());
+            var guide = usage.GetProperty("mailAttachments");
+            Assert.Contains("no attachment parameter", guide.GetProperty("summary").GetString());
+            Assert.Contains("expectedUpdatedAt", guide.GetProperty("steps")[1].GetString());
+            Assert.Contains("public-sharing authorization", guide.GetProperty("oversized").GetString());
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
     public async Task ChunksRejectGapsDifferentRetriesAndWrongOwnersThenCompleteExactlyOnce()
     {
         await WithStore(async (store, tools, draft, _) =>

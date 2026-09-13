@@ -1020,6 +1020,47 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task ArchivingFromUnifiedInboxShowsPendingMessageOnlyInArchive()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-move-unified-" + Guid.NewGuid());
+        var provider = new RecordingProvider { MoveRelease = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "account", "tenant", "alex@work.example", "Alex", ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, "Alex");
+            await store.SaveAccountAsync(account, token);
+            await store.SaveMailboxAsync(mailbox, token);
+            var inbox = new MailFolder(mailbox.Id, "actual-inbox-id", "Inbox", 0, 0, "inbox");
+            var archive = new MailFolder(mailbox.Id, "archive", "Archive", 0, 0, "archive");
+            await store.SaveFoldersAsync(mailbox.Id, [inbox, archive], token);
+            provider.FolderResults = [inbox, archive];
+            var vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, provider);
+            vm.Accounts.Add(account); vm.Mailboxes.Add(mailbox);
+            vm.Folders.Add(new(inbox, "Alex")); vm.Folders.Add(new(archive, "Alex"));
+            var message = Message(mailbox.Id, inbox.ProviderId, "Archive this", "Full body") with { IsRead = true };
+            await store.ApplySyncPageAsync("seed", new([message], null, false), token);
+            await ((AsyncCommand)vm.ShowUnifiedInboxCommand).ExecuteAsync();
+            vm.SetSelectedMessages([Assert.Single(vm.Messages)], vm.Messages[0]);
+            await vm.MoveSelectionToFolderAsync(vm.Folders[1]);
+            Assert.Empty(vm.Messages);
+            await store.ApplySyncPageAsync("stale-inbox", new([message], null, false), token);
+            await ((AsyncCommand)vm.ShowUnifiedInboxCommand).ExecuteAsync();
+            Assert.Empty(vm.Messages);
+            await ((AsyncCommand<MailFolderItem>)vm.SelectFolderCommand).ExecuteAsync(vm.Folders[1]);
+            var pending = Assert.Single(vm.Messages);
+            Assert.Equal(message.ProviderId, pending.ProviderId);
+            Assert.Equal("archive", pending.FolderId);
+            Assert.True(vm.IsMessageActionPending(pending));
+            provider.MoveRelease.TrySetResult();
+            await WaitUntilAsync(() => !vm.IsSyncing, token);
+        }
+        finally { provider.MoveRelease.TrySetResult(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
     public async Task MovingToInboxPreservesRowWhenUnifiedInboxOpensDuringFeedback()
     {
         var token = TestContext.Current.CancellationToken;

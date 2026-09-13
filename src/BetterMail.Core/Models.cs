@@ -169,6 +169,8 @@ public sealed record DraftMessage(
     bool RequestReadReceipt = false,
     bool RequestDeliveryReceipt = false);
 
+public enum MailResponseKind { Reply, ReplyAll, Forward }
+
 public sealed record CloudDraft(
     string ProviderId,
     string AccountId,

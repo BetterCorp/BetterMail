@@ -10,7 +10,8 @@ public sealed record McpConfiguration(
     bool AllowWrites = false,
     bool AllowSending = false,
     string[]? MailboxIds = null,
-    string[]? DriveAccountIds = null);
+    string[]? DriveAccountIds = null,
+    string[]? WorkspaceAccountIds = null);
 
 public sealed record BetterTunnelsConfiguration(bool Enabled = false, string Token = "", string Email = "");
 

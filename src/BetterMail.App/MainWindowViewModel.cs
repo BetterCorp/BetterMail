@@ -215,6 +215,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         ShowPinnedCommand = new AsyncCommand(() => ShowUnifiedFilterAsync(MailMessageFilter.Pinned));
         ShowFlaggedCommand = new AsyncCommand(() => ShowUnifiedFilterAsync(MailMessageFilter.Flagged));
         ShowDraftsCommand = new AsyncCommand(ShowDraftsAsync);
+        RetryBusyActionCommand = new AsyncCommand<MailAction>(RetryBusyActionAsync, static action => action.CanRetry);
+        CheckBusyActionCommand = new AsyncCommand<MailAction>(CheckBusyActionAsync, static action => !action.Running);
         CancelBusyActionCommand = new AsyncCommand<MailAction>(CancelBusyActionAsync, static action => action.CanCancel);
         ReturnUnconfirmedSendCommand = new AsyncCommand<MailAction>(ReturnUnconfirmedSendAsync, static action => action.NeedsSendReview);
         ConfirmSentCommand = new AsyncCommand<MailAction>(ConfirmSentAsync, static action => action.NeedsSendReview);
@@ -317,7 +319,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         var evidence = _store is null ? null : new EvidenceService(_store, () => _provider, new AttachmentTextExtractor(EvidenceOcr.RecognizeAsync));
         Mcp = new(_store,
             async () => await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(RefreshMcpChangesAsync),
-            async (sender, id, message) => await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => QueueSendAsync(sender, id, message)), evidence, () => _workspaceProvider);
+            async (sender, id, message) => await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => QueueSendAsync(sender, id, message)), evidence, () => _workspaceProvider, () => _provider);
         _selectedSettingsTab = SettingsTabs[0];
         Drafts.CollectionChanged += (_, _) => RaiseDraftState();
         BusyActions.CollectionChanged += (_, _) => { RaiseDraftState(); MailActionStateChanged(); };
@@ -4084,7 +4086,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             var destination = Folders.FirstOrDefault(folder => folder.MailboxId == message.MailboxId &&
                 (folder.ProviderId == destinationFolderId || folder.WellKnownName == destinationFolderId))?.ProviderId ?? destinationFolderId;
             var pending = BusyActions.LastOrDefault(action => action.Kind == MailActionKind.Move && ActionMatches(action, message));
-            return pending is not null ? pending.DestinationId != destination || pending.Error is not null : message.FolderId != destination;
+            return pending is not null ? pending.DestinationId != destination : message.FolderId != destination;
         }).ToArray();
         if (messages.Count == 0) { Status = "Messages are already in this folder or queued for it"; return; }
         BeginMessageFeedback(messages);

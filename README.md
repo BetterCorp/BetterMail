@@ -146,12 +146,17 @@ Search is limited to locally cached history. Bodies are bounded and report trunc
 attachment bytes are available through the evidence tools below. Arbitrary local filesystem access is not exposed. Treat mail content as untrusted data and
 review a draft before authorizing your client to send it.
 
-## MCP draft attachments and Drive
+## MCP content operations
+
+MCP covers content actions across mail, calendar, contacts, tasks, notes and Drive. Use `get_action_guide` to discover workflows and current tool descriptions. See [MCP content operations](docs/mcp-content-actions.md) for the action matrix, reply-with-attachment steps, account permissions and provider limits. Workspace accounts must be explicitly enabled in MCP settings.
+
+### Draft attachments and Drive
 
 Enable draft edits and separately select **Allowed Drive accounts** in MCP Settings. Mailbox access
 never grants Drive access automatically. Sending remains a separate permission.
 
-- `get_capabilities` reports permissions and limits. `update_draft`, `remove_draft_attachment`, and
+- `get_capabilities` reports permissions, limits, the server’s registered tool names, and an embedded usage guide for draft attachments and Drive uploads. It explains why attachments use separate tools after `create_draft`, how to pass IDs/version tokens and byte chunks, when sharing occurs, and how to recover from missing client tools or interrupted uploads. If the returned tool list differs from your client’s list, refresh discovery/reconnect and verify the endpoint and running app version.
+- `update_draft`, `remove_draft_attachment`, and
   `read_draft_attachment` use the `updatedAt` from `read_draft` to reject stale edits or reads.
 - Upload bytes using `begin_attachment_upload`, sequential `upload_attachment_chunk` calls, then
   `complete_attachment_upload`. Supply the byte count and SHA-256; each base64 chunk is at most

@@ -6,6 +6,166 @@ namespace BetterMail.Tests;
 
 public sealed class EncryptedMailStoreTests
 {
+    private static async Task WithStoreAsync(Func<EncryptedMailStore, CancellationToken, Task> test)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-busy-tests-" + Guid.NewGuid());
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), new string('A', 64));
+            await store.InitializeAsync(TestContext.Current.CancellationToken);
+            await test(store, TestContext.Current.CancellationToken);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BusyCheckRequiresExactIdentityAndNeverMutatesQueue(bool identityMatches)
+    {
+        await WithStoreAsync(async (store, token) =>
+        {
+            var account = new MailAccount("microsoft365", "account", "tenant", "alex@example.test", "Alex", ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, account.DisplayName);
+            var message = Message(mailbox.Id, "message", "Same subject", "Body") with { InternetMessageId = "<original@example.test>" };
+            await store.ApplySyncPageAsync("seed", new([message], null, false), token);
+            var action = await store.QueueMoveAsync(account, message, new(message.MailboxId, "archive", "Archive", 0, 0), token);
+            var provider = System.Reflection.DispatchProxy.Create<IMailProvider, BusyDiagnosticProvider>();
+            ((BusyDiagnosticProvider)(object)provider).Result = message with { ProviderId = "new-id", InternetMessageId = identityMatches ? message.InternetMessageId : "<other@example.test>" };
+            var service = new MailActionDiagnostics(store, provider);
+            var result = await service.CheckAsync(account, mailbox, action.Id, token);
+            Assert.Contains(identityMatches ? "different server ID" : "No exact identity", result);
+            Assert.Equal(action, await store.GetMailActionAsync(action.Id, token));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.CheckAsync(account, new Mailbox("other", "other@example.test", "Other"), action.Id, token));
+        });
+    }
+
+    public class BusyDiagnosticProvider : System.Reflection.DispatchProxy
+    {
+        public MailMessage Result = null!;
+        protected override object? Invoke(System.Reflection.MethodInfo? method, object?[]? args) => method!.Name switch
+        {
+            "GetMessageAsync" => Task.FromException<MailMessage>(new HttpRequestException("Missing", null, System.Net.HttpStatusCode.NotFound)),
+            "SearchMessagesAsync" => Task.FromResult<IReadOnlyList<MailMessage>>([Result]),
+            _ => throw new InvalidOperationException("Status check must not mutate the provider: " + method.Name)
+        };
+    }
+
+    [Theory]
+    [InlineData("read")]
+    [InlineData("flag")]
+    [InlineData("pin")]
+    public async Task ChangedPausedStateAuthorizesOneAttemptButDuplicateDoesNot(string field)
+    {
+        await WithStoreAsync(async (store, token) =>
+        {
+            var account = new MailAccount("microsoft365", "account", "tenant", "alex@example.test", "Alex", ProviderCapabilities.Mail);
+            var message = Message("account:alex@example.test", "message", "Subject", "Body");
+            await store.ApplySyncPageAsync("seed", new([message], null, false), token);
+            Task<MailAction> Queue(bool value) => store.QueueMessageStateAsync(account, message,
+                isRead: field == "read" ? value : null, isFlagged: field == "flag" ? value : null,
+                isPinned: field == "pin" ? value : null, cancellationToken: token);
+            var action = await Queue(true);
+            for (var i = 0; i < 3; i++)
+            {
+                Assert.NotNull(await store.StartMailActionAsync(action.Id, token));
+                await store.FailMailActionAsync(action.Id, "Offline", token);
+            }
+            Assert.True((await Queue(true)).IsRetryPaused);
+            Assert.Null(await store.StartMailActionAsync(action.Id, token));
+            var changed = await Queue(false);
+            Assert.Equal(action.Id, changed.Id);
+            Assert.Equal(3, changed.FailureCount);
+            Assert.NotNull(await store.StartMailActionAsync(action.Id, token));
+            await store.FailMailActionAsync(action.Id, "Offline again", token);
+            Assert.Null(await store.StartMailActionAsync(action.Id, token));
+        });
+    }
+
+    [Fact]
+    public async Task PausedMoveLivesInDestinationAcrossSyncRestartAndCancellation()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-destination-" + Guid.NewGuid());
+        var path = Path.Combine(directory, "mail.db");
+        var token = TestContext.Current.CancellationToken;
+        var account = new MailAccount("microsoft365", "account", "tenant", "alex@example.test", "Alex", ProviderCapabilities.Mail);
+        var message = Message("account:alex@example.test", "message", "Subject", "Body");
+        string id;
+        try
+        {
+            await using (var store = new EncryptedMailStore(path, new string('A', 64)))
+            {
+                await store.InitializeAsync(token);
+                await store.ApplySyncPageAsync("seed", new([message], null, false), token);
+                id = (await store.QueueMoveAsync(account, message, new(message.MailboxId, "archive", "Archive", 0, 0), token)).Id;
+                for (var attempt = 0; attempt < 3; attempt++)
+                {
+                    Assert.NotNull(await store.StartMailActionAsync(id, token));
+                    await store.FailMailActionAsync(id, "Offline", token);
+                    await store.ApplySyncPageAsync("source-sync", new([message], null, false), token);
+                    Assert.Empty((await store.GetMessagesPageAsync([new(message.MailboxId, message.FolderId)], cancellationToken: token)).Messages);
+                    Assert.Single((await store.GetMessagesPageAsync([new(message.MailboxId, "archive")], cancellationToken: token)).Messages);
+                }
+            }
+            await using var reopened = new EncryptedMailStore(path, new string('A', 64));
+            await reopened.InitializeAsync(token);
+            Assert.True((await reopened.GetMailActionAsync(id, token))!.IsRetryPaused);
+            var same = await reopened.QueueMoveAsync(account, message, new(message.MailboxId, "archive", "Archive", 0, 0), token);
+            Assert.Equal(id, same.Id);
+            Assert.True(same.IsRetryPaused);
+            Assert.Equal("Offline", same.Error);
+            Assert.Equal("archive", (await reopened.GetMessageAsync(message.MailboxId, message.ProviderId, token))!.FolderId);
+            Assert.True(await reopened.CancelMailActionAsync(id, token));
+            Assert.Equal(message.FolderId, (await reopened.GetMessageAsync(message.MailboxId, message.ProviderId, token))!.FolderId);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task RepeatedFailuresPauseAndManualRetryPreservesHistory()
+    {
+        await WithStoreAsync(async (store, token) =>
+        {
+            var account = new MailAccount("microsoft365", "account", "tenant", "alex@example.test", "Alex", ProviderCapabilities.Mail);
+            var message = Message("account:alex@example.test", "message", "Subject", "Body");
+            await store.ApplySyncPageAsync("seed", new([message], null, false), token);
+            var action = await store.QueueMoveAsync(account, message, new(message.MailboxId, "archive", "Archive", 0, 0), token);
+            await store.StartMailActionAsync(action.Id, token);
+            var later = await store.QueueMoveAsync(account, message, new(message.MailboxId, "done", "Done", 0, 0), token);
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                if (attempt > 0) Assert.NotNull(await store.StartMailActionAsync(action.Id, token));
+                await store.FailMailActionAsync(action.Id, "Object not found", token);
+            }
+            var paused = (await store.GetMailActionAsync(action.Id, token))!;
+            Assert.True(paused.IsRetryPaused);
+            Assert.NotNull(paused.LastAttemptAt);
+            Assert.NotNull(paused.LastFailureAt);
+            Assert.Null(await store.StartMailActionAsync(action.Id, token));
+            Assert.Null(await store.StartMailActionAsync(later.Id, token));
+            Assert.False(await store.RetryMailActionAsync(later.Id, token));
+            Assert.True(await store.RetryMailActionAsync(action.Id, token));
+            var retry = await store.StartMailActionAsync(action.Id, token);
+            Assert.Equal(3, retry!.FailureCount);
+            Assert.Equal("Object not found", retry.LastError);
+            Assert.False(await store.RetryMailActionAsync(action.Id, token));
+            await store.FailMailActionAsync(action.Id, "Still missing", token);
+            Assert.True((await store.GetMailActionAsync(action.Id, token))!.IsRetryPaused);
+            Assert.Null(await store.StartMailActionAsync(action.Id, token));
+        });
+    }
+
+    [Fact]
+    public void LegacyFailuresPauseAndUnconfirmedSendsCannotRetry()
+    {
+        var legacy = System.Text.Json.JsonSerializer.Deserialize<MailAction>("""
+            {"Id":"old","AccountId":"account","MailboxId":"mailbox","ItemId":"item","Kind":0,"Subject":"Example","CreatedAt":"2026-09-13T00:00:00Z","FailureCount":22,"Error":"Missing"}
+            """)!;
+        Assert.True(legacy.IsRetryPaused);
+        Assert.Equal("Missing", legacy.FailureDetails);
+        Assert.False((legacy with { Kind = MailActionKind.Send, SendAttempted = true }).CanRetry);
+    }
+
     [Fact]
     public async Task ActionFailureCountSurvivesRetryAndStoreReload()
     {
@@ -31,10 +191,14 @@ public sealed class EncryptedMailStoreTests
                 Assert.Null(retry!.Error);
                 Assert.Equal(1, retry.FailureCount);
                 await store.FailMailActionAsync(id, "Offline again", token);
+                Assert.NotNull(await store.StartMailActionAsync(id, token));
+                await store.FailMailActionAsync(id, "Offline a third time", token);
             }
             await using var reopened = new EncryptedMailStore(path, key);
             await reopened.InitializeAsync(token);
-            Assert.Equal(2, Assert.Single(await reopened.GetMailActionsAsync(token)).FailureCount);
+            Assert.Equal(3, Assert.Single(await reopened.GetMailActionsAsync(token)).FailureCount);
+            Assert.True(Assert.Single(await reopened.GetMailActionsAsync(token)).IsRetryPaused);
+            Assert.Null(await reopened.StartMailActionAsync(id, token));
             Assert.True(await reopened.CancelMailActionAsync(id, token));
             Assert.Empty(await reopened.GetMailActionsAsync(token));
         }
@@ -44,7 +208,7 @@ public sealed class EncryptedMailStoreTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task FailedMoveWithFollowUpRestoresSourceAcrossSyncAndRecovery(bool cancelFollowUp)
+    public async Task FailedMoveWithFollowUpKeepsDestinationAcrossSyncAndRecovery(bool cancelFollowUp)
     {
         var token = TestContext.Current.CancellationToken;
         var directory = Path.Combine(Path.GetTempPath(), "bettermail-failed-move-chain-" + Guid.NewGuid());
@@ -60,14 +224,14 @@ public sealed class EncryptedMailStoreTests
             first = (await store.StartMailActionAsync(first.Id, token))!;
             var followUp = await store.QueueMoveAsync(account, message with { FolderId = "archive" }, archive with { ProviderId = "done" }, token);
             await store.FailMailActionAsync(first.Id, "Offline", token);
-            Assert.Equal(message.FolderId, (await store.GetMessageAsync(message.MailboxId, message.ProviderId, token))!.FolderId);
+            Assert.Equal("done", (await store.GetMessageAsync(message.MailboxId, message.ProviderId, token))!.FolderId);
             Assert.Equal(2, (await store.GetMailActionsAsync(token)).Count);
             await store.ApplySyncPageAsync("refresh", new([message], null, false), token);
-            Assert.Equal(message.FolderId, (await store.GetMessageAsync(message.MailboxId, message.ProviderId, token))!.FolderId);
+            Assert.Equal("done", (await store.GetMessageAsync(message.MailboxId, message.ProviderId, token))!.FolderId);
             if (cancelFollowUp)
             {
                 Assert.True(await store.CancelMailActionAsync(followUp.Id, token));
-                Assert.Equal(message.FolderId, (await store.GetMessageAsync(message.MailboxId, message.ProviderId, token))!.FolderId);
+                Assert.Equal("archive", (await store.GetMessageAsync(message.MailboxId, message.ProviderId, token))!.FolderId);
             }
             else
             {
@@ -120,7 +284,7 @@ public sealed class EncryptedMailStoreTests
             var failed = await store.QueueMoveAsync(account, current, archive, token);
             await store.StartMailActionAsync(failed.Id, token);
             await store.FailMailActionAsync(failed.Id, "Offline", token);
-            Assert.Equal("done", (await store.GetMessageAsync(message.MailboxId, "moved", token))!.FolderId);
+            Assert.Equal("archive", (await store.GetMessageAsync(message.MailboxId, "moved", token))!.FolderId);
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }

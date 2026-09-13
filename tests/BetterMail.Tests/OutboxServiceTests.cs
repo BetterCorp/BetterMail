@@ -19,6 +19,7 @@ public sealed class OutboxServiceTests
             var action = Assert.Single(await store.GetMailActionsAsync());
             Assert.True(action.NeedsSendReview);
             Assert.False(action.CanCancel);
+            Assert.False(await store.RetryMailActionAsync(action.Id));
             Assert.False(await store.CancelMailActionAsync(action.Id));
             await using var restarted = reopen();
             await restarted.InitializeAsync();

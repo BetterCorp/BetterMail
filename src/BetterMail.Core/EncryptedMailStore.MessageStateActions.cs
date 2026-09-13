@@ -16,8 +16,12 @@ public sealed partial class EncryptedMailStore
                 : new MailAction(Guid.NewGuid().ToString("N"), account.AccountId, message.MailboxId, related.FirstOrDefault()?.ItemId ?? message.ProviderId,
                     MailActionKind.UpdateState, message.Subject, DateTimeOffset.UtcNow, related.LastOrDefault()?.ProviderId ?? message.ProviderId,
                     PreviousRead: message.IsRead, PreviousFlagged: message.IsFlagged, PreviousPinned: message.IsPinned);
+            var changed = isRead is not null && isRead != action.ReadValue ||
+                isFlagged is not null && isFlagged != action.FlagValue ||
+                isPinned is not null && isPinned != action.PinValue;
             action = action with { ReadValue = isRead ?? action.ReadValue, FlagValue = isFlagged ?? action.FlagValue,
-                PinValue = isPinned ?? action.PinValue, Error = null };
+                PinValue = isPinned ?? action.PinValue, Error = changed ? null : action.Error,
+                RetryAuthorizedAtFailureCount = changed ? action.FailureCount : action.RetryAuthorizedAtFailureCount };
             await WriteActionAsync(connection, transaction, action, cancellationToken).ConfigureAwait(false);
             await SetActionStateAsync(connection, transaction, action, false, cancellationToken).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);

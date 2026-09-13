@@ -76,9 +76,18 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
-              <ToggleSwitch Content="Allow draft/attachment edits, mail moves, and Drive changes" IsChecked="{Binding AllowWrites}" />
-              <ToggleSwitch Content="Also allow sending saved drafts" IsChecked="{Binding AllowSending}" IsEnabled="{Binding AllowWrites}" />
-              <TextBlock Text="Sending uses the Busy queue and retries on the next sync. With both permissions off, clients can only read cached mail." TextWrapping="Wrap" Opacity="0.7" />
+              <TextBlock Text="Allowed workspace accounts" FontWeight="SemiBold" />
+              <TextBlock Text="Select accounts whose calendars, contacts, tasks and notes MCP may access. Mailbox and Drive permissions do not grant workspace access." TextWrapping="Wrap" Opacity="0.7" />
+              <ItemsControl ItemsSource="{Binding Workspaces}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="app:McpDriveChoice">
+                    <CheckBox IsChecked="{Binding IsSelected}"><TextBlock Text="{Binding Label}" TextWrapping="Wrap" /></CheckBox>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <ToggleSwitch Content="Allow content edits across permitted mailboxes and workspaces" IsChecked="{Binding AllowWrites}" />
+              <ToggleSwitch Content="Also allow sending drafts and calendar invitations" IsChecked="{Binding AllowSending}" IsEnabled="{Binding AllowWrites}" />
+              <TextBlock Text="Sending uses the Busy queue and retries on the next sync. Read access remains limited to the selected mailboxes and accounts." TextWrapping="Wrap" Opacity="0.7" />
               <Button Classes="primary" Content="Apply MCP settings" Command="{Binding ApplyCommand}" />
             </StackPanel>
           </Border>
