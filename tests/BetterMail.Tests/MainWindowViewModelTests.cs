@@ -6,6 +6,77 @@ namespace BetterMail.Tests;
 
 public sealed class MainWindowViewModelTests
 {
+    [Fact]
+    public async Task PendingInboxLoadCanBeLeftForPeopleAndReentered()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-navigation-" + Guid.NewGuid());
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), new string('A', 64));
+            await store.InitializeAsync(token);
+            var vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null,
+                new RecordingProvider(), workspaceProvider: new FakeWorkspaceProvider());
+            var account = new MailAccount("microsoft365", "account", "tenant", "me@example.test", "Me",
+                ProviderCapabilities.Mail | ProviderCapabilities.Contacts);
+            vm.Accounts.Add(account);
+            var gate = (SemaphoreSlim)typeof(EncryptedMailStore).GetField("_folderReadGate",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(store)!;
+            await gate.WaitAsync(token);
+            Task returnToMail;
+            try
+            {
+                var first = ((AsyncCommand)vm.ShowUnifiedInboxCommand).ExecuteAsync();
+                Assert.False(first.IsCompleted);
+                Assert.True(vm.ShowUnifiedInboxCommand.CanExecute(null));
+                await ((AsyncCommand)vm.ShowContactsCommand).ExecuteAsync().WaitAsync(TimeSpan.FromSeconds(5), token);
+                await first.WaitAsync(TimeSpan.FromSeconds(5), token);
+                Assert.True(vm.IsContactsModule);
+                Assert.False(vm.IsLoadingMessages);
+                returnToMail = ((AsyncCommand)vm.ShowUnifiedInboxCommand).ExecuteAsync();
+                Assert.True(vm.IsMailModule);
+                Assert.True(vm.IsLoadingMessages);
+                var latest = ((AsyncCommand)vm.ShowUnifiedInboxCommand).ExecuteAsync();
+                await returnToMail.WaitAsync(TimeSpan.FromSeconds(5), token);
+                returnToMail = latest;
+            }
+            finally { gate.Release(); }
+            await returnToMail.WaitAsync(TimeSpan.FromSeconds(5), token);
+            await vm.PeopleBackgroundRefresh;
+            Assert.True(vm.IsMailModule);
+            Assert.False(vm.IsLoadingMessages);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task InboxNavigationDoesNotWaitForBackgroundCounts()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-counts-" + Guid.NewGuid());
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), new string('A', 64));
+            await store.InitializeAsync(token);
+            var vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null);
+            var gate = (SemaphoreSlim)typeof(EncryptedMailStore).GetField("_workspaceReadGate",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(store)!;
+            await gate.WaitAsync(token);
+            try
+            {
+                foreach (var command in new[] { vm.ShowUnifiedInboxCommand, vm.ShowPinnedCommand, vm.ShowFlaggedCommand })
+                {
+                    await ((AsyncCommand)command).ExecuteAsync().WaitAsync(TimeSpan.FromSeconds(5), token);
+                    Assert.True(vm.IsMailModule);
+                    Assert.False(vm.IsLoadingMessages);
+                    Assert.True(command.CanExecute(null));
+                }
+            }
+            finally { gate.Release(); }
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

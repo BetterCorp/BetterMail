@@ -570,9 +570,10 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
     public Task<MailMessageFilterCounts> GetMessageFilterCountsAsync(
         IReadOnlyList<MailFolderKey> folders,
         CancellationToken cancellationToken = default) =>
-        WithLockAsync<MailMessageFilterCounts>(async connection =>
+        WithWorkspaceReadAsync<MailMessageFilterCounts>(async connection =>
         {
             await using var command = connection.CreateCommand();
+            using var cancellation = cancellationToken.Register(command.Cancel);
             var folderClauses = new List<string>(folders.Count);
             for (var index = 0; index < folders.Count; index++)
             {
@@ -760,10 +761,11 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
         string query = "",
         int limit = 500,
         CancellationToken cancellationToken = default, IReadOnlyList<string>? mailboxIds = null) =>
-        WithLockAsync<IReadOnlyList<DiscoveredPerson>>(async connection =>
+        WithWorkspaceReadAsync<IReadOnlyList<DiscoveredPerson>>(async connection =>
         {
             var groups = new List<(string Email, string Name, string MailboxId, int Count, DateTimeOffset Last)>();
             await using var command = connection.CreateCommand();
+            using var cancellation = cancellationToken.Register(command.Cancel);
             command.CommandText = _correspondentsReady
                 ? """
                     SELECT email, display_name, mailbox_id, count(*), max(contacted_at)
@@ -1411,6 +1413,7 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
+            await DisposeWorkspaceReaderAsync().ConfigureAwait(false);
             await DisposeFolderReaderAsync().ConfigureAwait(false);
             await DisposeMessageReaderAsync().ConfigureAwait(false);
             if (_connection is not null)
@@ -1537,10 +1540,11 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
         CancellationToken cancellationToken,
         string extraWhere = "",
         params (string Name, object Value)[] extraParameters) =>
-        WithLockAsync<IReadOnlyList<T>>(async connection =>
+        WithWorkspaceReadAsync<IReadOnlyList<T>>(async connection =>
         {
             var values = new List<T>();
             await using var command = connection.CreateCommand();
+            using var cancellation = cancellationToken.Register(command.Cancel);
             var filters = new List<string> { "kind = $kind" };
             if (!string.IsNullOrWhiteSpace(accountId))
             {
