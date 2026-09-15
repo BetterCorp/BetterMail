@@ -211,9 +211,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         ToggleFlagCommand = new AsyncCommand(ToggleFlagAsync, CanRunSelectedMailAction, allowConcurrent: true);
         TogglePinCommand = new AsyncCommand(TogglePinAsync, CanRunSelectedMailAction, allowConcurrent: true);
         MoveToFolderCommand = new AsyncCommand<MailFolderItem>(MoveSelectionToFolderAsync, CanMoveSelectionToFolder, allowConcurrent: true);
-        ShowUnifiedInboxCommand = new AsyncCommand(ShowUnifiedInboxAsync);
-        ShowPinnedCommand = new AsyncCommand(() => ShowUnifiedFilterAsync(MailMessageFilter.Pinned));
-        ShowFlaggedCommand = new AsyncCommand(() => ShowUnifiedFilterAsync(MailMessageFilter.Flagged));
+        ShowUnifiedInboxCommand = new AsyncCommand(ShowUnifiedInboxAsync, allowConcurrent: true);
+        ShowPinnedCommand = new AsyncCommand(() => ShowUnifiedFilterAsync(MailMessageFilter.Pinned), allowConcurrent: true);
+        ShowFlaggedCommand = new AsyncCommand(() => ShowUnifiedFilterAsync(MailMessageFilter.Flagged), allowConcurrent: true);
         ShowDraftsCommand = new AsyncCommand(ShowDraftsAsync);
         RecoverBusyActionCommand = new AsyncCommand<MailAction>(RecoverBusyActionAsync, static action => action.CanRecover);
         RetryBusyActionCommand = new AsyncCommand<MailAction>(RetryBusyActionAsync, static action => action.CanRetry);
@@ -928,6 +928,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             if (!SetProperty(ref _activeModule, value))
             {
                 return;
+            }
+
+            if (value != "Mail")
+            {
+                _messageLoadCancellation?.Cancel();
+                ++_messageLoadVersion;
+                IsLoadingMessages = false;
             }
 
             RaisePropertyChanged(nameof(IsMailModule));
@@ -2965,7 +2972,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             ((AsyncCommand)LoadMoreMessagesCommand).Refresh();
             IsLoadingMessages = false;
             _ = RepairMissingSubjectsAsync(page.Messages);
-            if (requestedFolder is null) await RefreshUnifiedCountsAsync();
+            if (requestedFolder is null) _ = RefreshUnifiedCountsAsync(token);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         finally
@@ -3395,7 +3402,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private async Task RefreshUnifiedCountsAsync()
+    private async Task RefreshUnifiedCountsAsync(CancellationToken cancellationToken)
     {
         if (_store is null)
         {
@@ -3404,7 +3411,18 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         var inboxFolders = Folders.Where(static folder => folder.WellKnownName == "inbox")
             .Select(static folder => new MailFolderKey(folder.MailboxId, folder.ProviderId))
             .ToArray();
-        var counts = await _store.GetMessageFilterCountsAsync(inboxFolders);
+        MailMessageFilterCounts counts;
+        try
+        {
+            counts = await _store.GetMessageFilterCountsAsync(inboxFolders, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
+        catch (Exception exception)
+        {
+            if (!cancellationToken.IsCancellationRequested) Error = exception.Message;
+            return;
+        }
+        if (cancellationToken.IsCancellationRequested) return;
         _unifiedMessageCount = counts.All;
         _pinnedMessageCount = counts.Pinned;
         _flaggedMessageCount = counts.Flagged;

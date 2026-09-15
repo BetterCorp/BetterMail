@@ -35,6 +35,13 @@ public sealed class FolderReadTests
                 command.Transaction = transaction;
                 command.CommandText = "UPDATE messages SET subject='Uncommitted subject';";
                 await command.ExecuteNonQueryAsync(token);
+                // Counts and People cache reads must not wait behind an active sync writer.
+                await store.GetMessageFilterCountsAsync([new(mailbox.Id, "inbox")], token)
+                    .WaitAsync(TimeSpan.FromSeconds(5), token);
+                await store.GetDiscoveredPeopleAsync(cancellationToken: token)
+                    .WaitAsync(TimeSpan.FromSeconds(5), token);
+                await store.GetWorkspaceItemsAsync<ContactInfo>("contact", "account", cancellationToken: token)
+                    .WaitAsync(TimeSpan.FromSeconds(5), token);
                 var timer = System.Diagnostics.Stopwatch.StartNew();
                 var page = await store.GetMessagesPageAsync([new(mailbox.Id, "inbox")], cancellationToken: token)
                     .WaitAsync(TimeSpan.FromSeconds(5), token);
