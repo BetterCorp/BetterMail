@@ -5574,6 +5574,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             ConversationAction.ReplyAll => ReplyAllToAsync(request.Message),
             ConversationAction.Forward => ForwardMessageAsync(request.Message),
             ConversationAction.CreateEvent => CreateEventFromEmailAsync(request.Message),
+            ConversationAction.ExportMail => ExportMailAsync(request.Message),
+            ConversationAction.ViewHeaders => ViewHeadersAsync(request.Message),
             _ => Task.CompletedTask
         };
 

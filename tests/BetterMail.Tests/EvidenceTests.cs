@@ -265,9 +265,11 @@ public sealed class EvidenceTests
     }
 
     [Theory]
-    [InlineData(true, "Message saved as .eml")]
-    [InlineData(false, "Message export canceled")]
-    public async Task ExportReportsWhetherTheSaveDialogActuallySaved(bool saved, string status)
+    [InlineData(true, "Message saved as .eml", false)]
+    [InlineData(true, "Message saved as .eml", true)]
+    [InlineData(false, "Message export canceled", false)]
+    [InlineData(false, "Message export canceled", true)]
+    public async Task ExportReportsWhetherTheSaveDialogActuallySaved(bool saved, string status, bool conversation)
     {
         await WithStore(async (store, account, mailbox, hidden, provider, service) =>
         {
@@ -277,9 +279,27 @@ public sealed class EvidenceTests
             vm.SelectedMessage = Message(mailbox.Id, "one");
             byte[]? received = null;
             vm.SaveRawMailRequested = bytes => { received = bytes; return Task.FromResult(saved); };
-            await ((AsyncCommand)vm.ExportMailCommand).ExecuteAsync();
+            await ((AsyncCommand)(conversation ? vm.ConversationThread.ExportMailCommand : vm.ExportMailCommand)).ExecuteAsync();
             Assert.Equal(provider.Mime, received);
             Assert.Equal(status, vm.Status);
+            vm.SelectedMessage = null;
+        });
+    }
+
+    [Fact]
+    public async Task ConversationHeadersReachTheHeaderViewer()
+    {
+        await WithStore(async (store, account, mailbox, hidden, provider, service) =>
+        {
+            var vm = new MainWindowViewModel(null, Path.GetTempPath(), _ => { }, _ => { }, null, provider);
+            vm.Accounts.Add(account);
+            vm.Mailboxes.Add(mailbox);
+            vm.SelectedMessage = Message(mailbox.Id, "one");
+            MailHeadersDocument? document = null;
+            vm.HeadersRequested += value => document = value;
+            await ((AsyncCommand)vm.ConversationThread.ViewHeadersCommand).ExecuteAsync();
+            Assert.NotNull(document);
+            Assert.Equal("Message headers loaded", vm.Status);
             vm.SelectedMessage = null;
         });
     }
@@ -327,6 +347,8 @@ public sealed class EvidenceTests
     {
         public byte[] Bytes { get; } = Encoding.UTF8.GetBytes("Company registration REG123. Contract evidence.");
         public byte[] Mime { get; } = Encoding.UTF8.GetBytes("From: client@example.com\r\nTo: accounts@example.com\r\nMessage-ID: <original@example.com>\r\nDate: Wed, 9 Sep 2026 10:00:00 +0200\r\n\r\nOriginal content\r\n");
+        public Task<IReadOnlyList<MailHeader>> GetMessageHeadersAsync(MailAccount account, Mailbox mailbox, string messageId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MailHeader>>([new("Message-ID", "<original@example.com>")]);
         public bool MissingBytes { get; set; }
         public Task<byte[]> GetMimeMessageAsync(MailAccount account, Mailbox mailbox, string messageId, CancellationToken cancellationToken = default) => Task.FromResult(Mime);
         public Task<IReadOnlyList<MailAttachment>> GetAttachmentsAsync(MailAccount account, Mailbox mailbox, string messageId, CancellationToken cancellationToken = default) =>
