@@ -1028,6 +1028,7 @@ public sealed partial class MainWindow : Window
             _viewModel.ComposeRequested -= OpenCompose;
             _viewModel.SharedMailboxRequested -= OpenSharedMailbox;
             _viewModel.SearchFocusRequested -= FocusMailSearch;
+            _viewModel.SaveRawMailRequested = null;
             _viewModel.HeadersRequested -= OpenHeaders;
             _viewModel.AttachmentPreviewRequested -= PreviewAttachment;
             _viewModel.SaveAttachmentsRequested -= SaveAllAttachments;
@@ -1046,6 +1047,7 @@ public sealed partial class MainWindow : Window
             _viewModel.ComposeRequested += OpenCompose;
             _viewModel.SharedMailboxRequested += OpenSharedMailbox;
             _viewModel.SearchFocusRequested += FocusMailSearch;
+            _viewModel.SaveRawMailRequested = SaveRawMailAsync;
             _viewModel.HeadersRequested += OpenHeaders;
             _viewModel.AttachmentPreviewRequested += PreviewAttachment;
             _viewModel.SaveAttachmentsRequested += SaveAllAttachments;
@@ -1183,6 +1185,19 @@ public sealed partial class MainWindow : Window
 
         var window = new SharedMailboxWindow(account, _viewModel.AddSharedMailboxAsync);
         IndependentWindow.Show(window);
+    }
+
+    private async Task SaveRawMailAsync(byte[] bytes)
+    {
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save original message", SuggestedFileName = "message.eml", DefaultExtension = "eml",
+            FileTypeChoices = [new FilePickerFileType("Email message") { Patterns = ["*.eml"] }]
+        });
+        if (file is null) return;
+        await using var stream = await file.OpenWriteAsync();
+        stream.SetLength(0);
+        await stream.WriteAsync(bytes);
     }
 
     private void OpenHeaders(MailHeadersDocument document) =>

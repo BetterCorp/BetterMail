@@ -204,6 +204,66 @@ public sealed class EvidenceTests
     [InlineData("bettermail://evidence/00000000000000000000000000000000?path=secret")]
     public void RejectsInvalidEvidenceLinks(string value) => Assert.False(EvidenceLink.TryParse(value, out _));
 
+    [Fact]
+    public async Task MessageLinksAndRawBytesHonorEndpointAndMailboxRevocation()
+    {
+        await WithStore(async (store, account, mailbox, hidden, provider, service) =>
+        {
+            var token = TestContext.Current.CancellationToken;
+            var configuration = new McpConfiguration(Enabled: true, MailboxIds: [mailbox.Id]);
+            var saved = await store.GetMcpConfigurationAsync();
+            var address = "";
+            var tools = new McpMailTools(store, () => configuration, () => Task.CompletedTask,
+                (_, _, _) => Task.CompletedTask, service, mailProvider: () => provider, endpointUrl: () => address);
+            await using var endpoint = new McpEndpoint(tools, 0, saved.EndpointPath, () => configuration.Enabled, () => saved.AccessKey);
+            await endpoint.StartAsync(token);
+            address = endpoint.Address;
+            var links = JsonSerializer.SerializeToElement(await tools.GetMailLink(mailbox.Id, "one", token));
+            Assert.True(EvidenceLink.TryParse(links.GetProperty("localUrl").GetString()!, out var id));
+            Assert.Equal(address + "/evidence/records/" + id, links.GetProperty("url").GetString());
+            using var http = new HttpClient();
+            var rawUrl = links.GetProperty("rawUrl").GetString()!;
+            using var denied = await http.GetAsync(rawUrl, token);
+            Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+            http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", saved.AccessKey);
+            using var raw = await http.GetAsync(rawUrl, token);
+            Assert.Equal("message/rfc822", raw.Content.Headers.ContentType!.MediaType);
+            Assert.Equal(provider.Mime, await raw.Content.ReadAsByteArrayAsync(token));
+            var chunk = JsonSerializer.SerializeToElement(await tools.ReadMailRaw(mailbox.Id, "one", 3, 7, token));
+            Assert.Equal(provider.Mime[3..10], Convert.FromBase64String(chunk.GetProperty("contentBase64").GetString()!));
+            Assert.Equal(10, chunk.GetProperty("nextOffset").GetInt32());
+            await Assert.ThrowsAsync<McpException>(() => tools.ReadMailRaw(mailbox.Id, "one", -1, cancellationToken: token));
+            await Assert.ThrowsAsync<McpException>(() => tools.GetMailLink(hidden.Id, "hidden", token));
+            address = "https://example.tunnels.betterportal.dev" + saved.EndpointPath;
+            var tunneled = JsonSerializer.SerializeToElement(await tools.GetMailLink(mailbox.Id, "one", token));
+            Assert.Equal(links.GetProperty("localUrl").GetString(), tunneled.GetProperty("localUrl").GetString());
+            Assert.StartsWith(address, tunneled.GetProperty("url").GetString());
+            configuration = configuration with { MailboxIds = [] };
+            using var revoked = await http.GetAsync(rawUrl, token);
+            Assert.Equal(HttpStatusCode.Forbidden, revoked.StatusCode);
+            await Assert.ThrowsAsync<McpException>(() => tools.ReadMailRaw(mailbox.Id, "one", cancellationToken: token));
+        });
+    }
+
+    [Theory]
+    [InlineData("/records/00000000000000000000000000000000/raw", "GET", true)]
+    [InlineData("/records/00000000000000000000000000000000", "GET", true)]
+    [InlineData("/records/00000000000000000000000000000000/raw", "POST", false)]
+    [InlineData("/records/../../secret", "GET", false)]
+    [InlineData("/records/%2e%2e/secret", "GET", false)]
+    [InlineData("/records/00000000000000000000000000000000?token=secret", "GET", false)]
+    public void TunnelAllowsOnlyExplicitEvidenceRoutes(string suffix, string method, bool allowed)
+    {
+        var endpoint = new Uri("http://127.0.0.1:1234/bm/" + new string('a', 64));
+        var frame = new TunnelFrame("request", Path: endpoint.AbsolutePath + "/evidence" + suffix, Method: method);
+        if (!allowed) Assert.Throws<InvalidDataException>(() => BetterTunnelsClient.CreateLocalRequest(frame, endpoint));
+        else
+        {
+            using var request = BetterTunnelsClient.CreateLocalRequest(frame, endpoint);
+            Assert.Equal(endpoint.AbsoluteUri + "/evidence" + suffix, request.RequestUri!.AbsoluteUri);
+        }
+    }
+
     private static byte[] PdfBytes()
     {
         var builder = new PdfDocumentBuilder();

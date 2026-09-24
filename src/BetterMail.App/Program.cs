@@ -18,7 +18,8 @@ internal static class Program
         DefaultMailApp.Register();
 
         var activation = args.FirstOrDefault(argument =>
-            argument.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase)) ?? "activate";
+            argument.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase) ||
+            argument.StartsWith("bettermail:", StringComparison.OrdinalIgnoreCase)) ?? "activate";
         AppActivationRelay? relay = null;
         if (OperatingSystem.IsMacOS())
         {

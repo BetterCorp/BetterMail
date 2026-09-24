@@ -146,7 +146,8 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
             RaisePropertyChanged(nameof(AccessKey));
             RaisePropertyChanged(nameof(EndpointUrl));
             Volatile.Write(ref _active, configuration);
-            var tools = new McpMailTools(_store, () => Volatile.Read(ref _active), _refreshAndSync, _queueSend, _evidence, _filesProvider, _mailProvider);
+            var tools = new McpMailTools(_store, () => Volatile.Read(ref _active), _refreshAndSync, _queueSend, _evidence, _filesProvider, _mailProvider,
+                () => string.IsNullOrWhiteSpace(PublicEndpointUrl) ? _endpoint?.Address ?? "" : PublicEndpointUrl);
             _endpoint = new(tools, configuration.Port, _endpointPath, () => Volatile.Read(ref _active).Enabled, () => Volatile.Read(ref _accessKey));
             await _endpoint.StartAsync();
             Status = $"Listening at {_endpoint.Address} · {configuration.MailboxIds?.Length ?? 0} allowed mailboxes";

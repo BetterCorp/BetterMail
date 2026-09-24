@@ -309,6 +309,7 @@
                   <Button Classes="command" Content="{Binding ToggleFlagText}" HorizontalContentAlignment="Left" Click="MessageFlagClicked" AutomationProperties.Name="{Binding ToggleFlagText}" />
                   <Button Classes="command" Content="{Binding TogglePinText}" HorizontalContentAlignment="Left" Command="{Binding TogglePinCommand}" AutomationProperties.Name="{Binding TogglePinText}" />
                   <Button Classes="command" Content="{Binding ToggleReadText}" HorizontalContentAlignment="Left" Click="MessageReadClicked" AutomationProperties.Name="{Binding ToggleReadText}" />
+                  <Button Classes="command" Content="Save as .eml" HorizontalContentAlignment="Left" Command="{Binding ExportMailCommand}" AutomationProperties.Name="Save original email as .eml" />
                   <Button Classes="command" Content="View headers" HorizontalContentAlignment="Left" Command="{Binding ViewHeadersCommand}" AutomationProperties.Name="View internet message headers" />
                 </StackPanel>
               </Flyout>

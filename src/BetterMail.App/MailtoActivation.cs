@@ -211,6 +211,12 @@ internal static class DefaultMailApp
                 protocol.CreateSubKey(@"shell\open\command").SetValue(
                     "", $"{quote}{executable}{quote} {quote}%1{quote}");
             }
+            using (var link = Registry.CurrentUser.CreateSubKey(@"Software\Classes\bettermail"))
+            {
+                link.SetValue("", "URL:BetterMail Protocol");
+                link.SetValue("URL Protocol", "");
+                link.CreateSubKey(@"shell\open\command").SetValue("", $"\"{executable}\" \"%1\"");
+            }
             using (var capabilities = Registry.CurrentUser.CreateSubKey(CapabilitiesPath))
             {
                 capabilities.SetValue("ApplicationName", ApplicationName);
@@ -235,6 +241,7 @@ internal static class DefaultMailApp
 
         try
         {
+            Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\bettermail", false);
             Registry.CurrentUser.DeleteSubKeyTree($@"Software\Classes\{ProgId}", false);
             Registry.CurrentUser.DeleteSubKeyTree(@"Software\BetterCorp\BetterMail", false);
             using var registered = Registry.CurrentUser.OpenSubKey(@"Software\RegisteredApplications", writable: true);

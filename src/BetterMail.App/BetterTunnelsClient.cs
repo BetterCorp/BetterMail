@@ -246,12 +246,15 @@ internal sealed class BetterTunnelsClient : IDisposable
 
     internal static HttpRequestMessage CreateLocalRequest(TunnelFrame frame, Uri endpoint)
     {
-        // Exact private endpoint only. Never resolve attacker-provided paths into a local URL.
-        if (frame.Path != endpoint.AbsolutePath || frame.Method is not ("GET" or "POST" or "DELETE"))
+        // Only the private MCP endpoint and explicit read-only evidence routes may be forwarded.
+        var evidencePath = frame.Path?.StartsWith(endpoint.AbsolutePath + "/evidence/", StringComparison.Ordinal) == true
+            && System.Text.RegularExpressions.Regex.IsMatch(frame.Path[endpoint.AbsolutePath.Length..],
+                @"\A/evidence/(?:records/(?:[a-fA-F0-9]{32}|[a-fA-F0-9]{64})(?:/raw)?|files/(?:[a-fA-F0-9]{32}|[a-fA-F0-9]{64})|exports/(?:[a-fA-F0-9]{32}|[a-fA-F0-9]{64}))\z");
+        if (!(frame.Path == endpoint.AbsolutePath && frame.Method is ("GET" or "POST" or "DELETE") || evidencePath && frame.Method == "GET"))
             throw new InvalidDataException("Invalid MCP request target.");
         var body = Convert.FromBase64String(frame.Body ?? "");
         if (body.Length > 1024 * 1024) throw new InvalidDataException("MCP request is too large.");
-        var request = new HttpRequestMessage(new HttpMethod(frame.Method), endpoint) { Content = new ByteArrayContent(body) };
+        var request = new HttpRequestMessage(new HttpMethod(frame.Method!), new Uri(endpoint.GetLeftPart(UriPartial.Authority) + frame.Path)) { Content = new ByteArrayContent(body) };
         foreach (var (name, value) in frame.Headers ?? [])
         {
             if (name.Equals("Authorization", StringComparison.OrdinalIgnoreCase) || name.Equals("Accept", StringComparison.OrdinalIgnoreCase) ||
