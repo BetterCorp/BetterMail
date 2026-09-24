@@ -293,7 +293,7 @@ internal static class DefaultMailApp
             Exec=__APPIMAGE__ %u
             Icon=BetterMail
             Categories=Network;Email;
-            MimeType=x-scheme-handler/mailto;
+            MimeType=x-scheme-handler/mailto;x-scheme-handler/bettermail;
             Terminal=false
 
             """;
@@ -301,7 +301,7 @@ internal static class DefaultMailApp
             "__APPIMAGE__", string.Concat((char)34, appImage, (char)34), StringComparison.Ordinal);
         await File.WriteAllTextAsync(desktopPath, desktop);
         using var process = Process.Start(new ProcessStartInfo(
-            "xdg-mime", "default bettermail.desktop x-scheme-handler/mailto")
+            "xdg-mime", "default bettermail.desktop x-scheme-handler/mailto x-scheme-handler/bettermail")
         {
             UseShellExecute = false
         }) ?? throw new InvalidOperationException("xdg-mime is unavailable.");

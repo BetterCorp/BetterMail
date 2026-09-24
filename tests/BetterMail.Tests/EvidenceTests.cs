@@ -264,6 +264,26 @@ public sealed class EvidenceTests
         }
     }
 
+    [Theory]
+    [InlineData(true, "Message saved as .eml")]
+    [InlineData(false, "Message export canceled")]
+    public async Task ExportReportsWhetherTheSaveDialogActuallySaved(bool saved, string status)
+    {
+        await WithStore(async (store, account, mailbox, hidden, provider, service) =>
+        {
+            var vm = new MainWindowViewModel(null, Path.GetTempPath(), _ => { }, _ => { }, null, provider);
+            vm.Accounts.Add(account);
+            vm.Mailboxes.Add(mailbox);
+            vm.SelectedMessage = Message(mailbox.Id, "one");
+            byte[]? received = null;
+            vm.SaveRawMailRequested = bytes => { received = bytes; return Task.FromResult(saved); };
+            await ((AsyncCommand)vm.ExportMailCommand).ExecuteAsync();
+            Assert.Equal(provider.Mime, received);
+            Assert.Equal(status, vm.Status);
+            vm.SelectedMessage = null;
+        });
+    }
+
     private static byte[] PdfBytes()
     {
         var builder = new PdfDocumentBuilder();

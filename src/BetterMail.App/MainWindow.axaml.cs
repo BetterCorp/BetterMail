@@ -1187,17 +1187,18 @@ public sealed partial class MainWindow : Window
         IndependentWindow.Show(window);
     }
 
-    private async Task SaveRawMailAsync(byte[] bytes)
+    private async Task<bool> SaveRawMailAsync(byte[] bytes)
     {
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Save original message", SuggestedFileName = "message.eml", DefaultExtension = "eml",
             FileTypeChoices = [new FilePickerFileType("Email message") { Patterns = ["*.eml"] }]
         });
-        if (file is null) return;
+        if (file is null) return false;
         await using var stream = await file.OpenWriteAsync();
         stream.SetLength(0);
         await stream.WriteAsync(bytes);
+        return true;
     }
 
     private void OpenHeaders(MailHeadersDocument document) =>

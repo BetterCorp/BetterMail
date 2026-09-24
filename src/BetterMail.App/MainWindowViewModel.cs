@@ -498,7 +498,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     public ICommand ReplyAllCommand { get; }
     public ICommand ForwardCommand { get; }
     public ICommand ExportMailCommand { get; }
-    public Func<byte[], Task>? SaveRawMailRequested { get; set; }
+    public Func<byte[], Task<bool>>? SaveRawMailRequested { get; set; }
     public ICommand ViewHeadersCommand { get; }
     public ICommand SelectNextMessageCommand { get; }
     public ICommand SelectPreviousMessageCommand { get; }
@@ -4237,8 +4237,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         try
         {
             var bytes = await _provider.GetMimeMessageAsync(account, mailbox, message.ProviderId);
-            await save(bytes);
-            Status = "Message export finished";
+            Status = await save(bytes) ? "Message saved as .eml" : "Message export canceled";
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
