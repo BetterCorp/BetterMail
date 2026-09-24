@@ -46,7 +46,10 @@ from the rotatable MCP key. No CLI installation, child process, token arguments,
 or plaintext token file is required. BetterMail uses .NET's HTTP and WebSocket
 clients with the BetterTunnels v1 HTTP relay protocol.
 
-Forwarding is restricted to the exact private MCP path and fixed loopback target.
+Forwarding is restricted to the private MCP path and explicit GET routes below it
+for evidence records, original `.eml` downloads, captured files, and exports. Record
+IDs must be hexadecimal; arbitrary paths, traversal, query strings, and writes to
+these download routes are rejected. The loopback target remains fixed.
 The relay sets the local Host header correctly, preserving MCP's loopback checks.
 MCP still verifies the client's bearer key, allowed mailboxes, and write/send
 permissions. Origin headers are preserved: an arbitrary browser origin is rejected.
