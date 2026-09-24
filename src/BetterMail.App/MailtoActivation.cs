@@ -211,6 +211,12 @@ internal static class DefaultMailApp
                 protocol.CreateSubKey(@"shell\open\command").SetValue(
                     "", $"{quote}{executable}{quote} {quote}%1{quote}");
             }
+            using (var link = Registry.CurrentUser.CreateSubKey(@"Software\Classes\bettermail"))
+            {
+                link.SetValue("", "URL:BetterMail Protocol");
+                link.SetValue("URL Protocol", "");
+                link.CreateSubKey(@"shell\open\command").SetValue("", $"\"{executable}\" \"%1\"");
+            }
             using (var capabilities = Registry.CurrentUser.CreateSubKey(CapabilitiesPath))
             {
                 capabilities.SetValue("ApplicationName", ApplicationName);
@@ -235,6 +241,7 @@ internal static class DefaultMailApp
 
         try
         {
+            Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\bettermail", false);
             Registry.CurrentUser.DeleteSubKeyTree($@"Software\Classes\{ProgId}", false);
             Registry.CurrentUser.DeleteSubKeyTree(@"Software\BetterCorp\BetterMail", false);
             using var registered = Registry.CurrentUser.OpenSubKey(@"Software\RegisteredApplications", writable: true);
@@ -286,7 +293,7 @@ internal static class DefaultMailApp
             Exec=__APPIMAGE__ %u
             Icon=BetterMail
             Categories=Network;Email;
-            MimeType=x-scheme-handler/mailto;
+            MimeType=x-scheme-handler/mailto;x-scheme-handler/bettermail;
             Terminal=false
 
             """;
@@ -294,7 +301,7 @@ internal static class DefaultMailApp
             "__APPIMAGE__", string.Concat((char)34, appImage, (char)34), StringComparison.Ordinal);
         await File.WriteAllTextAsync(desktopPath, desktop);
         using var process = Process.Start(new ProcessStartInfo(
-            "xdg-mime", "default bettermail.desktop x-scheme-handler/mailto")
+            "xdg-mime", "default bettermail.desktop x-scheme-handler/mailto x-scheme-handler/bettermail")
         {
             UseShellExecute = false
         }) ?? throw new InvalidOperationException("xdg-mime is unavailable.");

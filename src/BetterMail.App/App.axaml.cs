@@ -230,7 +230,11 @@ public sealed partial class App : Application
             _mainWindow.Show();
         }
         _mainWindow.Activate();
-        if (MailtoParser.TryParse(activation, out var request))
+        if (BetterMail.Core.EvidenceLink.TryParse(activation, out var recordId))
+        {
+            await _viewModel.OpenEvidenceLinkAsync(recordId);
+        }
+        else if (MailtoParser.TryParse(activation, out var request))
         {
             await _viewModel.OpenComposeAsync(request);
         }

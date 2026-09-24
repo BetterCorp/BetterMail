@@ -17,6 +17,7 @@ public enum ConversationAction
     ToggleFlag,
     TogglePin,
     ViewHeaders,
+    ExportMail,
     Move,
     CreateEvent
 }
@@ -95,6 +96,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
         ToggleReadCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.ToggleRead), CanRunAction, allowConcurrent: true);
         ToggleFlagCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.ToggleFlag), CanRunAction, allowConcurrent: true);
         TogglePinCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.TogglePin), CanRunAction, allowConcurrent: true);
+        ExportMailCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.ExportMail), CanRunAction, allowConcurrent: true);
         ViewHeadersCommand = new AsyncCommand(() => RunActionAsync(ConversationAction.ViewHeaders), CanRunAction, allowConcurrent: true);
         MoveToFolderCommand = new AsyncCommand<MailFolderItem>(MoveToFolderAsync, CanMoveToFolder, allowConcurrent: true);
         OpenDraftCommand = new AsyncCommand<LocalDraft>(draft => _openDraft?.Invoke(draft) ?? Task.CompletedTask);
@@ -118,6 +120,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
     public ICommand ToggleReadCommand { get; }
     public ICommand ToggleFlagCommand { get; }
     public ICommand TogglePinCommand { get; }
+    public ICommand ExportMailCommand { get; }
     public ICommand ViewHeadersCommand { get; }
     public ICommand MoveToFolderCommand { get; }
     public ICommand OpenDraftCommand { get; }
@@ -471,6 +474,7 @@ public sealed class ConversationThreadViewModel : ViewModelBase
         ((AsyncCommand)ToggleReadCommand).Refresh();
         ((AsyncCommand)ToggleFlagCommand).Refresh();
         ((AsyncCommand)TogglePinCommand).Refresh();
+        ((AsyncCommand)ExportMailCommand).Refresh();
         ((AsyncCommand)ViewHeadersCommand).Refresh();
         ((AsyncCommand<MailFolderItem>)MoveToFolderCommand).Refresh();
     }

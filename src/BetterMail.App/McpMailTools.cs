@@ -13,7 +13,8 @@ internal sealed partial class McpMailTools(
     Func<ComposeSender, string, DraftMessage, Task> queueSend,
     EvidenceService? evidence = null,
     Func<IFilesProvider?>? filesProvider = null,
-    Func<IMailProvider?>? mailProvider = null)
+    Func<IMailProvider?>? mailProvider = null,
+    Func<string>? endpointUrl = null)
 {
     private McpConfiguration EnabledConfiguration()
     {
