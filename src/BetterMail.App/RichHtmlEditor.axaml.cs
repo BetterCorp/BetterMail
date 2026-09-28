@@ -15,6 +15,7 @@ public sealed partial class RichHtmlEditor : UserControl
     private bool _updatingFromEditor;
     private bool _initialized;
     private const string AttachmentMessagePrefix = "bettermail:attachment:";
+    private const string FocusMessage = "bettermail:editor-focus";
     public event Action<DraftAttachment>? AttachmentDropped;
 
     public static readonly StyledProperty<string> HtmlProperty = AvaloniaProperty.Register<RichHtmlEditor, string>(
@@ -29,6 +30,13 @@ public sealed partial class RichHtmlEditor : UserControl
     public RichHtmlEditor()
     {
         InitializeComponent();
+        Editor.GotFocus += (_, _) =>
+        {
+            if (_ready && Editor.IsEffectivelyVisible)
+                LinuxWebViewFocus.Focus(Editor.TryGetPlatformHandle(), TopLevel.GetTopLevel(this)?.TryGetPlatformHandle());
+        };
+        Editor.LostFocus += (_, _) => LinuxWebViewFocus.RestoreOwner(
+            Editor.TryGetPlatformHandle(), TopLevel.GetTopLevel(this)?.TryGetPlatformHandle());
         AttachedToVisualTree += InitializeEditor;
     }
 
@@ -59,7 +67,9 @@ public sealed partial class RichHtmlEditor : UserControl
         }
         if (change.Property == HtmlProperty)
         {
-            await Editor.InvokeScript($"editor.innerHTML={JsonSerializer.Serialize(Html)}");
+            // Two-way bindings can echo an input event back after its handler returns.
+            // Replacing identical HTML destroys the browser's selection and undo history.
+            await Editor.InvokeScript($"if(editor.innerHTML!=={JsonSerializer.Serialize(Html)}) editor.innerHTML={JsonSerializer.Serialize(Html)}");
         }
         else if (change.Property == IsReadOnlyProperty)
         {
@@ -98,6 +108,7 @@ public sealed partial class RichHtmlEditor : UserControl
               contenteditable="{{(!IsReadOnly).ToString().ToLowerInvariant()}}"></body>
             <script>
               editor.innerHTML={{JsonSerializer.Serialize(Html)}};
+              editor.addEventListener('pointerdown',()=>invokeCSharpAction('{{FocusMessage}}'));
               editor.addEventListener('input',()=>invokeCSharpAction(editor.innerHTML));
               document.addEventListener('dragover',e=>{
                 if(!Array.from(e.dataTransfer.types).includes('Files')) return;
@@ -132,6 +143,15 @@ public sealed partial class RichHtmlEditor : UserControl
 
     private void EditorWebMessageReceived(object? sender, WebMessageReceivedEventArgs e)
     {
+        if (e.Body == FocusMessage)
+        {
+            if (_ready && Editor.IsEffectivelyVisible)
+            {
+                Editor.Focus();
+                LinuxWebViewFocus.Focus(Editor.TryGetPlatformHandle(), TopLevel.GetTopLevel(this)?.TryGetPlatformHandle());
+            }
+            return;
+        }
         if (e.Body?.StartsWith(AttachmentMessagePrefix, StringComparison.Ordinal) == true)
         {
             if (!IsReadOnly && AttachmentDropped is not null)
@@ -149,7 +169,7 @@ public sealed partial class RichHtmlEditor : UserControl
             return;
         }
         _updatingFromEditor = true;
-        Html = e.Body ?? "";
+        SetCurrentValue(HtmlProperty, e.Body ?? "");
         _updatingFromEditor = false;
     }
 

@@ -161,7 +161,22 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private MailPageCursor? _messagePageCursor;
     private IReadOnlyList<MailFolderKey> _messagePageFolders = [];
     private bool _isLoadingMoreMessages;
-    private Task<IReadOnlyList<RecipientSuggestion>>? _recipientDirectoryTask;
+    private RecipientDirectoryCache? _recipientDirectory;
+    private string[] _recipientDirectoryScope = [];
+    internal event Action? RecipientDirectoryChanged;
+    private RecipientDirectoryCache RecipientDirectory
+    {
+        get
+        {
+            if (_recipientDirectory is not null) return _recipientDirectory;
+            var directory = new RecipientDirectoryCache(LoadRecipientContactsAsync, LoadRecipientHistoryAsync);
+            directory.Changed += () =>
+            {
+                if (ReferenceEquals(directory, _recipientDirectory)) RecipientDirectoryChanged?.Invoke();
+            };
+            return _recipientDirectory = directory;
+        }
+    }
     private CalendarEventSource? _nextCalendarEvent;
 
     internal string DataDirectory => _dataDirectory;
@@ -1521,7 +1536,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         await RefreshNextCalendarEventAsync();
         StartAutoSync();
         _ = ReconcileAllDraftsInBackgroundAsync();
-        _recipientDirectoryTask = LoadRecipientDirectoryAsync();
+        _ = RecipientDirectory.RefreshAsync();
     }
 
     private async Task ConnectAsync()
@@ -3799,46 +3814,32 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             .Select(result =>
                 $"{result.Owner.DisplayName}: {result.Error} Open Settings > Accounts and re-authenticate if access expired."));
         RaisePropertyChanged(nameof(IsWorkspaceEmpty));
-        _recipientDirectoryTask = null;
+        _ = RecipientDirectory.RefreshAsync();
     }
 
-    internal async Task<IReadOnlyList<RecipientSuggestion>> SearchRecipientSuggestionsAsync(
-        string query,
-        CancellationToken cancellationToken)
-    {
-        var directory = await (_recipientDirectoryTask ??= LoadRecipientDirectoryAsync())
-            .WaitAsync(cancellationToken);
-        return directory
-            .Where(suggestion => Contains(suggestion.DisplayName, query) || Contains(suggestion.Address, query))
-            .OrderByDescending(suggestion => suggestion.Address.StartsWith(query, StringComparison.OrdinalIgnoreCase))
-            .ThenByDescending(suggestion => suggestion.DisplayName.StartsWith(query, StringComparison.OrdinalIgnoreCase))
-            .ThenBy(static suggestion => suggestion.DisplayName, StringComparer.OrdinalIgnoreCase)
-            .Take(20)
-            .ToArray();
-    }
+    internal Task<IReadOnlyList<RecipientSuggestion>> SearchRecipientSuggestionsAsync(
+        string query, CancellationToken cancellationToken) =>
+        RecipientDirectory.SearchAsync(query.Trim(), cancellationToken);
 
-    private async Task<IReadOnlyList<RecipientSuggestion>> LoadRecipientDirectoryAsync()
+    private async Task<IReadOnlyList<RecipientSuggestion>> LoadRecipientContactsAsync()
     {
-        if (_store is null)
-        {
-            return [];
-        }
+        if (_store is null) return [];
         var suggestions = new List<RecipientSuggestion>();
-        foreach (var owner in ContactOwners)
+        foreach (var owner in ContactOwners.ToArray())
         {
             var contacts = await _store.GetWorkspaceItemsAsync<ContactInfo>(
                 "contact", owner.CacheId, "all");
             suggestions.AddRange(contacts.SelectMany(contact => contact.EmailAddresses.Select(address =>
                 new RecipientSuggestion(contact.DisplayName, address, owner.DisplayName))));
         }
-        if (_store.HasIndexedCorrespondents)
-        {
-            suggestions.AddRange((await _store.GetDiscoveredPeopleAsync("", 5000))
-                .Select(person => new RecipientSuggestion(person.DisplayName, person.EmailAddress, "Mail history")));
-        }
-        return suggestions
-            .Where(static suggestion => !string.IsNullOrWhiteSpace(suggestion.Address))
-            .DistinctBy(static suggestion => suggestion.Address, StringComparer.OrdinalIgnoreCase)
+        return suggestions;
+    }
+
+    private async Task<IReadOnlyList<RecipientSuggestion>> LoadRecipientHistoryAsync()
+    {
+        if (_store is null || !_store.HasIndexedCorrespondents) return [];
+        return (await _store.GetDiscoveredPeopleAsync("", 5000))
+            .Select(person => new RecipientSuggestion(person.DisplayName, person.EmailAddress, "Mail history"))
             .ToArray();
     }
     private Task EditContactAsync(PersonEntry person)
@@ -4839,7 +4840,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private void RebuildContactOwners()
     {
-        _recipientDirectoryTask = null;
         var selectedMailboxId = SelectedContactOwner?.Mailbox.Id;
         Replace(ContactOwners,
             from mailbox in Mailboxes.Concat(Accounts
@@ -4853,6 +4853,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         SelectedContactOwner = ContactOwners.FirstOrDefault(owner => owner.Mailbox.Id == selectedMailboxId)
             ?? ContactOwners.FirstOrDefault();
         RefreshContactCommands();
+        var scope = ContactOwners.Select(owner => $"contact:{owner.CacheId}:{owner.DisplayName}")
+            .Concat(Mailboxes.Select(mailbox => $"mail:{mailbox.Id}"))
+            .Order(StringComparer.Ordinal).ToArray();
+        if (!_recipientDirectoryScope.SequenceEqual(scope))
+        {
+            // Drop removed accounts immediately, but don't discard a warm cache on ordinary sync.
+            _recipientDirectoryScope = scope;
+            _recipientDirectory = null;
+            if (_initializationComplete) _ = RecipientDirectory.RefreshAsync();
+        }
     }
 
     private void OnSenderSignatureChanged(SenderSettingsItem item)
