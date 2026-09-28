@@ -231,7 +231,7 @@ public sealed partial class MainWindowViewModel
                 StorageSyncStep.Detail = $"{++batches} cleanup batches complete";
                 await Task.Delay(50);
             }
-            _recipientDirectoryTask = null;
+            _ = RecipientDirectory.RefreshAsync();
             if (WindowsSessionLock.IsLocked())
             {
                 using var vacuumCancellation = new CancellationTokenSource();

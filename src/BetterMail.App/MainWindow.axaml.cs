@@ -1119,8 +1119,16 @@ public sealed partial class MainWindow : Window
             return;
         }
         _composeWindows[session] = window;
+        var recipientOwner = _viewModel;
+        void RefreshRecipients()
+        {
+            if (window.FocusManager?.GetFocusedElement() is TextBox { DataContext: ComposeRecipientField field } &&
+                !string.IsNullOrWhiteSpace(field.Query)) field.RefreshSearch();
+        }
+        recipientOwner.RecipientDirectoryChanged += RefreshRecipients;
         window.Closed += (_, _) =>
         {
+            recipientOwner.RecipientDirectoryChanged -= RefreshRecipients;
             _composeWindows.Remove(session);
             if (!_isClosing)
             {
