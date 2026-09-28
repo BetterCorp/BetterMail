@@ -60,6 +60,7 @@
                     <Button Classes="command" Content="{Binding ToggleFlagText}" HorizontalContentAlignment="Left" Command="{Binding ToggleFlagCommand}" />
                     <Button Classes="command" Content="{Binding TogglePinText}" HorizontalContentAlignment="Left" Command="{Binding TogglePinCommand}" />
                     <Button Classes="command" Content="{Binding ToggleReadText}" HorizontalContentAlignment="Left" Command="{Binding ToggleReadCommand}" />
+                    <Button Classes="command" Content="Save as .eml" HorizontalContentAlignment="Left" Command="{Binding ExportMailCommand}" />
                     <Button Classes="command" Content="View headers" HorizontalContentAlignment="Left" Command="{Binding ViewHeadersCommand}" />
                   </StackPanel>
                 </Flyout>

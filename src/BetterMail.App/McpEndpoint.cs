@@ -65,6 +65,11 @@ internal sealed class McpEndpoint : IAsyncDisposable
             await next(context);
         });
         _app.MapMcp(_endpointPath);
+        _app.MapGet(_endpointPath + "/evidence/records/{id}/raw", async (string id, CancellationToken cancellationToken) =>
+        {
+            try { return Results.File(await tools.DownloadRecordRawAsync(id, cancellationToken), "message/rfc822", "message.eml"); }
+            catch (ModelContextProtocol.McpException error) { return Results.Json(new { error = error.Message }, statusCode: 403); }
+        });
         _app.MapGet(_endpointPath + "/evidence/records/{id}", async (string id, CancellationToken cancellationToken) =>
         {
             try { return Results.Json(await tools.ReadEvidence(id, cancellationToken)); }

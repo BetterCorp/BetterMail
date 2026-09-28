@@ -5,5 +5,5 @@ Comment=Fast local-first Microsoft 365 mail
 Exec=BetterMail %u
 Icon=BetterMail
 Categories=Network;Email;
-MimeType=x-scheme-handler/mailto;
+MimeType=x-scheme-handler/mailto;x-scheme-handler/bettermail;
 Terminal=false

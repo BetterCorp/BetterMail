@@ -17,7 +17,7 @@
     <dict>
       <key>CFBundleURLName</key><string>BetterMail mail links</string>
       <key>CFBundleTypeRole</key><string>Editor</string>
-      <key>CFBundleURLSchemes</key><array><string>mailto</string></array>
+      <key>CFBundleURLSchemes</key><array><string>mailto</string><string>bettermail</string></array>
     </dict>
   </array>
 </dict>

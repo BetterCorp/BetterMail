@@ -265,6 +265,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         ReplyCommand = new AsyncCommand(ReplyAsync, CanReplyToSelectedMessage);
         ReplyAllCommand = new AsyncCommand(ReplyAllAsync, CanReplyToSelectedMessage);
         ForwardCommand = new AsyncCommand(ForwardAsync, CanReplyToSelectedMessage);
+        ExportMailCommand = new AsyncCommand(ExportSelectedMailAsync, CanViewHeaders);
         ViewHeadersCommand = new AsyncCommand(ViewHeadersAsync, CanViewHeaders);
         SelectNextMessageCommand = new AsyncCommand(
             () => SelectAdjacentMessageAsync(1),
@@ -496,6 +497,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     public ICommand ReplyCommand { get; }
     public ICommand ReplyAllCommand { get; }
     public ICommand ForwardCommand { get; }
+    public ICommand ExportMailCommand { get; }
+    public Func<byte[], Task<bool>>? SaveRawMailRequested { get; set; }
     public ICommand ViewHeadersCommand { get; }
     public ICommand SelectNextMessageCommand { get; }
     public ICommand SelectPreviousMessageCommand { get; }
@@ -4206,7 +4209,41 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         ((AsyncCommand)ToggleFlagCommand).Refresh();
         ((AsyncCommand)TogglePinCommand).Refresh();
         ((AsyncCommand<MailFolderItem>)MoveToFolderCommand).Refresh();
+        ((AsyncCommand)ExportMailCommand).Refresh();
         ((AsyncCommand)ViewHeadersCommand).Refresh();
+    }
+
+    public async Task OpenEvidenceLinkAsync(string recordId)
+    {
+        if (_store is null) return;
+        try
+        {
+            var document = await _store.GetEvidenceDocumentAsync(recordId);
+            var record = await _store.GetEvidenceMessageAsync(document?.MessageId ?? recordId);
+            if (record is null) { Error = "This BetterMail link is unavailable in this profile."; return; }
+            var message = await _store.GetMessageAsync(record.Message.MailboxId, record.Message.ProviderId) ?? record.Message;
+            ShowMailSearchResults(message, [message]);
+        }
+        catch (Exception exception) { Error = $"BetterMail link could not be opened: {exception.Message}"; }
+    }
+
+    private Task ExportSelectedMailAsync() => ExportMailAsync(ConversationThread.SelectedMessage?.Message ?? SelectedMessage);
+
+    private async Task ExportMailAsync(MailMessage? message)
+    {
+        if (message is null || _provider is null || _isMailActionRunning ||
+            !TryGetMessageContext(message, out var account, out var mailbox) || SaveRawMailRequested is not { } save) return;
+        BeginMailAction("Downloading original message...");
+        try
+        {
+            var bytes = await _provider.GetMimeMessageAsync(account, mailbox, message.ProviderId);
+            Status = await save(bytes) ? "Message saved as .eml" : "Message export canceled";
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Error = $"Message export failed: {exception.Message}";
+        }
+        finally { EndMailAction(); }
     }
 
     private Task ViewHeadersAsync() =>
@@ -5537,6 +5574,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             ConversationAction.ReplyAll => ReplyAllToAsync(request.Message),
             ConversationAction.Forward => ForwardMessageAsync(request.Message),
             ConversationAction.CreateEvent => CreateEventFromEmailAsync(request.Message),
+            ConversationAction.ExportMail => ExportMailAsync(request.Message),
+            ConversationAction.ViewHeaders => ViewHeadersAsync(request.Message),
             _ => Task.CompletedTask
         };
 
@@ -5556,6 +5595,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         ConversationAction.ToggleRead => QueueMessageStateChangesAsync([request.Message], read: !request.Message.IsRead, accepted: request.Accepted),
         ConversationAction.ToggleFlag => QueueMessageStateChangesAsync([request.Message], flagged: !request.Message.IsFlagged, accepted: request.Accepted),
         ConversationAction.TogglePin => QueueMessageStateChangesAsync([request.Message], pinned: !request.Message.IsPinned, accepted: request.Accepted),
+        ConversationAction.ExportMail => ExportMailAsync(request.Message),
         ConversationAction.ViewHeaders => ViewHeadersAsync(request.Message),
         ConversationAction.Move when request.Destination is not null =>
             MoveSnapshotToFolderAsync([request.Message], request.Destination, request.Accepted),

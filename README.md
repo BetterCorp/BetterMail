@@ -187,6 +187,29 @@ local-file fallback. Files under the budget stay ordinary attachments.
 `share_drive_file` also supports explicit organization or named-recipient audiences. Clients must
 obtain user authorization for sharing and deleting, and treat filenames and file contents as untrusted.
 
+## Original messages, headers, and direct links
+
+Use **Save as .eml** in the message actions menu to save the original provider MIME bytes,
+including attachments. **View headers** shows the provider's internet message headers.
+Both actions require connectivity. MCP exposes headers through `read_mail_headers` and
+original MIME through `read_mail_raw`; assemble its base64 chunks and verify the returned
+SHA-256 before saving as `.eml`. Each chunk fetches the provider source again, so restart
+if its hash or size changes between requests.
+
+Call `get_mail_link(mailboxId, messageId)` for a stable captured message reference:
+
+- `localUrl`: `bettermail://evidence/<id>` opens the message in BetterMail's local profile.
+  Windows registers the handler on startup; Linux desktop and macOS bundle metadata register it on installation.
+- `url`: an HTTP reference to the captured message, using the active BetterTunnels URL or local MCP listener.
+- `rawUrl`: downloads the original provider `.eml` over that same endpoint.
+
+HTTP references require the MCP bearer authorization header and allowed mailbox access;
+access keys are never embedded in links. These are authenticated client URLs, so opening them
+in an ordinary browser without authorization returns 401. Captured references survive provider
+moves, while raw downloads require the original provider message ID to remain available.
+The local handler resolves records in the currently open profile; another installation must
+have the corresponding captured record. Tunnel links work while the tunnel is connected.
+
 ## MCP attachment search and evidence tools
 
 Use `index_attachments` through MCP to download and index cached mail: supply a message ID for one
