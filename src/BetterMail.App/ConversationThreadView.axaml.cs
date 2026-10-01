@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
@@ -27,6 +26,7 @@ public sealed partial class ConversationThreadView : UserControl
     public ConversationThreadView()
     {
         InitializeComponent();
+        _ = new ReadOnlyWebViewLinks(MessageWebView);
         KeyDown += HandleKeyDown;
         ThreadHeaderScroll.AddHandler(PointerWheelChangedEvent, (_, _) => _scrollInputVersion++, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         ThreadHeaderScroll.AddHandler(PointerPressedEvent, (_, _) => _scrollInputVersion++, Avalonia.Interactivity.RoutingStrategies.Tunnel);
@@ -258,28 +258,6 @@ public sealed partial class ConversationThreadView : UserControl
         {
             command.Execute(null);
             args.Handled = true;
-        }
-    }
-
-    private void MessageWebView_NavigationStarted(
-        object? sender,
-        WebViewNavigationStartingEventArgs args)
-    {
-        var request = args.Request;
-        if (request is null ||
-            (request.Scheme != Uri.UriSchemeHttp && request.Scheme != Uri.UriSchemeHttps))
-        {
-            return;
-        }
-
-        try
-        {
-            args.Cancel = Process.Start(
-                new ProcessStartInfo(request.AbsoluteUri) { UseShellExecute = true }) is not null;
-        }
-        catch
-        {
-            args.Cancel = false;
         }
     }
 }

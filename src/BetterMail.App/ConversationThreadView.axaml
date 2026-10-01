@@ -220,7 +220,6 @@
 
       <NativeWebView Grid.Row="1"
                      x:Name="MessageWebView"
-                     NavigationStarted="MessageWebView_NavigationStarted"
                      AutomationProperties.Name="Selected conversation message content" />
     </Grid>
 
