@@ -57,6 +57,10 @@ jobs:
       - name: Smoke test published Linux app
         if: runner.os == 'Linux'
         run: xvfb-run -a python3 scripts/smoke-startup.py artifacts/smoke/BetterMail.dll
+      - name: Check email link navigation
+        if: runner.os == 'Linux'
+        timeout-minutes: 2
+        run: xvfb-run -a dotnet run --project tools/BetterMail.UiPreview --configuration Release --no-build -- artifacts/email-links --email-links
       - uses: actions/upload-artifact@v4
         with:
           name: smoke-${{ matrix.platform }}

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
@@ -17,6 +16,7 @@ public sealed partial class NotesWorkspaceView : UserControl
     public NotesWorkspaceView()
     {
         InitializeComponent();
+        _ = new ReadOnlyWebViewLinks(PageWebView);
         NotesTree.AddHandler(TreeViewItem.ExpandedEvent, async (_, args) =>
         {
             if (args.Source is TreeViewItem { DataContext: NoteTreeNode node } && DataContext is NotesWorkspaceViewModel vm)
@@ -228,26 +228,6 @@ public sealed partial class NotesWorkspaceView : UserControl
         {
             ShowPhoneNavigation();
             args.Handled = true;
-        }
-    }
-
-    private void PageWebView_NavigationStarted(
-        object? sender, WebViewNavigationStartingEventArgs args)
-    {
-        var request = args.Request;
-        if (request is null ||
-            (request.Scheme != Uri.UriSchemeHttp && request.Scheme != Uri.UriSchemeHttps))
-        {
-            return;
-        }
-        try
-        {
-            args.Cancel = Process.Start(
-                new ProcessStartInfo(request.AbsoluteUri) { UseShellExecute = true }) is not null;
-        }
-        catch
-        {
-            args.Cancel = false;
         }
     }
 }

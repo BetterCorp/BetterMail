@@ -50,5 +50,6 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="BetterMail.Tests" />
+    <InternalsVisibleTo Include="BetterMail.UiPreview" />
   </ItemGroup>
 </Project>
