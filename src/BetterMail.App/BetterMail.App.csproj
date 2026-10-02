@@ -24,6 +24,8 @@
     <ProjectReference Include="../BetterMail.Microsoft365/BetterMail.Microsoft365.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="../../asset-pack/04-desktop/linux/hicolor/512x512/apps/bettermail.png"
+                      LogicalName="BetterMail.LinuxIcon.png" />
     <AvaloniaResource Include="Assets\**" />
     <AvaloniaResource Include="..\..\asset-pack\06-banners\website-header-1500x500.png"
                       Link="Assets\BetterMailSettingsBanner.png" />
