@@ -54,6 +54,10 @@ jobs:
         if: runner.os == 'Linux'
         timeout-minutes: 2
         run: xvfb-run -a dotnet run --project tools/BetterMail.UiPreview --configuration Release --no-build -- artifacts/compose-input --compose-input
+      - name: Check recipient drag and drop
+        if: runner.os == 'Linux'
+        timeout-minutes: 2
+        run: xvfb-run -a dotnet run --project tools/BetterMail.UiPreview --configuration Release --no-build -- artifacts/recipient-dragging --recipient-dragging
       - name: Smoke test published Linux app
         if: runner.os == 'Linux'
         run: xvfb-run -a python3 scripts/smoke-startup.py artifacts/smoke/BetterMail.dll
