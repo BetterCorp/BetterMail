@@ -4,8 +4,8 @@ using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.AspNetCore;
 
@@ -23,9 +23,7 @@ internal sealed class McpEndpoint : IAsyncDisposable
             !endpointPath[4..].All(Uri.IsHexDigit))
             throw new ArgumentException("The saved MCP endpoint path is invalid.", nameof(endpointPath));
         _endpointPath = endpointPath;
-        var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { Args = [] });
-        builder.Configuration.Sources.Clear();
-        builder.Logging.ClearProviders();
+        var builder = CreateHostBuilder();
         builder.WebHost.ConfigureKestrel(options =>
         {
             options.Listen(IPAddress.Loopback, port);
@@ -89,6 +87,25 @@ internal sealed class McpEndpoint : IAsyncDisposable
                 catch (ModelContextProtocol.McpException error) { return Results.Json(new { error = error.Message }, statusCode: 403); }
             });
         }
+    }
+
+    internal static WebApplicationBuilder CreateHostBuilder()
+    {
+        // SlimBuilder installs JSON reload watchers during construction, before sources can be
+        // cleared. MCP uses saved database settings and must never load or watch content files.
+        var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions
+        {
+            Args = [],
+            ApplicationName = typeof(McpEndpoint).Assembly.GetName().Name,
+            ContentRootPath = AppContext.BaseDirectory,
+            EnvironmentName = "Production"
+        });
+        builder.Environment.ContentRootFileProvider = new NullFileProvider();
+        builder.Environment.WebRootFileProvider = new NullFileProvider();
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseKestrelCore();
+        builder.Services.AddRouting();
+        return builder;
     }
 
     public Task StartAsync(CancellationToken cancellationToken = default) => _app.StartAsync(cancellationToken);
