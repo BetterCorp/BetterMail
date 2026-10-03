@@ -6,10 +6,21 @@ using BetterMail.Core;
 
 namespace BetterMail.Microsoft365;
 
-public sealed class Microsoft365MailProvider(
-    Microsoft365AuthService authentication,
-    HttpClient? httpClient = null) : IMailProvider, ISharedMailboxProvider
+public sealed class Microsoft365MailProvider : IMailProvider, ISharedMailboxProvider, IMailRecoveryProvider
 {
+    private readonly Func<string, CancellationToken, Task<string>> _getAccessToken;
+    private readonly HttpClient _httpClient;
+
+    public Microsoft365MailProvider(Microsoft365AuthService authentication, HttpClient? httpClient = null)
+        : this(authentication.GetAccessTokenAsync, httpClient ?? new HttpClient
+        { BaseAddress = new Uri("https://graph.microsoft.com/v1.0/") }) { }
+
+    internal Microsoft365MailProvider(Func<string, CancellationToken, Task<string>> getAccessToken, HttpClient httpClient)
+    {
+        _getAccessToken = getAccessToken;
+        _httpClient = httpClient;
+    }
+
     public bool SupportsCloudDrafts => true;
 
     internal const long SimpleAttachmentLimitBytes = 3L * 1024 * 1024;
@@ -20,11 +31,6 @@ public sealed class Microsoft365MailProvider(
         "id,conversationId,subject,toRecipients,ccRecipients,bccRecipients,body,lastModifiedDateTime,hasAttachments,importance,flag,isReadReceiptRequested,isDeliveryReceiptRequested";
     internal const string FolderSelect =
         "id,displayName,unreadItemCount,totalItemCount,childFolderCount";
-
-    private readonly HttpClient _httpClient = httpClient ?? new HttpClient
-    {
-        BaseAddress = new Uri("https://graph.microsoft.com/v1.0/")
-    };
 
     public async Task<IReadOnlyList<MailFolder>> GetFoldersAsync(
         MailAccount account,
@@ -62,7 +68,7 @@ public sealed class Microsoft365MailProvider(
         }
 
         var wellKnownIds = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var name in new[] { "inbox", "sentitems" })
+        foreach (var name in new[] { "inbox", "sentitems", "deleteditems", "archive", "junkemail" })
         {
             try
             {
@@ -213,6 +219,41 @@ public sealed class Microsoft365MailProvider(
     {
         var escapedQuery = Uri.EscapeDataString($"\"{query.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"");
         return $"{MailboxPath(account, mailbox)}/messages?$search={escapedQuery}&$select={MessageSelect}&$top={limit}";
+    }
+
+    public async Task<IReadOnlyList<MailMessage>?> FindMessagesByIdentityAsync(
+        MailAccount account, Mailbox mailbox, string internetMessageId, CancellationToken token = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(internetMessageId);
+        var filter = Uri.EscapeDataString($"internetMessageId eq '{internetMessageId.Replace("'", "''")}'");
+        string? endpoint = $"{MailboxPath(account, mailbox)}/messages?$filter={filter}&$select={MessageSelect}&$top=2";
+        var matches = new Dictionary<string, MailMessage>(StringComparer.Ordinal);
+        var pages = new HashSet<string>(StringComparer.Ordinal);
+        while (endpoint is not null)
+        {
+            if (pages.Count >= 20 || !pages.Add(endpoint))
+                throw new InvalidOperationException("The exact message lookup was incomplete. Nothing was changed.");
+            using var document = await GetJsonAsync(account, endpoint, token).ConfigureAwait(false);
+            foreach (var element in document.RootElement.GetProperty("value").EnumerateArray())
+            {
+                var message = MapMessage(mailbox, element);
+                if (message.InternetMessageId != internetMessageId || message.IsDeleted)
+                    throw new InvalidOperationException("Microsoft returned a different identity during message recovery.");
+                matches[message.ProviderId] = message;
+                if (matches.Count == 2) return matches.Values.ToArray();
+            }
+            endpoint = document.RootElement.TryGetProperty("@odata.nextLink", out var next) ? next.GetString() : null;
+        }
+        return matches.Values.ToArray();
+    }
+
+    public async Task<string> ResolveFolderIdAsync(
+        MailAccount account, Mailbox mailbox, string folderId, CancellationToken token = default)
+    {
+        var path = MailboxPath(account, mailbox);
+        if (folderId is not ("inbox" or "sentitems" or "deleteditems" or "archive" or "junkemail" or "drafts")) return folderId;
+        using var document = await GetJsonAsync(account, $"{path}/mailFolders/{folderId}?$select=id", token).ConfigureAwait(false);
+        return RequiredString(document.RootElement, "id");
     }
 
     internal static bool NeedsHydration(JsonElement message) =>
@@ -874,7 +915,7 @@ public sealed class Microsoft365MailProvider(
         var request = new HttpRequestMessage(method, endpoint);
         request.Headers.Authorization = new AuthenticationHeaderValue(
             "Bearer",
-            await authentication.GetAccessTokenAsync(account.AccountId, cancellationToken).ConfigureAwait(false));
+            await _getAccessToken(account.AccountId, cancellationToken).ConfigureAwait(false));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.Add("Prefer", "outlook.body-content-type=html");
         if (endpoint.Contains("/messages/delta", StringComparison.OrdinalIgnoreCase))
