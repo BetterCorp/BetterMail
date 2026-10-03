@@ -691,13 +691,14 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
     {
         if (string.IsNullOrWhiteSpace(query))
         {
-            return GetMessagesAsync(mailboxId: mailboxId, limit: limit, cancellationToken: cancellationToken);
+            return QuerySearchMessagesAsync(_ => "WHERE ($mailbox IS NULL OR mailbox_id = $mailbox)",
+                limit, true, cancellationToken, ("$mailbox", (object?)mailboxId ?? DBNull.Value));
         }
 
         var ftsQuery = string.Join(' ', query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(static term => $"\"{term.Replace("\"", "\"\"")}\"*"));
-        return QueryMessagesAsync(
-            (_optimizedSearch
+        return QuerySearchMessagesAsync(
+            optimized => (optimized
                 ? "WHERE rowid IN (SELECT rowid FROM message_search_v2 WHERE message_search_v2 MATCH $query)"
                 : "WHERE rowid IN (SELECT rowid FROM message_search WHERE message_search MATCH $query UNION SELECT rowid FROM message_search_v2 WHERE message_search_v2 MATCH $query)") +
                 " AND ($mailbox IS NULL OR mailbox_id = $mailbox)",
@@ -1413,6 +1414,7 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
+            await DisposeSearchReaderAsync().ConfigureAwait(false);
             await DisposeWorkspaceReaderAsync().ConfigureAwait(false);
             await DisposeFolderReaderAsync().ConfigureAwait(false);
             await DisposeMessageReaderAsync().ConfigureAwait(false);
@@ -1435,6 +1437,12 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
         string where, int limit, bool includeBody, CancellationToken cancellationToken,
         params (string Name, object Value)[] parameters) =>
         WithLockAsync(connection => QueryMessagesOnConnectionAsync(connection, where, limit, includeBody, cancellationToken, parameters), cancellationToken);
+
+    private Task<IReadOnlyList<MailMessage>> QuerySearchMessagesAsync(
+        Func<bool, string> where, int limit, bool includeBody, CancellationToken cancellationToken,
+        params (string Name, object Value)[] parameters) =>
+        WithSearchReadAsync((connection, optimized) => QueryMessagesOnConnectionAsync(
+            connection, where(optimized), limit, includeBody, cancellationToken, parameters), cancellationToken);
 
     private Task<IReadOnlyList<MailMessage>> QueryReadingPaneMessagesAsync(
         string where, int limit, bool includeBody, CancellationToken cancellationToken,

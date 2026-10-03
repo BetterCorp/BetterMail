@@ -47,6 +47,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private readonly Func<TimeSpan, CancellationToken, Task> _waitForMarkRead;
     private readonly NewMailNotificationCoordinator _newMailNotifications;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _draftSyncLocks = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _providerInitializationLocks = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IAccountProvider> _accountProviders = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IMailProvider> _mailProviders = new(StringComparer.Ordinal);
     private Microsoft365AuthService? _microsoftAuthentication;
@@ -1505,27 +1506,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             await LoadFoldersAsync();
             await PrimeNewMailNotificationsAsync();
             await LoadMessagesAsync();
-
-            try
-            {
-                if (_provider is null)
-                {
-                    foreach (var providerId in Accounts.Select(static account => account.ProviderId).Distinct(StringComparer.Ordinal))
-                    {
-                        await EnsureProviderAsync(providerId);
-                    }
-                    RefreshMailProviderRouter();
-                }
-                ((AsyncCommand)SyncCommand).Refresh();
-                ((AsyncCommand)ToggleReadCommand).Refresh();
-                RefreshWorkspaceCommands();
-                await LoadAttachmentsAsync(SelectedMessage);
-                _ = RepairMissingSubjectsAsync(Messages);
-            }
-            catch (InvalidOperationException exception)
-            {
-                Error = exception.Message;
-            }
         });
         RaisePropertyChanged(nameof(SettingsAccounts));
         RaisePropertyChanged(nameof(SettingsMailboxes));
@@ -1533,6 +1513,33 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(HasAccounts));
         RaisePropertyChanged(nameof(ShowOnboarding));
         RaisePropertyChanged(nameof(ShowFullScreenLoader));
+
+        // Local mail is ready. Account/keyring setup must not keep the full-window loader open.
+        try
+        {
+            if (_provider is null)
+            {
+                foreach (var providerId in Accounts.Select(static account => account.ProviderId).Distinct(StringComparer.Ordinal).ToArray())
+                {
+                    try { await EnsureProviderAsync(providerId); }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        Error = exception.Message;
+                        Status = "Cached mail ready — account setup needs attention";
+                    }
+                }
+                RefreshMailProviderRouter();
+            }
+            ((AsyncCommand)SyncCommand).Refresh();
+            ((AsyncCommand)ToggleReadCommand).Refresh();
+            RefreshWorkspaceCommands();
+            await LoadAttachmentsAsync(SelectedMessage);
+            _ = RepairMissingSubjectsAsync(Messages);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Error = exception.Message;
+        }
         await RefreshNextCalendarEventAsync();
         StartAutoSync();
         _ = ReconcileAllDraftsInBackgroundAsync();
@@ -1613,29 +1620,34 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private async Task EnsureProviderAsync(string providerId, CancellationToken cancellationToken = default)
     {
-        if (_store is null || _accountProviders.ContainsKey(providerId))
+        if (_store is null) return;
+        // Cached mail is usable during startup, so a concurrent retry must share provider setup.
+        var gate = _providerInitializationLocks.GetOrAdd(providerId, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
         {
-            return;
+            if (_accountProviders.ContainsKey(providerId)) return;
+            switch (providerId)
+            {
+                case Microsoft365AuthService.Id:
+                    _microsoftAuthentication = await Microsoft365AuthService.CreateAsync(
+                        Microsoft365Options.Create(_dataDirectory), cancellationToken);
+                    _accountProviders[providerId] = _microsoftAuthentication;
+                    _mailProviders[providerId] = new Microsoft365MailProvider(_microsoftAuthentication);
+                    _workspaceProvider ??= new Microsoft365WorkspaceProvider(_microsoftAuthentication);
+                    break;
+                case GoogleAuthService.Id:
+                    cancellationToken.ThrowIfCancellationRequested();
+                    _googleAuthentication = new GoogleAuthService(GoogleOptions.Create(), _store);
+                    _accountProviders[providerId] = _googleAuthentication;
+                    _mailProviders[providerId] = new GoogleGmailProvider(_googleAuthentication);
+                    break;
+                default:
+                    throw new InvalidOperationException($"The account provider '{providerId}' is not installed.");
+            }
+            RefreshMailProviderRouter();
         }
-        switch (providerId)
-        {
-            case Microsoft365AuthService.Id:
-                _microsoftAuthentication = await Microsoft365AuthService.CreateAsync(
-                    Microsoft365Options.Create(_dataDirectory), cancellationToken);
-                _accountProviders[providerId] = _microsoftAuthentication;
-                _mailProviders[providerId] = new Microsoft365MailProvider(_microsoftAuthentication);
-                _workspaceProvider ??= new Microsoft365WorkspaceProvider(_microsoftAuthentication);
-                break;
-            case GoogleAuthService.Id:
-                cancellationToken.ThrowIfCancellationRequested();
-                _googleAuthentication = new GoogleAuthService(GoogleOptions.Create(), _store);
-                _accountProviders[providerId] = _googleAuthentication;
-                _mailProviders[providerId] = new GoogleGmailProvider(_googleAuthentication);
-                break;
-            default:
-                throw new InvalidOperationException($"The account provider '{providerId}' is not installed.");
-        }
-        RefreshMailProviderRouter();
+        finally { gate.Release(); }
     }
 
     private void RefreshMailProviderRouter()

@@ -53,10 +53,41 @@ public sealed class Microsoft365AuthService : IAccountProvider
         ProviderCapabilities.Files |
         ProviderCapabilities.Notes;
 
-    public static async Task<Microsoft365AuthService> CreateAsync(
+    public static Task<Microsoft365AuthService> CreateAsync(
         Microsoft365Options options,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        CreateAsync(options, storage => MsalCacheHelper.CreateAsync(storage), TimeSpan.FromSeconds(15), cancellationToken);
+
+    internal static async Task<Microsoft365AuthService> CreateAsync(
+        Microsoft365Options options,
+        Func<StorageCreationProperties, Task<MsalCacheHelper>> createCache,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
     {
+        using var initialization = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        initialization.CancelAfter(timeout);
+        var token = initialization.Token;
+        try
+        {
+            // MSAL cache creation and verification can block on native keyrings or file locks.
+            // ConfigureAwait alone does not move their synchronous work off the calling UI thread.
+            return await Task.Run(() => CreateCoreAsync(options, createCache, token), token)
+                .WaitAsync(token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            throw new InvalidOperationException(
+                "Microsoft account setup timed out waiting for secure storage. Your cached mail is available. " +
+                "Unlock your system keyring or Keychain, then retry from Settings > Accounts > Re-authenticate.");
+        }
+    }
+
+    private static async Task<Microsoft365AuthService> CreateCoreAsync(
+        Microsoft365Options options,
+        Func<StorageCreationProperties, Task<MsalCacheHelper>> createCache,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         Directory.CreateDirectory(options.DataDirectory);
         var client = PublicClientApplicationBuilder
             .Create(options.ClientId)
@@ -74,10 +105,11 @@ public sealed class Microsoft365AuthService : IAccountProvider
             .WithMacKeyChain("com.bettermail.tokens", "BetterMail")
             .Build();
 
-        var cache = await MsalCacheHelper.CreateAsync(storage).ConfigureAwait(false);
-        cache.VerifyPersistence();
-        cache.RegisterCache(client.UserTokenCache);
+        var cache = await createCache(storage).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
+        cache.VerifyPersistence();
+        cancellationToken.ThrowIfCancellationRequested();
+        cache.RegisterCache(client.UserTokenCache);
         return new Microsoft365AuthService(client, cache);
     }
 

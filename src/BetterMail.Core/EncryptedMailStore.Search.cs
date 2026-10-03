@@ -49,13 +49,7 @@ public sealed partial class EncryptedMailStore
         string Add(object value) { var name = "$p" + parameters.Count; parameters.Add((name, value)); return name; }
         if (allowedMailboxIds is not null)
             clauses.Add($"mailbox_id IN (SELECT value FROM json_each({Add(JsonSerializer.Serialize(allowedMailboxIds))}))");
-        if (query.Terms.Count > 0)
-        {
-            var parameter = Add(query.FtsText);
-            clauses.Add(_optimizedSearch
-                ? $"rowid IN (SELECT rowid FROM message_search_v2 WHERE message_search_v2 MATCH {parameter})"
-                : $"rowid IN (SELECT rowid FROM message_search WHERE message_search MATCH {parameter} UNION SELECT rowid FROM message_search_v2 WHERE message_search_v2 MATCH {parameter})");
-        }
+        var ftsParameter = query.Terms.Count > 0 ? Add(query.FtsText) : null;
         foreach (var key in new[] { "from", "to", "cc", "subject" })
         {
             if (query[key] is not { } value) continue;
@@ -98,6 +92,14 @@ public sealed partial class EncryptedMailStore
                 else clauses.Add($"julianday(received_at) {date.Operator} {Julian(instant)}");
             }
         }
-        return QueryMessagesAsync("WHERE " + string.Join(" AND ", clauses), limit, false, cancellationToken, parameters.ToArray());
+        return QuerySearchMessagesAsync(optimized =>
+        {
+            var where = "WHERE " + string.Join(" AND ", clauses);
+            if (ftsParameter is not null)
+                where += optimized
+                    ? $" AND rowid IN (SELECT rowid FROM message_search_v2 WHERE message_search_v2 MATCH {ftsParameter})"
+                    : $" AND rowid IN (SELECT rowid FROM message_search WHERE message_search MATCH {ftsParameter} UNION SELECT rowid FROM message_search_v2 WHERE message_search_v2 MATCH {ftsParameter})";
+            return where;
+        }, limit, false, cancellationToken, parameters.ToArray());
     }
 }
