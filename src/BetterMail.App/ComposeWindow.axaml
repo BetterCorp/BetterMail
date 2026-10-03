@@ -27,6 +27,9 @@
     <Style Selector="Border.recipientField:focus-within">
       <Setter Property="BorderBrush" Value="{DynamicResource BetterMailAccentBrush}" />
     </Style>
+    <Style Selector="Border.recipientField.recipientDropTarget">
+      <Setter Property="BorderBrush" Value="{DynamicResource BetterMailAccentBrush}" />
+    </Style>
   </Window.Styles>
   <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto" Margin="18">
     <Grid ColumnDefinitions="80,*" Margin="0,0,0,10" IsEnabled="{Binding CanChangeAttachments}">
@@ -41,14 +44,18 @@
         <DataTemplate>
           <Grid ColumnDefinitions="80,*" Margin="0,0,0,8">
             <TextBlock Text="{Binding Label}" VerticalAlignment="Center" Opacity="0.7" />
-            <Border Grid.Column="1" Classes="recipientField" PointerPressed="RecipientFieldPressed">
+            <Border Grid.Column="1" Classes="recipientField" PointerPressed="RecipientFieldPressed"
+                    DragDrop.AllowDrop="True" DragDrop.DragOver="RecipientDragOver"
+                    DragDrop.DragLeave="RecipientDragLeave" DragDrop.Drop="RecipientDropped">
               <Grid>
                 <DockPanel LastChildFill="True">
                   <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding Tokens}" Margin="5,0,5,0">
                     <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
-                        <Border Background="{DynamicResource BetterMailSelectionBrush}" CornerRadius="10" Padding="7,3" Margin="0,4,4,0"
+                        <Border Classes="recipientToken" Background="{DynamicResource BetterMailSelectionBrush}" CornerRadius="10" Padding="7,3" Margin="0,4,4,0"
+                                PointerPressed="RecipientTokenPressed" PointerMoved="RecipientTokenMoved"
+                                PointerReleased="RecipientTokenReleased" PointerCaptureLost="RecipientTokenCaptureLost"
                                 MaxWidth="{Binding $parent[ItemsControl].Bounds.Width}">
                           <Grid ColumnDefinitions="*,Auto" ColumnSpacing="4">
                             <TextBlock Text="{Binding Text}" TextWrapping="Wrap" VerticalAlignment="Center" />
