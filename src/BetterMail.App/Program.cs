@@ -16,6 +16,7 @@ internal static class Program
         }
         velopack.Run();
         DefaultMailApp.Register();
+        LinuxDesktopIntegration.Register();
 
         var activation = args.FirstOrDefault(argument =>
             argument.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase) ||
@@ -42,6 +43,7 @@ internal static class Program
     public static AppBuilder BuildAvaloniaApp() => AppBuilder
         .Configure<App>()
         .UsePlatformDetect()
+        .With(new X11PlatformOptions { WmClass = "BetterMail" })
         .WithInterFont()
         .LogToTrace();
 }

@@ -65,6 +65,10 @@ if ($Runtime -eq "linux-x64") {
     Copy-Item -LiteralPath (Join-Path $repositoryRoot "scripts/AppRun") -Destination (Join-Path $appDir "AppRun")
     Copy-Item -LiteralPath (Join-Path $repositoryRoot "packaging/BetterMail.desktop") -Destination (Join-Path $appDir "BetterMail.desktop")
     Copy-Item -LiteralPath $icon -Destination (Join-Path $appDir "BetterMail.png")
+    Copy-Item -LiteralPath $icon -Destination (Join-Path $appDir ".DirIcon")
+    $iconDirectory = Join-Path $appDir "usr/share/icons/hicolor/512x512/apps"
+    New-Item -ItemType Directory -Force $iconDirectory | Out-Null
+    Copy-Item -LiteralPath $icon -Destination (Join-Path $iconDirectory "BetterMail.png")
     chmod +x (Join-Path $appDir "AppRun")
     $packDirectory = $appDir
 }

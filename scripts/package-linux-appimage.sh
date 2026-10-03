@@ -21,4 +21,5 @@ install -m 644 "$icon" "$appdir/BetterMail.svg"
 install -m 644 "$icon" "$appdir/usr/share/icons/hicolor/scalable/apps/BetterMail.svg"
 
 linuxdeploy --appdir "$appdir" --desktop-file "$appdir/BetterMail.desktop" --icon-file "$appdir/BetterMail.svg"
+install -m 644 "$root/asset-pack/04-desktop/linux/hicolor/256x256/apps/bettermail.png" "$appdir/.DirIcon"
 ARCH=x86_64 appimagetool "$appdir" "$root/artifacts/BetterMail-x86_64.AppImage"

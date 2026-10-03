@@ -275,31 +275,7 @@ internal static class DefaultMailApp
         {
             throw new InvalidOperationException("Install the BetterMail AppImage before choosing it as the default mail app.");
         }
-        if (appImage.Contains((char)34))
-        {
-            throw new InvalidOperationException("The AppImage path contains an unsupported quote character.");
-        }
-
-        var applications = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".local", "share", "applications");
-        Directory.CreateDirectory(applications);
-        var desktopPath = Path.Combine(applications, "bettermail.desktop");
-        var desktop = """
-            [Desktop Entry]
-            Type=Application
-            Name=BetterMail
-            Comment=Fast local-first Microsoft 365 mail
-            Exec=__APPIMAGE__ %u
-            Icon=BetterMail
-            Categories=Network;Email;
-            MimeType=x-scheme-handler/mailto;x-scheme-handler/bettermail;
-            Terminal=false
-
-            """;
-        desktop = desktop.Replace(
-            "__APPIMAGE__", string.Concat((char)34, appImage, (char)34), StringComparison.Ordinal);
-        await File.WriteAllTextAsync(desktopPath, desktop);
+        LinuxDesktopIntegration.Install(appImage, LinuxDesktopIntegration.DataDirectory);
         using var process = Process.Start(new ProcessStartInfo(
             "xdg-mime", "default bettermail.desktop x-scheme-handler/mailto x-scheme-handler/bettermail")
         {
