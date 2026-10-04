@@ -1527,7 +1527,9 @@ public sealed class MainWindowViewModelTests
             viewModel.Mailboxes.Add(mailbox);
             viewModel.Folders.Add(new MailFolderItem(folder, mailbox.DisplayName));
 
-            viewModel.SearchText = "Needle";
+            // Isolate mail fallback: other workspace searches can reorder the result
+            // collection while this headless test inspects the blocked mail search.
+            viewModel.SearchText = "type:mail Needle";
             viewModel.SearchCommand.Execute(null);
             await WaitUntilAsync(
                 () => provider.SearchCalls == 1 &&

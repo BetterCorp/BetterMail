@@ -372,6 +372,18 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         ScheduleAutosave();
     }
 
+    internal bool CanMoveRecipient(ComposeRecipientField source, ComposeRecipientField target, ComposeRecipientToken token) =>
+        CanChangeAttachments && !ReferenceEquals(source, target) &&
+        RecipientFields.Contains(source) && RecipientFields.Contains(target) &&
+        source.Tokens.Any(existing => ReferenceEquals(existing, token));
+
+    internal bool MoveRecipient(ComposeRecipientField source, ComposeRecipientField target, ComposeRecipientToken token)
+    {
+        if (!CanMoveRecipient(source, target, token)) return false;
+        source.MoveTokenTo(target, token);
+        return true;
+    }
+
     private void ApplySignatureForSender(ComposeSender? sender)
     {
         if (!_manageSignature || sender is null)
@@ -686,6 +698,18 @@ public sealed class ComposeRecipientField : ViewModelBase
             _changed();
         }
         return Task.CompletedTask;
+    }
+
+    internal void MoveTokenTo(ComposeRecipientField target, ComposeRecipientToken token)
+    {
+        Tokens.Remove(token);
+        if (!target.Tokens.Any(existing => existing.Address.Equals(token.Address, StringComparison.OrdinalIgnoreCase)))
+            target.Tokens.Add(token);
+        RaisePropertyChanged(nameof(Serialized));
+        target.RaisePropertyChanged(nameof(Serialized));
+        // Both fields belong to the same compose model. Notify after the whole move so an
+        // immediate autosave cannot persist the recipient in both fields or in neither.
+        _changed();
     }
 
     private void Add(string name, string address, bool notify = true)

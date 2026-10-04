@@ -9,6 +9,11 @@ namespace BetterMail.App;
 
 public sealed partial class ComposeWindow : Window
 {
+    private sealed record RecipientDrag(ComposeWindowViewModel Owner, ComposeRecipientField Source, ComposeRecipientToken Token);
+    private static readonly DataFormat<RecipientDrag> RecipientDragFormat = DataFormat.CreateInProcessFormat<RecipientDrag>("BetterMail.Recipient");
+    private PointerPressedEventArgs? _recipientDragStart;
+    private Avalonia.Point _recipientDragOrigin;
+    private RecipientDrag? _recipientDrag;
     private bool _closeAfterSave;
     private IFilesProvider? _filesProvider;
 
@@ -170,6 +175,86 @@ public sealed partial class ComposeWindow : Window
     {
         if (e.Source is Avalonia.Visual source && source.GetSelfAndVisualAncestors().Any(static visual => visual is TextBox or Button)) return;
         if (sender is Border border)
+            border.GetVisualDescendants().OfType<TextBox>().FirstOrDefault()?.Focus();
+    }
+
+    private void RecipientTokenPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is not Border { DataContext: ComposeRecipientToken token } chip ||
+            DataContext is not ComposeWindowViewModel { CanChangeAttachments: true } viewModel ||
+            !e.GetCurrentPoint(chip).Properties.IsLeftButtonPressed ||
+            e.Source is Avalonia.Visual visual && visual.GetSelfAndVisualAncestors().Any(ancestor => ancestor is Button)) return;
+        var sourceBorder = chip.GetVisualAncestors().OfType<Border>()
+            .FirstOrDefault(border => border.Classes.Contains("recipientField"));
+        if (sourceBorder?.DataContext is not ComposeRecipientField source) return;
+        sourceBorder.GetVisualDescendants().OfType<TextBox>().FirstOrDefault()?.Focus();
+        _recipientDragStart = e;
+        _recipientDragOrigin = e.GetPosition(this);
+        _recipientDrag = new(viewModel, source, token);
+        e.Pointer.Capture(chip);
+        e.Handled = true;
+    }
+
+    private async void RecipientTokenMoved(object? sender, PointerEventArgs e)
+    {
+        if (_recipientDragStart is not { } pressed || _recipientDrag is not { } drag ||
+            !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
+        var position = e.GetPosition(this);
+        if (Math.Abs(position.X - _recipientDragOrigin.X) < 6 && Math.Abs(position.Y - _recipientDragOrigin.Y) < 6) return;
+        _recipientDragStart = null;
+        _recipientDrag = null;
+        e.Pointer.Capture(null);
+        var data = new DataTransfer();
+        data.Add(DataTransferItem.Create(RecipientDragFormat, drag));
+        e.Handled = true;
+        try { await DragDrop.DoDragDropAsync(pressed, data, DragDropEffects.Move); }
+        finally
+        {
+            foreach (var border in this.GetVisualDescendants().OfType<Border>())
+                border.Classes.Remove("recipientDropTarget");
+        }
+    }
+
+    private void RecipientTokenReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        _recipientDragStart = null;
+        _recipientDrag = null;
+        e.Pointer.Capture(null);
+    }
+
+    private void RecipientTokenCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        _recipientDragStart = null;
+        _recipientDrag = null;
+    }
+
+    private bool CanDropRecipient(Border border, RecipientDrag drag) =>
+        ReferenceEquals(DataContext, drag.Owner) && border.DataContext is ComposeRecipientField target &&
+        drag.Owner.CanMoveRecipient(drag.Source, target, drag.Token);
+
+    private void RecipientDragOver(object? sender, DragEventArgs e)
+    {
+        if (sender is not Border border || e.DataTransfer.TryGetValue(RecipientDragFormat) is not { } drag) return;
+        var allowed = CanDropRecipient(border, drag);
+        border.Classes.Set("recipientDropTarget", allowed);
+        e.DragEffects = allowed ? DragDropEffects.Move : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private static void RecipientDragLeave(object? sender, DragEventArgs e)
+    {
+        if (sender is Border border) border.Classes.Remove("recipientDropTarget");
+    }
+
+    private void RecipientDropped(object? sender, DragEventArgs e)
+    {
+        if (sender is not Border border || e.DataTransfer.TryGetValue(RecipientDragFormat) is not { } drag) return;
+        border.Classes.Remove("recipientDropTarget");
+        e.DragEffects = CanDropRecipient(border, drag) &&
+            drag.Owner.MoveRecipient(drag.Source, (ComposeRecipientField)border.DataContext!, drag.Token)
+            ? DragDropEffects.Move : DragDropEffects.None;
+        e.Handled = true;
+        if (e.DragEffects == DragDropEffects.Move)
             border.GetVisualDescendants().OfType<TextBox>().FirstOrDefault()?.Focus();
     }
 

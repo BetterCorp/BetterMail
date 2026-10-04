@@ -29,9 +29,14 @@ if sys.argv[2] in ('click', 'doubleclick'):
 elif sys.argv[2] == 'move':
     t.XTestFakeMotionEvent(d, -1, int(sys.argv[3]), int(sys.argv[4]), 0)
 elif sys.argv[2] == 'drag':
-    t.XTestFakeMotionEvent(d, -1, int(sys.argv[3]), int(sys.argv[4]), 0)
+    start_x, start_y, end_x, end_y = map(int, sys.argv[3:7])
+    t.XTestFakeMotionEvent(d, -1, start_x, start_y, 0)
     t.XTestFakeButtonEvent(d, 1, 1, 0)
-    t.XTestFakeMotionEvent(d, -1, int(sys.argv[5]), int(sys.argv[6]), 100)
+    # Cross the drag threshold before entering the destination so the native drag
+    # operation has started by the time its target receives pointer movement.
+    t.XTestFakeMotionEvent(d, -1, start_x + (8 if end_x >= start_x else -8), start_y, 100)
+    t.XTestFakeMotionEvent(d, -1, (start_x + end_x) // 2, (start_y + end_y) // 2, 100)
+    t.XTestFakeMotionEvent(d, -1, end_x, end_y, 100)
     t.XTestFakeButtonEvent(d, 1, 0, 100)
 else:
     key(sys.argv[2], 1)

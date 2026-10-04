@@ -145,7 +145,9 @@ public sealed class DeletedMailRecoveryTests
 
     private static async Task WriteLegacyRecoveryAsync(string path, string id, CancellationToken token)
     {
-        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path }.ToString());
+        // This temporary legacy-payload writer must release its file handle on disposal.
+        // A pooled connection keeps mail.db open and prevents cleanup on Windows.
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString());
         await connection.OpenAsync(token);
         await using var key = connection.CreateCommand();
         key.CommandText = $"PRAGMA key = '{new string('A', 64)}';";
