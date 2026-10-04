@@ -184,9 +184,10 @@ public sealed partial class ComposeWindow : Window
             DataContext is not ComposeWindowViewModel { CanChangeAttachments: true } viewModel ||
             !e.GetCurrentPoint(chip).Properties.IsLeftButtonPressed ||
             e.Source is Avalonia.Visual visual && visual.GetSelfAndVisualAncestors().Any(ancestor => ancestor is Button)) return;
-        var source = chip.GetVisualAncestors().OfType<Border>()
-            .FirstOrDefault(border => border.Classes.Contains("recipientField"))?.DataContext as ComposeRecipientField;
-        if (source is null) return;
+        var sourceBorder = chip.GetVisualAncestors().OfType<Border>()
+            .FirstOrDefault(border => border.Classes.Contains("recipientField"));
+        if (sourceBorder?.DataContext is not ComposeRecipientField source) return;
+        sourceBorder.GetVisualDescendants().OfType<TextBox>().FirstOrDefault()?.Focus();
         _recipientDragStart = e;
         _recipientDragOrigin = e.GetPosition(this);
         _recipientDrag = new(viewModel, source, token);

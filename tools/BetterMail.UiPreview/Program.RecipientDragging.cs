@@ -24,6 +24,18 @@ internal static partial class Program
             window.Show();
             window.Activate();
             await Task.Delay(600);
+            var subject = window.GetVisualDescendants().OfType<TextBox>()
+                .Single(box => Avalonia.Automation.AutomationProperties.GetName(box) == "Subject");
+            foreach (var field in vm.RecipientFields)
+            {
+                // A chip click must still focus its field when no drag follows.
+                await Click(subject);
+                await Click(Chip(field.Tokens[0]));
+                await Input("r");
+                if (field.Query != "r" || subject.Text?.Length > 0)
+                    throw new InvalidOperationException($"Clicking a {field.Label} chip did not direct typing to its recipient input.");
+                field.Query = "";
+            }
             foreach (var field in vm.RecipientFields) field.Query = $"pending-{field.Label.ToLowerInvariant()}@example.test";
             foreach (var (source, target) in new[]
             {
@@ -45,8 +57,6 @@ internal static partial class Program
             }
             // Same-field and unrelated drops must leave the recipient where it was.
             await Drag(Chip(token), Field(vm.CcField));
-            var subject = window.GetVisualDescendants().OfType<TextBox>()
-                .Single(box => Avalonia.Automation.AutomationProperties.GetName(box) == "Subject");
             await Drag(Chip(token), subject);
             if (!vm.CcField.Tokens.Contains(token) || subject.Text?.Length > 0)
                 throw new InvalidOperationException("Rejected drop moved a contact or pasted it into Subject.");
@@ -59,7 +69,7 @@ internal static partial class Program
             var point = remove.PointToScreen(new Point(remove.Bounds.Width / 2, remove.Bounds.Height / 2));
             await Input("click", point.X.ToString(), point.Y.ToString());
             if (vm.ToField.Tokens.Count != 0) throw new InvalidOperationException("Recipient remove button stopped working.");
-            Console.WriteLine("Recipient dragging passed: all six To/Cc/Bcc moves, pending text, saved drafts, rejected drops, duplicate merging and removal.");
+            Console.WriteLine("Recipient dragging passed: chip-click typing focus, all six To/Cc/Bcc moves, pending text, saved drafts, rejected drops, duplicate merging and removal.");
         }
         finally { window.Close(); }
 
@@ -72,6 +82,11 @@ internal static partial class Program
             var from = source.PointToScreen(new Point(12, source.Bounds.Height / 2));
             var to = target.PointToScreen(new Point(40, target.Bounds.Height / 2));
             await Input("drag", from.X.ToString(), from.Y.ToString(), to.X.ToString(), to.Y.ToString());
+        }
+        async Task Click(Control control)
+        {
+            var point = control.PointToScreen(new Point(12, control.Bounds.Height / 2));
+            await Input("click", point.X.ToString(), point.Y.ToString());
         }
         static async Task Input(params string[] args)
         {
