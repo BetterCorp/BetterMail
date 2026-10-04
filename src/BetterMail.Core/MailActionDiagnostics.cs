@@ -19,24 +19,25 @@ public sealed class MailActionDiagnostics(EncryptedMailStore store, IMailProvide
         var cached = await store.GetMessageAsync(mailbox.Id, action.ProviderId, token);
         foreach (var id in new[] { action.ProviderId }.Concat(action.PreviousProviderIds ?? []).Distinct().Take(10))
         {
+            MailMessage message;
             try
             {
-                var message = await provider.GetMessageAsync(account, mailbox, id, token);
-                if (message.MailboxId != mailbox.Id) throw new InvalidOperationException("Provider returned a different mailbox.");
-                if (id == action.ProviderId || (cached?.InternetMessageId is { Length: > 0 } identity && message.InternetMessageId == identity))
-                    return Describe(action, message);
+                message = await provider.GetMessageAsync(account, mailbox, id, token);
             }
-            catch (HttpRequestException error) when (error.StatusCode == HttpStatusCode.NotFound) { }
+            catch (HttpRequestException error) when (error.StatusCode == HttpStatusCode.NotFound) { continue; }
+            if (message.MailboxId != mailbox.Id) throw new InvalidOperationException("Provider returned a different mailbox.");
+            if (id == action.ProviderId || (cached?.InternetMessageId is { Length: > 0 } identity && message.InternetMessageId == identity))
+                return await DescribeAsync(account, mailbox, action, message, token);
         }
         if (string.IsNullOrWhiteSpace(cached?.InternetMessageId))
             return "The saved server IDs were not found. No stable message identity is cached, so a subject match cannot safely identify it. Check the provider mailbox and destination. The pending action has been kept.";
-        var results = await provider.SearchMessagesAsync(account, mailbox, cached.Subject, 100, token);
+        var (results, complete) = await FindIdentityAsync(account, mailbox, cached, token);
         var matches = results.Where(message => message.MailboxId == mailbox.Id && message.InternetMessageId == cached.InternetMessageId)
             .DistinctBy(message => message.ProviderId).ToArray();
-        if (results.Count < 100 && matches.Length == 1) return Describe(action, matches[0]);
-        return matches.Length > 1 || results.Count >= 100
+        if (complete && matches.Length == 1) return await DescribeAsync(account, mailbox, action, matches[0], token);
+        return matches.Length > 1 || !complete
             ? "Server search is ambiguous or incomplete. No action was changed. Inspect the message and destination in your provider before deciding what to do."
-            : "No exact identity match was found in this bounded server search. That does not prove deletion or delivery. Check the provider mailbox and destination; the pending action is kept.";
+            : "No exact identity match was found in the server lookup. That does not prove deletion or delivery. Check the provider mailbox and destination; the pending action is kept.";
     }
 
     public async Task<bool> TryAutomaticRecoveryAsync(MailAccount account, Mailbox mailbox, string actionId, CancellationToken token = default)
@@ -73,27 +74,45 @@ public sealed class MailActionDiagnostics(EncryptedMailStore store, IMailProvide
         catch (HttpRequestException error) when (error.StatusCode == HttpStatusCode.NotFound) { }
         if (verified is null)
         {
-            var results = await provider.SearchMessagesAsync(account, mailbox, cached.Subject, 100, token);
+            var (results, complete) = await FindIdentityAsync(account, mailbox, cached, token);
             var matches = results.Where(message => message.MailboxId == mailbox.Id && !message.IsDeleted && message.InternetMessageId == cached.InternetMessageId)
                 .DistinctBy(message => message.ProviderId).ToArray();
-            if (results.Count >= 100 || matches.Length != 1)
-                throw new InvalidOperationException("No unique exact identity match in the bounded search. Nothing was changed.");
+            if (!complete || matches.Length != 1)
+                throw new InvalidOperationException("No unique exact identity match in the server lookup. Nothing was changed.");
             verified = await provider.GetMessageAsync(account, mailbox, matches[0].ProviderId, token);
             if (verified.ProviderId != matches[0].ProviderId)
                 throw new InvalidOperationException("The message changed during lookup. Check status again.");
         }
         if (verified.MailboxId != mailbox.Id || verified.IsDeleted || verified.InternetMessageId != cached.InternetMessageId)
             throw new InvalidOperationException("The server message does not match the cached identity. Nothing was changed.");
+        var destinationId = await ResolveDestinationAsync(account, mailbox, expected, token);
         authorize?.Invoke();
-        if (!await store.RecoverMailActionAsync(expected, verified with { Body = verified.Body ?? cached.Body }, cached.InternetMessageId, token))
+        if (!await store.RecoverMailActionAsync(expected, verified with { Body = verified.Body ?? cached.Body }, cached.InternetMessageId, token, destinationId))
             throw new InvalidOperationException("The queued action changed or an earlier action must finish. Check status again.");
-        return expected.Kind == MailActionKind.Move && verified.FolderId == expected.DestinationId
+        return expected.Kind == MailActionKind.Move && verified.FolderId == destinationId
             ? "The message is already at the destination. The move was confirmed without moving it again."
             : "The server ID was verified and repaired. Retry queued with the original destination and failure history kept.";
     }
 
-    private static string Describe(MailAction action, MailMessage message) =>
-        message.FolderId == action.DestinationId && action.Kind == MailActionKind.Move
+    private async Task<(IReadOnlyList<MailMessage> Results, bool Complete)> FindIdentityAsync(
+        MailAccount account, Mailbox mailbox, MailMessage cached, CancellationToken token)
+    {
+        if (provider is IMailRecoveryProvider recovery &&
+            await recovery.FindMessagesByIdentityAsync(account, mailbox, cached.InternetMessageId!, token) is { } exact)
+            return (exact, true);
+        var results = await provider.SearchMessagesAsync(account, mailbox, cached.Subject, 100, token);
+        return (results, results.Count < 100);
+    }
+
+    private async Task<string?> ResolveDestinationAsync(MailAccount account, Mailbox mailbox, MailAction action, CancellationToken token)
+    {
+        if (action.Kind == MailActionKind.Move && provider is IMailRecoveryProvider recovery)
+            return await recovery.ResolveFolderIdAsync(account, mailbox, action.DestinationId!, token);
+        return action.DestinationId;
+    }
+
+    private async Task<string> DescribeAsync(MailAccount account, Mailbox mailbox, MailAction action, MailMessage message, CancellationToken token) =>
+        message.FolderId == await ResolveDestinationAsync(account, mailbox, action, token) && action.Kind == MailActionKind.Move
             ? "The message was found in the requested destination. No further move appears necessary. Use Recover and retry to verify and confirm this move without moving it again."
             : message.ProviderId != action.ProviderId
                 ? "The same message was found under a different server ID. Retrying the old ID will still fail. Use Recover and retry to verify its identity again and repair the queued action. No mail was deleted or changed by this check."
