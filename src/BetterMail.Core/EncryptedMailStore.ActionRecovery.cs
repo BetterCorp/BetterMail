@@ -12,7 +12,7 @@ public sealed partial class EncryptedMailStore
             var action = actions.FirstOrDefault(action => action.Id == id);
             if (action is not { CanAutomaticallyRecover: true } || actions.TakeWhile(item => item.Id != id).Any(item =>
                 item.MailboxId == action.MailboxId && item.ItemId == action.ItemId && !item.Accepted)) return null;
-            action = action with { AutomaticRecoveryAttempted = true,
+            action = action with { AutomaticRecoveryAttempted = true, AutomaticRecoveryVersion = MailAction.CurrentRecoveryVersion,
                 AutomaticRecoveryDetails = "Automatic recovery was attempted. Check status if it did not complete." };
             await WriteActionAsync(connection, null, action, token).ConfigureAwait(false);
             return action;
@@ -27,7 +27,7 @@ public sealed partial class EncryptedMailStore
         }, token);
 
     public Task<bool> RecoverMailActionAsync(MailAction expected, MailMessage verified, string expectedIdentity,
-        CancellationToken token = default) => WithLockAsync(async connection =>
+        CancellationToken token = default, string? resolvedDestinationId = null) => WithLockAsync(async connection =>
     {
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(token).ConfigureAwait(false);
         var actions = await ReadActionsAsync(connection, transaction, token).ConfigureAwait(false);
@@ -40,7 +40,8 @@ public sealed partial class EncryptedMailStore
         var related = actions.Where(action => action.MailboxId == current.MailboxId && action.ItemId == current.ItemId &&
             action.Kind is MailActionKind.Move or MailActionKind.UpdateState).ToArray();
         if (related.Any(action => action.Running) || related.TakeWhile(action => action.Id != current.Id).Any(action => !action.Accepted)) return false;
-        var alreadyMoved = current.Kind == MailActionKind.Move && verified.FolderId == current.DestinationId;
+        var destinationId = resolvedDestinationId ?? current.DestinationId;
+        var alreadyMoved = current.Kind == MailActionKind.Move && verified.FolderId == destinationId;
         foreach (var action in related)
             await WriteActionAsync(connection, transaction, action with
             {
@@ -49,6 +50,7 @@ public sealed partial class EncryptedMailStore
                 SourceFolderId = action.Kind == MailActionKind.Move && !action.Accepted ? verified.FolderId : action.SourceFolderId,
                 SourceWasUnread = action.Kind == MailActionKind.Move && !action.Accepted ? verified.IsUnread : action.SourceWasUnread,
                 Accepted = action.Accepted || action.Id == current.Id && alreadyMoved,
+                DestinationId = action.Id == current.Id ? destinationId : action.DestinationId,
                 RecoveredAtFailureCount = action.Id == current.Id ? action.FailureCount : action.RecoveredAtFailureCount,
                 RetryAuthorizedAtFailureCount = action.Id == current.Id ? action.FailureCount : action.RetryAuthorizedAtFailureCount
             }, token).ConfigureAwait(false);
@@ -56,7 +58,7 @@ public sealed partial class EncryptedMailStore
             !(action.Id == current.Id && alreadyMoved));
         await UpsertMessageAsync(connection, transaction, verified with
         {
-            FolderId = desired?.DestinationId ?? verified.FolderId,
+            FolderId = desired?.Id == current.Id ? destinationId! : desired?.DestinationId ?? verified.FolderId,
             IsRead = desired is not null || verified.IsRead
         }, token).ConfigureAwait(false);
         foreach (var state in related.Where(action => action.Kind == MailActionKind.UpdateState && !action.Accepted))

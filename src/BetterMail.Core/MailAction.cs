@@ -25,15 +25,18 @@ public sealed record MailAction(
     bool? PreviousRead = null, bool? PreviousFlagged = null, bool? PreviousPinned = null, int FailureCount = 0,
     int? RetryAuthorizedAtFailureCount = null, DateTimeOffset? LastAttemptAt = null,
     DateTimeOffset? LastFailureAt = null, string? LastError = null,
-    bool AutomaticRecoveryAttempted = false, string? AutomaticRecoveryDetails = null, int? RecoveredAtFailureCount = null)
+    bool AutomaticRecoveryAttempted = false, string? AutomaticRecoveryDetails = null, int? RecoveredAtFailureCount = null,
+    int AutomaticRecoveryVersion = 0)
 {
+    public const int CurrentRecoveryVersion = 1;
     [System.Text.Json.Serialization.JsonIgnore]
     public string? StatusCheckDetails { get; init; }
     [System.Text.Json.Serialization.JsonIgnore]
     public bool HasStatusCheck => StatusCheckDetails is not null;
     public bool IsRetryPaused => !Accepted && !Running && (FailureCount >= 3 || (AutomaticRecoveryAttempted || RecoveredAtFailureCount is not null) && FailureCount > (RecoveredAtFailureCount ?? -1)) && RetryAuthorizedAtFailureCount != FailureCount;
     public bool HasAutomaticRecoveryDetails => !string.IsNullOrEmpty(AutomaticRecoveryDetails);
-    public bool CanAutomaticallyRecover => CanRecover && !AutomaticRecoveryAttempted &&
+    public bool CanAutomaticallyRecover => CanRecover &&
+        (!AutomaticRecoveryAttempted || AutomaticRecoveryVersion < CurrentRecoveryVersion && RecoveredAtFailureCount is null) &&
         FailureDetails?.Contains("not found", StringComparison.OrdinalIgnoreCase) == true;
     public bool CanRecover => CanRetry && Kind is MailActionKind.Move or MailActionKind.UpdateState;
     public bool CanRetry => !Running && !Accepted && !SendAttempted && FailureCount > 0;

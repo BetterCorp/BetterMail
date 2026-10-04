@@ -2,6 +2,7 @@ namespace BetterMail.Core;
 
 public sealed class MailProviderRouter(IEnumerable<(string ProviderId, IMailProvider Provider)> providers) :
     IMailProvider,
+    IMailRecoveryProvider,
     ISharedMailboxProvider
 {
     private readonly IReadOnlyDictionary<string, IMailProvider> _providers = providers.ToDictionary(
@@ -27,6 +28,14 @@ public sealed class MailProviderRouter(IEnumerable<(string ProviderId, IMailProv
         For(account).GetMessageAsync(account, mailbox, messageId, cancellationToken);
     public Task<IReadOnlyList<MailMessage>> SearchMessagesAsync(MailAccount account, Mailbox mailbox, string query, int limit = 250, CancellationToken cancellationToken = default) =>
         For(account).SearchMessagesAsync(account, mailbox, query, limit, cancellationToken);
+    public Task<IReadOnlyList<MailMessage>?> FindMessagesByIdentityAsync(MailAccount account, Mailbox mailbox, string internetMessageId, CancellationToken token = default) =>
+        For(account) is IMailRecoveryProvider recovery
+            ? recovery.FindMessagesByIdentityAsync(account, mailbox, internetMessageId, token)
+            : Task.FromResult<IReadOnlyList<MailMessage>?>(null);
+    public Task<string> ResolveFolderIdAsync(MailAccount account, Mailbox mailbox, string folderId, CancellationToken token = default) =>
+        For(account) is IMailRecoveryProvider recovery
+            ? recovery.ResolveFolderIdAsync(account, mailbox, folderId, token)
+            : Task.FromResult(folderId);
     public Task<IReadOnlyList<MailHeader>> GetMessageHeadersAsync(MailAccount account, Mailbox mailbox, string messageId, CancellationToken cancellationToken = default) =>
         For(account).GetMessageHeadersAsync(account, mailbox, messageId, cancellationToken);
     public Task MoveMessageAsync(MailAccount account, Mailbox mailbox, string messageId, string destinationFolderId, CancellationToken cancellationToken = default) =>
