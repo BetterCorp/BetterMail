@@ -46,7 +46,7 @@ public sealed class OutboxService(IMailProvider provider, EncryptedMailStore sto
             {
                 try
                 {
-                    if (await provider.IsDraftSentAsync(account, mailbox, action.ProviderId, cancellationToken).ConfigureAwait(false))
+                    if (await provider.IsDraftSentAsync(account, mailbox, local.ProviderImmutableId ?? action.ProviderId, cancellationToken).ConfigureAwait(false))
                     {
                         await store.MarkOutboxSendAcceptedAsync(draftId, cancellationToken).ConfigureAwait(false);
                         await store.DeleteLocalDraftAsync(draftId, cancellationToken).ConfigureAwait(false);
@@ -75,8 +75,8 @@ public sealed class OutboxService(IMailProvider provider, EncryptedMailStore sto
                 if (remote.AccountId != account.AccountId || remote.MailboxId != mailbox.Id)
                     throw new InvalidOperationException("The provider returned a draft owned by another mailbox.");
                 await store.UpdateLocalDraftSyncMetadataAsync(local.Id, remote.ProviderId, local.UpdatedAt,
-                    remote.UpdatedAt, remote.ETag, cancellationToken).ConfigureAwait(false);
-                providerDraftId = remote.ProviderId;
+                    remote.UpdatedAt, remote.ETag, remote.ProviderImmutableId, cancellationToken).ConfigureAwait(false);
+                providerDraftId = remote.ProviderImmutableId ?? remote.ProviderId;
             }
             // Persist before handing the request to the provider, including the crash window.
             await store.MarkSendAttemptedAsync(draftId, cancellationToken).ConfigureAwait(false);

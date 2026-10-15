@@ -24,7 +24,7 @@ public sealed class Microsoft365AuthService : IAccountProvider
 
     internal static readonly string[] MailScopes =
     [
-        // translateExchangeIds needs User.Read when reconciling a draft after send.
+        // translateExchangeIds needs User.Read when capturing a draft's stable identity.
         "User.Read",
         "Mail.ReadWrite",
         "Mail.Send",

@@ -513,6 +513,7 @@ public interface IDraftStore
         DateTimeOffset syncedLocalUpdatedAt,
         DateTimeOffset providerUpdatedAt,
         string? providerETag,
+        string? providerImmutableId,
         CancellationToken cancellationToken = default);
     Task UpdateLocalDraftSyncIssueAsync(
         string id,

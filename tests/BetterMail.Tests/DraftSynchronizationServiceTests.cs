@@ -192,6 +192,7 @@ public sealed class DraftSynchronizationServiceTests
             DateTimeOffset syncedLocalUpdatedAt,
             DateTimeOffset providerUpdatedAt,
             string? providerETag,
+            string? providerImmutableId,
             CancellationToken cancellationToken = default)
         {
             var index = Drafts.FindIndex(draft => draft.Id == id);
@@ -200,7 +201,8 @@ public sealed class DraftSynchronizationServiceTests
                 ProviderDraftId = providerDraftId,
                 SyncedLocalUpdatedAt = syncedLocalUpdatedAt,
                 ProviderUpdatedAt = providerUpdatedAt,
-                ProviderETag = providerETag
+                ProviderETag = providerETag,
+                ProviderImmutableId = providerImmutableId
             };
             return Task.CompletedTask;
         }

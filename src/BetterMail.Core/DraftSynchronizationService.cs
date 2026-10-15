@@ -84,7 +84,7 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
                 if (!remoteById.TryGetValue(local.ProviderDraftId, out var remote))
                 {
                     if (local.SyncedLocalUpdatedAt == local.UpdatedAt &&
-                        await provider.IsDraftSentAsync(account, mailbox, local.ProviderDraftId, cancellationToken).ConfigureAwait(false) &&
+                        await provider.IsDraftSentAsync(account, mailbox, local.ProviderImmutableId ?? local.ProviderDraftId, cancellationToken).ConfigureAwait(false) &&
                         await store.TryRemoveConfirmedSentDraftAsync(local, cancellationToken).ConfigureAwait(false))
                     {
                         results.Add(new(local.Id, local.ProviderDraftId, DraftSyncStatus.RemovedSent));
@@ -144,6 +144,8 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
                 }
                 else
                 {
+                    if (remote.ProviderImmutableId is not null && local.ProviderImmutableId != remote.ProviderImmutableId)
+                        await SaveMetadataAsync(local, remote, cancellationToken).ConfigureAwait(false);
                     results.Add(new(local.Id, remote.ProviderId, DraftSyncStatus.Unchanged));
                 }
             }
@@ -205,6 +207,7 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
             local.UpdatedAt,
             remote.UpdatedAt,
             remote.ETag,
+            remote.ProviderImmutableId,
             cancellationToken);
 
     private static void ValidateOwner(MailAccount account, Mailbox mailbox, CloudDraft draft)
@@ -244,7 +247,8 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
             ? null
             : ConversationThread.ThreadIdentity(draft.MailboxId, draft.ConversationId),
         Importance: draft.Message.Importance, IsFlagged: draft.Message.IsFlagged,
-        RequestReadReceipt: draft.Message.RequestReadReceipt, RequestDeliveryReceipt: draft.Message.RequestDeliveryReceipt);
+        RequestReadReceipt: draft.Message.RequestReadReceipt, RequestDeliveryReceipt: draft.Message.RequestDeliveryReceipt,
+        ProviderImmutableId: draft.ProviderImmutableId);
 
     private static IReadOnlyList<MailAddress> ParseAddresses(string value)
     {

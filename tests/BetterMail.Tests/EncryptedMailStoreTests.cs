@@ -854,6 +854,7 @@ public sealed class EncryptedMailStoreTests
                 draft.UpdatedAt,
                 providerUpdatedAt,
                 "etag-1",
+                "stable-draft",
                 cancellationToken);
             await store.SaveLocalDraftAsync(
                 draft with { Subject = "Locally edited", UpdatedAt = providerUpdatedAt.AddSeconds(1) },
@@ -861,6 +862,7 @@ public sealed class EncryptedMailStoreTests
             savedDraft = Assert.Single(await store.GetLocalDraftsAsync(cancellationToken));
             Assert.Equal("Locally edited", savedDraft.Subject);
             Assert.Equal("server-draft", savedDraft.ProviderDraftId);
+            Assert.Equal("stable-draft", savedDraft.ProviderImmutableId);
             Assert.Equal(draft.UpdatedAt, savedDraft.SyncedLocalUpdatedAt);
             Assert.Equal(providerUpdatedAt, savedDraft.ProviderUpdatedAt);
             Assert.Equal("etag-1", savedDraft.ProviderETag);
@@ -874,6 +876,7 @@ public sealed class EncryptedMailStoreTests
                 cancellationToken);
             savedDraft = Assert.Single(await store.GetLocalDraftsAsync(cancellationToken));
             Assert.Null(savedDraft.ProviderDraftId);
+            Assert.Null(savedDraft.ProviderImmutableId);
             Assert.Null(savedDraft.SyncedLocalUpdatedAt);
             Assert.Null(savedDraft.ProviderUpdatedAt);
             Assert.Null(savedDraft.ProviderETag);
