@@ -40,7 +40,7 @@ public sealed class Microsoft365OptionsTests
         ], Microsoft365AuthService.Scopes);
 
         Assert.Equal(
-        ["Mail.ReadWrite", "Mail.Send", "Mail.ReadWrite.Shared", "Mail.Send.Shared"],
+        ["User.Read", "Mail.ReadWrite", "Mail.Send", "Mail.ReadWrite.Shared", "Mail.Send.Shared"],
         Microsoft365AuthService.MailScopes);
     }
 
