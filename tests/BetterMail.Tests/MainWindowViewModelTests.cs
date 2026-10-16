@@ -179,7 +179,11 @@ public sealed class MainWindowViewModelTests
     {
         var token = TestContext.Current.CancellationToken;
         var directory = Path.Combine(Path.GetTempPath(), "bettermail-draft-quick-delete-" + Guid.NewGuid());
-        var provider = new LifecycleDraftProvider { DeleteRelease = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        var provider = new LifecycleDraftProvider
+        {
+            DeleteStarted = new(TaskCreationOptions.RunContinuationsAsynchronously),
+            DeleteRelease = new(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
         MainWindowViewModel? vm = null;
         try
         {
@@ -199,6 +203,9 @@ public sealed class MainWindowViewModelTests
             var deleting = vm.DeleteDraftQuickAsync(first);
             Assert.True(vm.IsDraftDeletionPending(first));
             await deleting.WaitAsync(TimeSpan.FromSeconds(5), token);
+            // Wait until sync is blocked at the server, after its Busy collection refresh.
+            // Without this handshake the headless test can mutate Busy on two pool threads.
+            await provider.DeleteStarted.Task.WaitAsync(TimeSpan.FromSeconds(5), token);
             await vm.DeleteDraftQuickAsync(second).WaitAsync(TimeSpan.FromSeconds(5), token);
             Assert.False(provider.DeleteRelease.Task.IsCompleted);
             var applied = (bool)typeof(MainWindowViewModel).GetMethod("TryApplyDraftSnapshot", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(vm, [staleVersion, new LocalDraft[] { first, second }])!;
@@ -3233,6 +3240,7 @@ public sealed class MainWindowViewModelTests
         public int SendCount { get; private set; }
         public int DeleteCount { get; private set; }
         public bool DeleteAsMissing { get; set; }
+        public TaskCompletionSource? DeleteStarted { get; set; }
         public TaskCompletionSource? DeleteRelease { get; set; }
 
         public Task<IReadOnlyList<CloudDraft>> GetDraftsAsync(
@@ -3272,6 +3280,7 @@ public sealed class MainWindowViewModelTests
             CancellationToken cancellationToken = default)
         {
             DeleteCount++;
+            DeleteStarted?.TrySetResult();
             if (DeleteRelease is not null) await DeleteRelease.Task.WaitAsync(cancellationToken);
             if (DeleteAsMissing)
             {

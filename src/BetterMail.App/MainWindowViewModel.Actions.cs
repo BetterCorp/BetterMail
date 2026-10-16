@@ -206,7 +206,7 @@ public sealed partial class MainWindowViewModel
                         var draft = await _store.GetLocalDraftAsync(action.ItemId, timeout.Token);
                         var providerId = draft?.ProviderDraftId ?? action.ProviderId;
                         if (providerId is not null && _provider.SupportsCloudDraftsFor(account) &&
-                            !await _provider.IsDraftSentAsync(account, mailbox, providerId, timeout.Token))
+                            !await _provider.IsDraftSentAsync(account, mailbox, draft?.ProviderImmutableId ?? providerId, timeout.Token))
                         {
                             try { await _provider.DeleteDraftAsync(account, mailbox, providerId, timeout.Token); }
                             catch (HttpRequestException exception) when (exception.StatusCode == HttpStatusCode.NotFound) { }

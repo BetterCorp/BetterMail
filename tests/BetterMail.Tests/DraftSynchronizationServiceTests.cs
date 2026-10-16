@@ -186,12 +186,21 @@ public sealed class DraftSynchronizationServiceTests
             return Task.CompletedTask;
         }
 
+        public Task<bool> TryUpdateLocalDraftIdentityAsync(LocalDraft expected, string providerDraftId, string? providerImmutableId, CancellationToken cancellationToken = default)
+        {
+            var index = Drafts.FindIndex(draft => draft.Id == expected.Id && draft.ProviderDraftId == expected.ProviderDraftId &&
+                draft.AccountId == expected.AccountId && draft.MailboxId == expected.MailboxId && draft.ProviderImmutableId == expected.ProviderImmutableId);
+            if (index >= 0) Drafts[index] = Drafts[index] with { ProviderDraftId = providerDraftId, ProviderImmutableId = providerImmutableId };
+            return Task.FromResult(index >= 0);
+        }
+
         public Task UpdateLocalDraftSyncMetadataAsync(
             string id,
             string providerDraftId,
             DateTimeOffset syncedLocalUpdatedAt,
             DateTimeOffset providerUpdatedAt,
             string? providerETag,
+            string? providerImmutableId,
             CancellationToken cancellationToken = default)
         {
             var index = Drafts.FindIndex(draft => draft.Id == id);
@@ -200,7 +209,8 @@ public sealed class DraftSynchronizationServiceTests
                 ProviderDraftId = providerDraftId,
                 SyncedLocalUpdatedAt = syncedLocalUpdatedAt,
                 ProviderUpdatedAt = providerUpdatedAt,
-                ProviderETag = providerETag
+                ProviderETag = providerETag,
+                ProviderImmutableId = providerImmutableId
             };
             return Task.CompletedTask;
         }

@@ -398,7 +398,7 @@ public sealed class Microsoft365MailProvider : IMailProvider, ISharedMailboxProv
     {
         ValidateCanSend(mailbox);
         var cloudDraft = await CreateDraftAsync(account, mailbox, draft, cancellationToken).ConfigureAwait(false);
-        await SendDraftAsync(account, mailbox, cloudDraft.ProviderId, cancellationToken).ConfigureAwait(false);
+        await SendDraftAsync(account, mailbox, cloudDraft.ProviderImmutableId ?? cloudDraft.ProviderId, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<CloudDraft>> GetDraftsAsync(
@@ -422,7 +422,42 @@ public sealed class Microsoft365MailProvider : IMailProvider, ISharedMailboxProv
                 ? nextLink.GetString()
                 : null;
         }
-        return drafts;
+        return await CaptureImmutableDraftIdsAsync(account, mailbox, drafts, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<IReadOnlyList<CloudDraft>> CaptureImmutableDraftIdsAsync(
+        MailAccount account, Mailbox mailbox, List<CloudDraft> drafts, CancellationToken cancellationToken)
+    {
+        // Convert only IDs in the current Drafts snapshot, while they still resolve.
+        // Keep regular IDs for existing mappings and save the stable identity separately.
+        var identities = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var batch in drafts.Chunk(1000))
+        {
+            JsonDocument translation;
+            try
+            {
+                translation = await SendJsonForResponseAsync(account, HttpMethod.Post,
+                    $"{MailboxPath(account, mailbox)}/translateExchangeIds",
+                    new { inputIds = batch.Select(draft => draft.ProviderId).ToArray(), sourceIdType = "restId", targetIdType = "restImmutableEntryId" },
+                    cancellationToken, retryTransient: true).ConfigureAwait(false);
+            }
+            catch (HttpRequestException error) when (error.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.BadRequest)
+            {
+                // A draft can leave the folder after the snapshot. Preserve its local copy.
+                continue;
+            }
+            using (translation)
+            {
+                foreach (var group in translation.RootElement.GetProperty("value").EnumerateArray()
+                    .GroupBy(item => OptionalString(item, "sourceId"), StringComparer.Ordinal))
+                {
+                    if (group.Key is not null && group.Count() == 1 && OptionalString(group.Single(), "targetId") is { } target &&
+                        !string.IsNullOrWhiteSpace(target))
+                        identities[group.Key] = target;
+                }
+            }
+        }
+        return drafts.Select(draft => draft with { ProviderImmutableId = identities.GetValueOrDefault(draft.ProviderId) }).ToArray();
     }
 
     public async Task<CloudDraft> GetDraftAsync(
@@ -435,11 +470,15 @@ public sealed class Microsoft365MailProvider : IMailProvider, ISharedMailboxProv
         using var document = await GetJsonAsync(
             account,
             $"{DraftEndpoint(account, mailbox, draftId)}?$select={DraftSelect}",
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken, immutableIds: true).ConfigureAwait(false);
         var attachments = document.RootElement.TryGetProperty("hasAttachments", out var hasAttachments) && hasAttachments.GetBoolean()
             ? await GetDraftAttachmentsAsync(account, mailbox, draftId, cancellationToken).ConfigureAwait(false)
             : DraftAttachmentSet.Empty;
-        return MapDraft(account, mailbox, document.RootElement, attachments);
+        return MapDraft(account, mailbox, document.RootElement, attachments) with
+        {
+            ProviderId = draftId,
+            ProviderImmutableId = RequiredString(document.RootElement, "id")
+        };
     }
 
     public async Task<CloudDraft> CreateResponseDraftAsync(MailAccount account, Mailbox mailbox, string messageId,
@@ -531,17 +570,19 @@ public sealed class Microsoft365MailProvider : IMailProvider, ISharedMailboxProv
 
     public async Task<bool> IsDraftSentAsync(MailAccount account, Mailbox mailbox, string draftId, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(draftId);
         try
         {
             using var document = await GetJsonAsync(account,
-                $"{DraftEndpoint(account, mailbox, draftId)}?$select=isDraft,parentFolderId", cancellationToken).ConfigureAwait(false);
+                $"{DraftEndpoint(account, mailbox, draftId)}?$select=isDraft,parentFolderId",
+                cancellationToken, immutableIds: true).ConfigureAwait(false);
             using var sentFolder = await GetJsonAsync(account,
                 $"{MailboxPath(account, mailbox)}/mailFolders/sentitems?$select=id", cancellationToken).ConfigureAwait(false);
             return IsSentMessage(document.RootElement, RequiredString(sentFolder.RootElement, "id"));
         }
         catch (HttpRequestException error) when (error.StatusCode == HttpStatusCode.NotFound)
         {
-            // IDs may change on send; absence is not evidence of successful delivery.
+            // Even a missing immutable ID is not evidence of successful delivery.
             return false;
         }
     }
@@ -564,7 +605,7 @@ public sealed class Microsoft365MailProvider : IMailProvider, ISharedMailboxProv
             HttpMethod.Post,
             $"{DraftEndpoint(account, mailbox, draftId)}/send",
             body: null,
-            cancellationToken);
+            cancellationToken, immutableIds: true);
     }
 
     internal static string DraftsEndpoint(MailAccount account, Mailbox mailbox) =>
@@ -862,7 +903,8 @@ public sealed class Microsoft365MailProvider : IMailProvider, ISharedMailboxProv
         return mailbox;
     }
 
-    private async Task<JsonDocument> GetJsonAsync(MailAccount account, string endpoint, CancellationToken cancellationToken)
+    private async Task<JsonDocument> GetJsonAsync(MailAccount account, string endpoint, CancellationToken cancellationToken,
+        bool immutableIds = false)
     {
         using var response = await Microsoft365RequestScheduler.Shared.SendAsync(
             account,
@@ -870,6 +912,7 @@ public sealed class Microsoft365MailProvider : IMailProvider, ISharedMailboxProv
             async (_, token) =>
             {
                 using var request = await CreateRequestAsync(account, HttpMethod.Get, endpoint, token).ConfigureAwait(false);
+                if (immutableIds) request.Headers.Add("Prefer", "IdType=\"ImmutableId\"");
                 return await _httpClient.SendAsync(
                     request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
             },
@@ -879,21 +922,24 @@ public sealed class Microsoft365MailProvider : IMailProvider, ISharedMailboxProv
         return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task SendJsonAsync(MailAccount account, HttpMethod method, string endpoint, object? body, CancellationToken cancellationToken)
+    private async Task SendJsonAsync(MailAccount account, HttpMethod method, string endpoint, object? body, CancellationToken cancellationToken,
+        bool immutableIds = false)
     {
-        using var response = await SendAsync(account, method, endpoint, body, cancellationToken).ConfigureAwait(false);
+        using var response = await SendAsync(account, method, endpoint, body, cancellationToken, immutableIds).ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<JsonDocument> SendJsonForResponseAsync(MailAccount account, HttpMethod method, string endpoint, object? body, CancellationToken cancellationToken)
+    private async Task<JsonDocument> SendJsonForResponseAsync(MailAccount account, HttpMethod method, string endpoint, object? body, CancellationToken cancellationToken,
+        bool retryTransient = false)
     {
-        using var response = await SendAsync(account, method, endpoint, body, cancellationToken).ConfigureAwait(false);
+        using var response = await SendAsync(account, method, endpoint, body, cancellationToken, retryTransientPost: retryTransient).ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<HttpResponseMessage> SendAsync(MailAccount account, HttpMethod method, string endpoint, object? body, CancellationToken cancellationToken)
+    private async Task<HttpResponseMessage> SendAsync(MailAccount account, HttpMethod method, string endpoint, object? body, CancellationToken cancellationToken,
+        bool immutableIds = false, bool retryTransientPost = false)
     {
         return await Microsoft365RequestScheduler.Shared.SendAsync(
             account,
@@ -901,13 +947,14 @@ public sealed class Microsoft365MailProvider : IMailProvider, ISharedMailboxProv
             async (_, token) =>
             {
                 using var request = await CreateRequestAsync(account, method, endpoint, token).ConfigureAwait(false);
+                if (immutableIds) request.Headers.Add("Prefer", "IdType=\"ImmutableId\"");
                 if (body is not null)
                 {
                     request.Content = JsonContent.Create(body);
                 }
                 return await _httpClient.SendAsync(request, token).ConfigureAwait(false);
             },
-            cancellationToken, retryTransient: method != HttpMethod.Post).ConfigureAwait(false);
+            cancellationToken, retryTransient: method != HttpMethod.Post || retryTransientPost).ConfigureAwait(false);
     }
 
     private async Task<HttpRequestMessage> CreateRequestAsync(MailAccount account, HttpMethod method, string endpoint, CancellationToken cancellationToken)

@@ -179,7 +179,8 @@ public sealed record CloudDraft(
     DateTimeOffset UpdatedAt,
     string? ETag = null,
     bool HasUnsupportedAttachments = false,
-    string? ConversationId = null);
+    string? ConversationId = null,
+    string? ProviderImmutableId = null);
 
 public sealed record DraftAttachment(
     string Name,
@@ -219,7 +220,8 @@ public sealed record LocalDraft(
     MailImportance Importance = MailImportance.Normal,
     bool IsFlagged = false,
     bool RequestReadReceipt = false,
-    bool RequestDeliveryReceipt = false)
+    bool RequestDeliveryReceipt = false,
+    string? ProviderImmutableId = null)
 {
     public string KindText => IsQueued ? "Queued" : "Draft";
     public string DisplaySubject => string.IsNullOrWhiteSpace(Subject) ? "(no subject)" : Subject;

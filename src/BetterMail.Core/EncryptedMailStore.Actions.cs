@@ -231,6 +231,7 @@ public sealed partial class EncryptedMailStore
             command.CommandText = """
                 UPDATE local_drafts SET is_queued = 0,
                     provider_draft_id = CASE WHEN $clear THEN NULL ELSE provider_draft_id END,
+                    provider_immutable_id = CASE WHEN $clear THEN NULL ELSE provider_immutable_id END,
                     synced_local_updated_at = CASE WHEN $clear THEN NULL ELSE synced_local_updated_at END,
                     provider_updated_at = CASE WHEN $clear THEN NULL ELSE provider_updated_at END,
                     provider_etag = CASE WHEN $clear THEN NULL ELSE provider_etag END,
@@ -287,12 +288,14 @@ public sealed partial class EncryptedMailStore
             command.CommandText = """
                 DELETE FROM local_drafts WHERE id = $id AND account_id = $account AND mailbox_id = $mailbox
                 AND provider_draft_id = $provider AND updated_at = $updated AND synced_local_updated_at = $updated
+                AND provider_immutable_id IS $immutable
                 AND is_queued = 0;
                 """;
             command.Parameters.AddWithValue("$id", expected.Id);
             command.Parameters.AddWithValue("$account", expected.AccountId);
             command.Parameters.AddWithValue("$mailbox", expected.MailboxId);
             command.Parameters.AddWithValue("$provider", expected.ProviderDraftId);
+            command.Parameters.AddWithValue("$immutable", (object?)expected.ProviderImmutableId ?? DBNull.Value);
             command.Parameters.AddWithValue("$updated", expected.UpdatedAt.ToString("O"));
             if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 0) return false;
             await WriteActionAsync(connection, transaction, new MailAction("delete:" + expected.Id,
