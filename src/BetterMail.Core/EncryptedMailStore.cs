@@ -1352,6 +1352,24 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }, cancellationToken);
 
+    public Task UpdateLocalDraftImmutableIdAsync(LocalDraft expected, string providerImmutableId,
+        CancellationToken cancellationToken = default) => WithLockAsync(async connection =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE local_drafts SET provider_immutable_id = $immutable
+                WHERE id = $id AND account_id = $account AND mailbox_id = $mailbox
+                AND provider_draft_id = $provider AND provider_immutable_id IS $previous;
+                """;
+            command.Parameters.AddWithValue("$id", expected.Id);
+            command.Parameters.AddWithValue("$account", expected.AccountId);
+            command.Parameters.AddWithValue("$mailbox", expected.MailboxId);
+            command.Parameters.AddWithValue("$provider", (object?)expected.ProviderDraftId ?? DBNull.Value);
+            command.Parameters.AddWithValue("$previous", (object?)expected.ProviderImmutableId ?? DBNull.Value);
+            command.Parameters.AddWithValue("$immutable", providerImmutableId);
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+
     public Task UpdateLocalDraftSyncMetadataAsync(
         string id,
         string providerDraftId,

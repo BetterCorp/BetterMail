@@ -507,6 +507,8 @@ public interface IDraftStore
         (await GetLocalDraftsAsync(cancellationToken).ConfigureAwait(false))
             .FirstOrDefault(draft => draft.Id == id);
     Task DeleteLocalDraftAsync(string id, CancellationToken cancellationToken = default);
+    Task UpdateLocalDraftImmutableIdAsync(LocalDraft expected, string providerImmutableId,
+        CancellationToken cancellationToken = default);
     Task UpdateLocalDraftSyncMetadataAsync(
         string id,
         string providerDraftId,

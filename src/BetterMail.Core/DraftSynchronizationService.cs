@@ -97,6 +97,10 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
                         "Not found in server drafts; sending could not be confirmed. Your local copy is kept. Discard it explicitly if no longer needed."));
                     continue;
                 }
+                // Identity capture must not imply that either copy's content was synchronized.
+                // Conflicts and unsupported attachments still need a durable identity before a move.
+                if (remote.ProviderImmutableId is not null && local.ProviderImmutableId != remote.ProviderImmutableId)
+                    await store.UpdateLocalDraftImmutableIdAsync(local, remote.ProviderImmutableId, cancellationToken).ConfigureAwait(false);
                 if (remote.HasUnsupportedAttachments)
                 {
                     results.Add(new(
@@ -144,8 +148,6 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
                 }
                 else
                 {
-                    if (remote.ProviderImmutableId is not null && local.ProviderImmutableId != remote.ProviderImmutableId)
-                        await SaveMetadataAsync(local, remote, cancellationToken).ConfigureAwait(false);
                     results.Add(new(local.Id, remote.ProviderId, DraftSyncStatus.Unchanged));
                 }
             }

@@ -59,6 +59,30 @@ public sealed class DraftSentRecoveryTests
         });
     }
 
+    [Fact]
+    public async Task ConflictedLegacyDraftCapturesIdentityWithoutAdvancingSynchronizationBaseline()
+    {
+        await WithDraft(async (store, account, mailbox, draft, path, token) =>
+        {
+            var edited = draft with { Body = "Unsynced work", UpdatedAt = draft.UpdatedAt.AddMinutes(2), ProviderETag = "original-version" };
+            await store.SaveLocalDraftAsync(edited, token);
+            var handler = new SentHandler { DraftPresent = true, UpdatedAt = draft.UpdatedAt.AddMinutes(1) };
+            using var http = Client(handler);
+            var result = await new DraftSynchronizationService(Provider(http), store).SynchronizeAsync(account, mailbox, token);
+            Assert.Equal(DraftSyncStatus.Conflict, Assert.Single(result.Items).Status);
+
+            await using var restarted = new EncryptedMailStore(path, new string('A', 64));
+            await restarted.InitializeAsync(token);
+            var captured = Assert.Single(await restarted.GetLocalDraftsAsync(token));
+            Assert.Equal("stable-id", captured.ProviderImmutableId);
+            Assert.Equal(edited.Body, captured.Body);
+            Assert.Equal(edited.UpdatedAt, captured.UpdatedAt);
+            Assert.Equal(draft.SyncedLocalUpdatedAt, captured.SyncedLocalUpdatedAt);
+            Assert.Equal(draft.ProviderUpdatedAt, captured.ProviderUpdatedAt);
+            Assert.Equal(edited.ProviderETag, captured.ProviderETag);
+        }, stable: false);
+    }
+
     [Theory]
     [InlineData("no-translation")]
     [InlineData("wrong-source")]
