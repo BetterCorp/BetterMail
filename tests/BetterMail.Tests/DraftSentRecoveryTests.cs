@@ -107,6 +107,24 @@ public sealed class DraftSentRecoveryTests
         }, stable: false);
     }
 
+    [Theory]
+    [InlineData("throttled")]
+    [InlineData("server-transient")]
+    [InlineData("network-transient")]
+    public async Task IdTranslationRetriesTransientReadFailures(string mode)
+    {
+        await WithDraft(async (store, account, mailbox, draft, _, token) =>
+        {
+            var handler = new SentHandler { Mode = mode, DraftPresent = true, UpdatedAt = draft.UpdatedAt };
+            using var http = Client(handler);
+            var result = await new DraftSynchronizationService(Provider(http), store).SynchronizeAsync(account, mailbox, token);
+            Assert.Equal(DraftSyncStatus.Unchanged, Assert.Single(result.Items).Status);
+            Assert.Equal("stable-id", Assert.Single(await store.GetLocalDraftsAsync(token)).ProviderImmutableId);
+            Assert.Equal(2, handler.TranslationAttempts);
+            Assert.Equal(0, handler.SendCount);
+        }, stable: false);
+    }
+
     [Fact]
     public async Task LookupFailurePreservesDraftAndReportsTheActualFailure()
     {
@@ -214,6 +232,84 @@ public sealed class DraftSentRecoveryTests
         Assert.Equal(1, handler.SendCount);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ChangedRegularIdRebindsExistingDraftWithoutImportingOrCreatingAnother(bool conflict)
+    {
+        await WithDraft(async (store, account, mailbox, draft, _, token) =>
+        {
+            var edited = conflict ? draft with { Body = "Unsynced work", UpdatedAt = draft.UpdatedAt.AddMinutes(2) } : draft;
+            await store.SaveLocalDraftAsync(edited, token);
+            var handler = new SentHandler
+            {
+                DraftPresent = true, RegularId = "moved-id",
+                UpdatedAt = conflict ? draft.UpdatedAt.AddMinutes(1) : draft.UpdatedAt
+            };
+            using var http = Client(handler);
+            var result = await new DraftSynchronizationService(Provider(http), store).SynchronizeAsync(account, mailbox, token);
+            Assert.Equal(conflict ? DraftSyncStatus.Conflict : DraftSyncStatus.Unchanged, Assert.Single(result.Items).Status);
+            var rebound = Assert.Single(await store.GetLocalDraftsAsync(token));
+            Assert.Equal(draft.Id, rebound.Id);
+            Assert.Equal("moved-id", rebound.ProviderDraftId);
+            Assert.Equal("stable-id", rebound.ProviderImmutableId);
+            Assert.Equal(edited.Body, rebound.Body);
+            Assert.Equal(draft.SyncedLocalUpdatedAt, rebound.SyncedLocalUpdatedAt);
+            Assert.Equal(draft.ProviderUpdatedAt, rebound.ProviderUpdatedAt);
+            Assert.Equal(0, handler.CreateCount);
+            Assert.Equal(0, handler.SendCount);
+        });
+    }
+
+    [Fact]
+    public async Task AmbiguousStableIdentityDoesNotRebindOrImportDuplicates()
+    {
+        await WithDraft(async (store, account, mailbox, draft, _, token) =>
+        {
+            var handler = new SentHandler { DraftPresent = true, RegularId = "moved-id", Ambiguous = true };
+            using var http = Client(handler);
+            var result = await new DraftSynchronizationService(Provider(http), store).SynchronizeAsync(account, mailbox, token);
+            Assert.Equal(DraftSyncStatus.Conflict, Assert.Single(result.Items).Status);
+            Assert.Equal(draft.ProviderDraftId, Assert.Single(await store.GetLocalDraftsAsync(token)).ProviderDraftId);
+            Assert.Equal(0, handler.CreateCount);
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReturningUnconfirmedMovedDraftPreservesIdentityOrRejectsAmbiguity(bool ambiguous)
+    {
+        await WithDraft(async (store, account, mailbox, draft, _, token) =>
+        {
+            await store.SaveLocalDraftAsync(draft with { IsQueued = true, Attachments = [] }, token);
+            var handler = new SentHandler { DraftPresent = true, UpdatedAt = draft.UpdatedAt, LoseSendAcknowledgement = true };
+            using var http = Client(handler);
+            var provider = Provider(http);
+            var service = new OutboxService(provider, store);
+            await service.ProcessAsync(account, mailbox, draft.Id, token);
+            handler.DraftPresent = true;
+            handler.RegularId = "moved-id";
+            handler.Ambiguous = ambiguous;
+            if (ambiguous)
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(() => service.ReturnToDraftAsync(account, mailbox, "send:" + draft.Id, token));
+                Assert.True(Assert.Single(await store.GetLocalDraftsAsync(token)).IsQueued);
+                Assert.True(Assert.Single(await store.GetMailActionsAsync(token)).NeedsSendReview);
+                return;
+            }
+            Assert.True(await service.ReturnToDraftAsync(account, mailbox, "send:" + draft.Id, token));
+            var returned = Assert.Single(await store.GetLocalDraftsAsync(token));
+            Assert.False(returned.IsQueued);
+            Assert.Equal("moved-id", returned.ProviderDraftId);
+            Assert.Equal("stable-id", returned.ProviderImmutableId);
+            await new DraftSynchronizationService(provider, store).SynchronizeAsync(account, mailbox, token);
+            Assert.Single(await store.GetLocalDraftsAsync(token));
+            Assert.Equal(0, handler.CreateCount);
+            Assert.Equal(1, handler.SendCount);
+        });
+    }
+
     private static MailAccount Account => new("microsoft365", "account", "tenant", "author@example.test", "Author", ProviderCapabilities.Mail);
     private static HttpClient Client(SentHandler handler) => new(handler) { BaseAddress = new Uri("https://graph.microsoft.com/v1.0/") };
     private static Microsoft365MailProvider Provider(HttpClient client) => new((_, _) => Task.FromResult("fictional-token"), client);
@@ -245,9 +341,13 @@ public sealed class DraftSentRecoveryTests
     {
         public string Mode { get; init; } = "sent";
         public bool DraftPresent { get; set; }
+        public string RegularId { get; set; } = "old-id";
+        public bool Ambiguous { get; set; }
         public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
         public bool LoseSendAcknowledgement { get; init; }
         public int SendCount { get; private set; }
+        public int CreateCount { get; private set; }
+        public int TranslationAttempts { get; private set; }
         public Func<Task>? BeforeStableLookup { get; init; }
         public Func<Task>? BeforeSend { get; init; }
         public List<(HttpMethod Method, Uri Uri, bool ImmutableIds)> Requests { get; } = [];
@@ -266,14 +366,15 @@ public sealed class DraftSentRecoveryTests
             var immutable = request.Headers.TryGetValues("Prefer", out var preferences) && preferences.Contains("IdType=\"ImmutableId\"");
             Requests.Add((request.Method, uri, immutable));
             if (uri.AbsolutePath.EndsWith("/mailFolders/drafts/messages"))
-                return Json(DraftPresent ? "{\"value\":[" + DraftJson("old-id") + "]}" : "{\"value\":[]}");
+                return Json(DraftPresent ? "{\"value\":[" + DraftJson(RegularId) + (Ambiguous ? "," + DraftJson("other-id") : "") + "]}" : "{\"value\":[]}");
             if (uri.AbsolutePath.EndsWith("/messages") && request.Method == HttpMethod.Post)
             {
                 DraftPresent = true;
-                return Json(DraftJson("old-id"));
+                CreateCount++;
+                return Json(DraftJson(RegularId));
             }
-            if (uri.AbsolutePath.EndsWith("/messages/old-id/attachments")) return Json("{\"value\":[]}");
-            if (uri.AbsolutePath.EndsWith("/messages/old-id"))
+            if (uri.AbsolutePath.EndsWith("/messages/" + RegularId + "/attachments")) return Json("{\"value\":[]}");
+            if (uri.AbsolutePath.EndsWith("/messages/" + RegularId))
             {
                 if (Mode == "original") return Json("{\"isDraft\":false,\"parentFolderId\":\"sent\"}");
                 if (!DraftPresent) return new(HttpStatusCode.NotFound);
@@ -285,8 +386,18 @@ public sealed class DraftSentRecoveryTests
             {
                 Assert.True(DraftPresent, "A stale ID cannot be translated after it stops resolving.");
                 Assert.Equal(HttpMethod.Post, request.Method);
+                TranslationAttempts++;
+                if (TranslationAttempts == 1 && Mode is "throttled" or "server-transient" or "network-transient")
+                {
+                    if (Mode == "network-transient") throw new HttpRequestException("Temporary connection failure");
+                    var transient = new HttpResponseMessage(Mode == "throttled" ? HttpStatusCode.TooManyRequests : HttpStatusCode.ServiceUnavailable);
+                    transient.Headers.RetryAfter = new(TimeSpan.Zero);
+                    return transient;
+                }
                 using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
-                Assert.Equal("old-id", Assert.Single(body.RootElement.GetProperty("inputIds").EnumerateArray()).GetString());
+                var ids = body.RootElement.GetProperty("inputIds").EnumerateArray().Select(item => item.GetString()).ToArray();
+                Assert.Equal(Ambiguous ? 2 : 1, ids.Length);
+                Assert.Contains(RegularId, ids);
                 Assert.Equal("restId", body.RootElement.GetProperty("sourceIdType").GetString());
                 Assert.Equal("restImmutableEntryId", body.RootElement.GetProperty("targetIdType").GetString());
                 return Mode switch
@@ -296,7 +407,7 @@ public sealed class DraftSentRecoveryTests
                     "wrong-source" => Json("{\"value\":[{\"sourceId\":\"unrelated\",\"targetId\":\"stable-id\"}]}"),
                     "empty-target" => Json("{\"value\":[{\"sourceId\":\"old-id\",\"targetId\":\"\"}]}"),
                     "duplicate" => Json("{\"value\":[{\"sourceId\":\"old-id\",\"targetId\":\"stable-id\"},{\"sourceId\":\"old-id\",\"targetId\":\"other-id\"}]}"),
-                    _ => Json("{\"value\":[{\"sourceId\":\"old-id\",\"targetId\":\"stable-id\"}]}")
+                    _ => Json(JsonSerializer.Serialize(new { value = ids.Select(sourceId => new { sourceId, targetId = "stable-id" }) }))
                 };
             }
             if (uri.AbsolutePath.EndsWith("/messages/stable-id/send"))

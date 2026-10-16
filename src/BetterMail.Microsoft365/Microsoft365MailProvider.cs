@@ -439,7 +439,7 @@ public sealed class Microsoft365MailProvider : IMailProvider, ISharedMailboxProv
                 translation = await SendJsonForResponseAsync(account, HttpMethod.Post,
                     $"{MailboxPath(account, mailbox)}/translateExchangeIds",
                     new { inputIds = batch.Select(draft => draft.ProviderId).ToArray(), sourceIdType = "restId", targetIdType = "restImmutableEntryId" },
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken, retryTransient: true).ConfigureAwait(false);
             }
             catch (HttpRequestException error) when (error.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.BadRequest)
             {
@@ -929,16 +929,17 @@ public sealed class Microsoft365MailProvider : IMailProvider, ISharedMailboxProv
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<JsonDocument> SendJsonForResponseAsync(MailAccount account, HttpMethod method, string endpoint, object? body, CancellationToken cancellationToken)
+    private async Task<JsonDocument> SendJsonForResponseAsync(MailAccount account, HttpMethod method, string endpoint, object? body, CancellationToken cancellationToken,
+        bool retryTransient = false)
     {
-        using var response = await SendAsync(account, method, endpoint, body, cancellationToken).ConfigureAwait(false);
+        using var response = await SendAsync(account, method, endpoint, body, cancellationToken, retryTransientPost: retryTransient).ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<HttpResponseMessage> SendAsync(MailAccount account, HttpMethod method, string endpoint, object? body, CancellationToken cancellationToken,
-        bool immutableIds = false)
+        bool immutableIds = false, bool retryTransientPost = false)
     {
         return await Microsoft365RequestScheduler.Shared.SendAsync(
             account,
@@ -953,7 +954,7 @@ public sealed class Microsoft365MailProvider : IMailProvider, ISharedMailboxProv
                 }
                 return await _httpClient.SendAsync(request, token).ConfigureAwait(false);
             },
-            cancellationToken, retryTransient: method != HttpMethod.Post).ConfigureAwait(false);
+            cancellationToken, retryTransient: method != HttpMethod.Post || retryTransientPost).ConfigureAwait(false);
     }
 
     private async Task<HttpRequestMessage> CreateRequestAsync(MailAccount account, HttpMethod method, string endpoint, CancellationToken cancellationToken)

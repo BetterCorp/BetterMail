@@ -50,6 +50,8 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
             throw new InvalidOperationException("The provider returned a draft owned by another account or mailbox.");
         }
         var remoteById = remoteDrafts.ToDictionary(static draft => draft.ProviderId, StringComparer.Ordinal);
+        var remoteByImmutableId = remoteDrafts.Where(static draft => !string.IsNullOrWhiteSpace(draft.ProviderImmutableId))
+            .ToLookup(static draft => draft.ProviderImmutableId!, StringComparer.Ordinal);
         var localDrafts = (await store.GetLocalDraftSummariesAsync(cancellationToken).ConfigureAwait(false))
             .Where(draft => draft.AccountId == account.AccountId && draft.MailboxId == mailbox.Id)
             .ToArray();
@@ -57,10 +59,14 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
             .Select(static draft => draft.ProviderDraftId)
             .Where(static id => !string.IsNullOrWhiteSpace(id))
             .ToHashSet(StringComparer.Ordinal);
+        var localImmutableIds = localDrafts.Select(static draft => draft.ProviderImmutableId).ToHashSet(StringComparer.Ordinal);
+        foreach (var remote in remoteDrafts.Where(draft => draft.ProviderImmutableId is not null && localImmutableIds.Contains(draft.ProviderImmutableId)))
+            mappedRemoteIds.Add(remote.ProviderId);
         var results = new List<DraftSyncItem>();
 
-        foreach (var local in localDrafts.Where(static draft => !draft.IsQueued))
+        foreach (var summary in localDrafts.Where(static draft => !draft.IsQueued))
         {
+            var local = summary;
             cancellationToken.ThrowIfCancellationRequested();
             if (await store.IsDraftPendingDeletionAsync(local.Id, cancellationToken).ConfigureAwait(false))
                 continue;
@@ -81,7 +87,19 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
                     continue;
                 }
 
-                if (!remoteById.TryGetValue(local.ProviderDraftId, out var remote))
+                remoteById.TryGetValue(local.ProviderDraftId, out var remote);
+                if (remote is null && local.ProviderImmutableId is not null)
+                {
+                    var matches = remoteByImmutableId[local.ProviderImmutableId].Take(2).ToArray();
+                    if (matches.Length > 1)
+                    {
+                        results.Add(new(local.Id, local.ProviderDraftId, DraftSyncStatus.Conflict,
+                            "Multiple server drafts match the saved identity; your local copy is kept."));
+                        continue;
+                    }
+                    remote = matches.SingleOrDefault();
+                }
+                if (remote is null)
                 {
                     if (local.SyncedLocalUpdatedAt == local.UpdatedAt &&
                         await provider.IsDraftSentAsync(account, mailbox, local.ProviderImmutableId ?? local.ProviderDraftId, cancellationToken).ConfigureAwait(false) &&
@@ -99,8 +117,14 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
                 }
                 // Identity capture must not imply that either copy's content was synchronized.
                 // Conflicts and unsupported attachments still need a durable identity before a move.
-                if (remote.ProviderImmutableId is not null && local.ProviderImmutableId != remote.ProviderImmutableId)
-                    await store.UpdateLocalDraftImmutableIdAsync(local, remote.ProviderImmutableId, cancellationToken).ConfigureAwait(false);
+                if (remote.ProviderId != local.ProviderDraftId ||
+                    remote.ProviderImmutableId is not null && local.ProviderImmutableId != remote.ProviderImmutableId)
+                {
+                    var immutableId = remote.ProviderImmutableId ?? local.ProviderImmutableId;
+                    if (!await store.TryUpdateLocalDraftIdentityAsync(local, remote.ProviderId, immutableId, cancellationToken).ConfigureAwait(false))
+                        continue;
+                    local = local with { ProviderDraftId = remote.ProviderId, ProviderImmutableId = immutableId };
+                }
                 if (remote.HasUnsupportedAttachments)
                 {
                     results.Add(new(

@@ -186,12 +186,12 @@ public sealed class DraftSynchronizationServiceTests
             return Task.CompletedTask;
         }
 
-        public Task UpdateLocalDraftImmutableIdAsync(LocalDraft expected, string providerImmutableId, CancellationToken cancellationToken = default)
+        public Task<bool> TryUpdateLocalDraftIdentityAsync(LocalDraft expected, string providerDraftId, string? providerImmutableId, CancellationToken cancellationToken = default)
         {
             var index = Drafts.FindIndex(draft => draft.Id == expected.Id && draft.ProviderDraftId == expected.ProviderDraftId &&
                 draft.AccountId == expected.AccountId && draft.MailboxId == expected.MailboxId && draft.ProviderImmutableId == expected.ProviderImmutableId);
-            if (index >= 0) Drafts[index] = Drafts[index] with { ProviderImmutableId = providerImmutableId };
-            return Task.CompletedTask;
+            if (index >= 0) Drafts[index] = Drafts[index] with { ProviderDraftId = providerDraftId, ProviderImmutableId = providerImmutableId };
+            return Task.FromResult(index >= 0);
         }
 
         public Task UpdateLocalDraftSyncMetadataAsync(

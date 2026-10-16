@@ -1352,22 +1352,34 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }, cancellationToken);
 
-    public Task UpdateLocalDraftImmutableIdAsync(LocalDraft expected, string providerImmutableId,
+    public Task<bool> TryUpdateLocalDraftIdentityAsync(LocalDraft expected, string providerDraftId, string? providerImmutableId,
         CancellationToken cancellationToken = default) => WithLockAsync(async connection =>
         {
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
             await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = """
-                UPDATE local_drafts SET provider_immutable_id = $immutable
+                UPDATE local_drafts SET provider_draft_id = $newProvider, provider_immutable_id = $immutable
                 WHERE id = $id AND account_id = $account AND mailbox_id = $mailbox
-                AND provider_draft_id = $provider AND provider_immutable_id IS $previous;
+                AND provider_draft_id = $provider AND provider_immutable_id IS $previous
+                AND updated_at = $updated AND is_queued = $queued;
                 """;
             command.Parameters.AddWithValue("$id", expected.Id);
             command.Parameters.AddWithValue("$account", expected.AccountId);
             command.Parameters.AddWithValue("$mailbox", expected.MailboxId);
             command.Parameters.AddWithValue("$provider", (object?)expected.ProviderDraftId ?? DBNull.Value);
+            command.Parameters.AddWithValue("$newProvider", providerDraftId);
             command.Parameters.AddWithValue("$previous", (object?)expected.ProviderImmutableId ?? DBNull.Value);
-            command.Parameters.AddWithValue("$immutable", providerImmutableId);
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            command.Parameters.AddWithValue("$immutable", (object?)providerImmutableId ?? DBNull.Value);
+            command.Parameters.AddWithValue("$updated", expected.UpdatedAt.ToString("O", CultureInfo.InvariantCulture));
+            command.Parameters.AddWithValue("$queued", expected.IsQueued);
+            if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 0) return false;
+            var action = (await ReadActionsAsync(connection, transaction, cancellationToken).ConfigureAwait(false))
+                .FirstOrDefault(action => action.ItemId == expected.Id && action.Kind is MailActionKind.DeleteDraft or MailActionKind.Send);
+            if (action is not null)
+                await WriteActionAsync(connection, transaction, action with { ProviderId = providerDraftId }, cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return true;
         }, cancellationToken);
 
     public Task UpdateLocalDraftSyncMetadataAsync(

@@ -21,6 +21,21 @@ public sealed class OutboxService(IMailProvider provider, EncryptedMailStore sto
             if (drafts.Any(draft => draft.AccountId != account.AccountId || draft.MailboxId != mailbox.Id))
                 throw new InvalidOperationException("The provider returned a draft owned by another mailbox.");
             clearMapping = drafts.All(draft => draft.ProviderId != action.ProviderId);
+            if (clearMapping)
+            {
+                var local = await store.GetLocalDraftAsync(action.ItemId, cancellationToken).ConfigureAwait(false);
+                if (local is null || local.AccountId != account.AccountId || local.MailboxId != mailbox.Id) return false;
+                var matches = local.ProviderImmutableId is null ? [] : drafts
+                    .Where(draft => draft.ProviderImmutableId == local.ProviderImmutableId).Take(2).ToArray();
+                if (matches.Length > 1)
+                    throw new InvalidOperationException("Multiple server drafts match the saved identity; the queued copy is kept.");
+                if (matches.Length == 1)
+                {
+                    if (!await store.TryUpdateLocalDraftIdentityAsync(local, matches[0].ProviderId, local.ProviderImmutableId, cancellationToken).ConfigureAwait(false))
+                        return false;
+                    clearMapping = false;
+                }
+            }
         }
         return await store.ReturnUnconfirmedSendToDraftAsync(actionId, clearMapping, cancellationToken).ConfigureAwait(false);
     }
