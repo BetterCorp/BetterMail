@@ -333,11 +333,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         SettingsTabs.Add(new("Signatures"));
         SettingsTabs.Add(new("Accounts"));
         SettingsTabs.Add(new("MCP"));
+        SettingsTabs.Add(new("Tunnels/Web"));
         SettingsTabs.Add(new("About"));
         var evidence = _store is null ? null : new EvidenceService(_store, () => _provider, new AttachmentTextExtractor(EvidenceOcr.RecognizeAsync));
+        Tunnels = new(_store, () => _provider as IMailWebhookProvider,
+            async account => await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => SyncWebhookAccountAsync(account)));
+        Tunnels.Accounts.CollectionChanged += (_, _) => RaisePropertyChanged(nameof(SettingsAccounts));
+        Accounts.CollectionChanged += (_, _) => _ = Tunnels.RefreshAccountsAsync();
         Mcp = new(_store,
             async () => await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(RefreshMcpChangesAsync),
-            async (sender, id, message) => await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => QueueSendAsync(sender, id, message)), evidence, () => _workspaceProvider, () => _provider);
+            async (sender, id, message) => await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => QueueSendAsync(sender, id, message)), evidence, () => _workspaceProvider, () => _provider, Tunnels);
         _selectedSettingsTab = SettingsTabs[0];
         Drafts.CollectionChanged += (_, _) => RaiseDraftState();
         BusyActions.CollectionChanged += (_, _) => { RaiseDraftState(); MailActionStateChanged(); };
@@ -377,7 +382,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             .Select(mailbox => new SharedMailboxSettingsItem(
                 mailbox,
                 permission => ChangeSharedMailboxPermissionAsync(mailbox, permission)))
-            .ToArray()));
+            .ToArray(), Tunnels.ForAccount(account)));
     public ObservableCollection<MailMessage> Messages { get; } = [];
     public ObservableCollection<MailMessage> SelectedMessages { get; } = [];
     public ObservableCollection<MailQuickActionOption> MailQuickActions { get; } = [];
@@ -1308,6 +1313,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 RaisePropertyChanged(nameof(ShowSignatureSettings));
                 RaisePropertyChanged(nameof(ShowAccountSettings));
                 RaisePropertyChanged(nameof(ShowMcpSettings));
+                RaisePropertyChanged(nameof(ShowTunnelsSettings));
                 RaisePropertyChanged(nameof(ShowAboutSettings));
             }
         }
@@ -1319,6 +1325,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     public bool ShowAccountSettings => SelectedSettingsTab?.Name == "Accounts";
     public bool ShowMcpSettings => SelectedSettingsTab?.Name == "MCP";
     public McpSettingsViewModel Mcp { get; }
+    public TunnelsSettingsViewModel Tunnels { get; }
+    public bool ShowTunnelsSettings => SelectedSettingsTab?.Name == "Tunnels/Web";
     public bool ShowAboutSettings => SelectedSettingsTab?.Name == "About";
 
     public SignatureItem? SelectedSignature
@@ -1655,6 +1663,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         if (_mailProviders.Count > 0)
         {
             _provider = new MailProviderRouter(_mailProviders.Select(static pair => (pair.Key, pair.Value)));
+            _ = Tunnels.RefreshAccountsAsync();
             RefreshMailActionCommands();
         }
     }
@@ -1756,6 +1765,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         StopContactPhotoSync();
         await RunBusyAsync("Removing account…", async () =>
         {
+            await Tunnels.RemoveAccountAsync(account);
             if (_accountProviders.TryGetValue(account.ProviderId, out var accountProvider))
             {
                 await accountProvider.SignOutAsync(account.AccountId);
@@ -5739,7 +5749,7 @@ public sealed class MailboxFolderGroup(Mailbox mailbox, IReadOnlyList<MailFolder
     public string Color => AccountColors.For(Mailbox.Id);
 }
 
-public sealed record AccountSettingsItem(MailAccount Account, IReadOnlyList<SharedMailboxSettingsItem> SharedMailboxes)
+public sealed record AccountSettingsItem(MailAccount Account, IReadOnlyList<SharedMailboxSettingsItem> SharedMailboxes, WebhookAccountChoice? Webhooks = null)
 {
     public string DisplayName => Account.DisplayName;
     public string EmailAddress => Account.EmailAddress;

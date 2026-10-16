@@ -14,9 +14,11 @@ internal sealed class BetterTunnelsClient : IDisposable
     private readonly HttpClient _api = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(20) };
     private readonly HttpClient _local = new(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false, UseCookies = false }) { Timeout = Timeout.InfiniteTimeSpan };
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private readonly Func<TunnelFrame, HttpRequestMessage>? _createRequest;
 
-    internal BetterTunnelsClient(Uri? server = null)
+    internal BetterTunnelsClient(Uri? server = null, Func<TunnelFrame, HttpRequestMessage>? createRequest = null)
     {
+        _createRequest = createRequest;
         _server = server ?? new("https://connect.tunnels.betterportal.dev");
         _api.DefaultRequestHeaders.UserAgent.ParseAdd("BetterMail/1.0 BetterTunnels/1.0.21");
     }
@@ -217,7 +219,7 @@ internal sealed class BetterTunnelsClient : IDisposable
         {
             try
             {
-                using var request = CreateLocalRequest(frame, endpoint);
+                using var request = _createRequest is null ? CreateLocalRequest(frame, endpoint) : _createRequest(frame);
                 using var response = await _local.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, requestLifetime.Token);
                 var headers = response.Headers.Concat(response.Content.Headers).ToDictionary(pair => pair.Key.ToLowerInvariant(), pair => string.Join(", ", pair.Value));
                 await SendAsync(new { type = "response.start", frame.RequestId, status = (int)response.StatusCode, headers }, requestLifetime.Token);

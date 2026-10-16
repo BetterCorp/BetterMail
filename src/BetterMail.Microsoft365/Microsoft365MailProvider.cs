@@ -6,7 +6,7 @@ using BetterMail.Core;
 
 namespace BetterMail.Microsoft365;
 
-public sealed class Microsoft365MailProvider : IMailProvider, ISharedMailboxProvider, IMailRecoveryProvider
+public sealed partial class Microsoft365MailProvider : IMailProvider, ISharedMailboxProvider, IMailRecoveryProvider, IMailWebhookProvider
 {
     private readonly Func<string, CancellationToken, Task<string>> _getAccessToken;
     private readonly HttpClient _httpClient;
