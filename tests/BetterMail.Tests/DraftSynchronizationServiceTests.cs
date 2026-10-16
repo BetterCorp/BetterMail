@@ -63,6 +63,7 @@ public sealed class DraftSynchronizationServiceTests
         var missing = Local("missing", "Keep me", baseline.AddMinutes(1)) with
         {
             ProviderDraftId = "gone",
+            ProviderImmutableId = "stable-gone",
             SyncedLocalUpdatedAt = baseline,
             ProviderUpdatedAt = baseline
         };
@@ -143,7 +144,8 @@ public sealed class DraftSynchronizationServiceTests
         updatedAt,
         etag,
         unsupported,
-        conversationId);
+        conversationId,
+        ProviderImmutableId: "stable-" + id);
 
     private sealed class DraftStore(IEnumerable<LocalDraft> drafts) : IDraftStore
     {

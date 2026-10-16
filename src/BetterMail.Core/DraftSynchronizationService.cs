@@ -63,6 +63,13 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
         var localImmutableIds = localDrafts.Select(static draft => draft.ProviderImmutableId).ToHashSet(StringComparer.Ordinal);
         foreach (var remote in remoteDrafts.Where(draft => draft.ProviderImmutableId is not null && localImmutableIds.Contains(draft.ProviderImmutableId)))
             mappedRemoteIds.Add(remote.ProviderId);
+        var hasUnidentifiedRemoteDrafts = remoteDrafts.Any(draft =>
+            !mappedRemoteIds.Contains(draft.ProviderId) && string.IsNullOrWhiteSpace(draft.ProviderImmutableId));
+        var hasUnclaimedUnsupportedDrafts = remoteDrafts.Any(draft =>
+            !mappedRemoteIds.Contains(draft.ProviderId) && draft.HasUnsupportedAttachments);
+        var deferUnidentifiedImports = hasUnidentifiedRemoteDrafts && localDrafts.Any(draft =>
+            !string.IsNullOrWhiteSpace(draft.ProviderDraftId) && !remoteById.ContainsKey(draft.ProviderDraftId) &&
+            (string.IsNullOrWhiteSpace(draft.ProviderImmutableId) || !remoteByImmutableId[draft.ProviderImmutableId].Any()));
         var results = new List<DraftSyncItem>();
 
         foreach (var summary in localDrafts.Where(static draft => !draft.IsQueued))
@@ -102,6 +109,15 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
                 }
                 if (remote is null)
                 {
+                    if (hasUnidentifiedRemoteDrafts ||
+                        string.IsNullOrWhiteSpace(local.ProviderImmutableId) && hasUnclaimedUnsupportedDrafts)
+                    {
+                        // Translation can fail after a regular ID changes. An unclaimed
+                        // server entry without stable identity may still be this draft.
+                        results.Add(new(local.Id, local.ProviderDraftId, DraftSyncStatus.Failed,
+                            "Server draft identities could not be matched completely. Your copy is kept until the next sync."));
+                        continue;
+                    }
                     // Draft membership and delivery are separate facts. A complete Drafts
                     // snapshot is authoritative for synchronized copies, including legacy
                     // IDs that no longer resolve after an Outlook send or deletion. Never
@@ -188,6 +204,7 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
         foreach (var remote in remoteDrafts.Where(draft => !mappedRemoteIds.Contains(draft.ProviderId)))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (deferUnidentifiedImports && string.IsNullOrWhiteSpace(remote.ProviderImmutableId)) continue;
             var localId = Guid.NewGuid().ToString("N");
             if (remote.HasUnsupportedAttachments)
             {

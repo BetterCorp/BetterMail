@@ -8,4 +8,6 @@ Cloud reconciliation fetches and validates every page of the mailbox's Drafts sn
 
 Unsynced local changes are retained with an explicit reconciliation issue. If a clean draft is removed while its composer is open, subsequent edits are saved under a fresh local identity, without carrying the removed provider mapping. The store acknowledges whether a save was accepted; an ignored save cannot silently close the composer. Queued messages cannot take this recovery path.
 
-An incomplete or failed server listing never authorizes removal. Draft disappearance is not evidence of delivery: queued sends remain under the outbox's separate acceptance and uncertain-send recovery rules.
+An incomplete or failed server listing never authorizes removal. If an unclaimed server draft lacks immutable identity and a mapped local draft cannot be located, both removal and import of unidentified entries are deferred until identity capture recovers; this protects moved drafts and unsupported attachment content. Queued mappings also defer unidentified imports.
+
+Draft disappearance is not evidence of delivery: queued sends remain under the outbox's separate acceptance and uncertain-send recovery rules.

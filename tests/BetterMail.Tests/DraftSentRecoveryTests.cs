@@ -9,6 +9,42 @@ namespace BetterMail.Tests;
 public sealed class DraftSentRecoveryTests
 {
     [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, true)]
+    [InlineData(true, false, false)]
+    public async Task IncompleteMovedIdentityPreservesLocalDraftAndDefersDuplicateImport(bool unsupported, bool queued, bool stable)
+    {
+        await WithDraft(async (store, account, mailbox, draft, _, token) =>
+        {
+            if (queued) await store.SaveLocalDraftAsync(draft with { IsQueued = true }, token);
+            var handler = new SentHandler
+            {
+                DraftPresent = true, RegularId = "moved-id", Mode = stable ? "no-translation" : "sent",
+                UpdatedAt = draft.UpdatedAt, HasUnsupportedAttachments = unsupported
+            };
+            using var http = Client(handler);
+            var service = new DraftSynchronizationService(Provider(http), store);
+            var result = await service.SynchronizeAsync(account, mailbox, token);
+            if (queued) Assert.Empty(result.Items);
+            else Assert.Contains(result.Items, item => item.LocalDraftId == draft.Id && item.Status == DraftSyncStatus.Failed);
+            var kept = Assert.Single(await store.GetLocalDraftsAsync(token));
+            Assert.Equal(draft.Id, kept.Id);
+            Assert.Equal(draft.ProviderDraftId, kept.ProviderDraftId);
+            Assert.Equal(draft.Attachments[0].ContentBytes, kept.Attachments[0].ContentBytes);
+            Assert.Null(await store.GetMailActionAsync("delete:" + draft.Id, token));
+            if (queued || !stable) return;
+
+            handler.Mode = "sent";
+            var recovered = await service.SynchronizeAsync(account, mailbox, token);
+            Assert.Equal(unsupported ? DraftSyncStatus.UnsupportedAttachment : DraftSyncStatus.Unchanged,
+                Assert.Single(recovered.Items).Status);
+            Assert.Equal(draft.Id, Assert.Single(await store.GetLocalDraftsAsync(token)).Id);
+            Assert.Equal("moved-id", (await store.GetLocalDraftAsync(draft.Id, token))!.ProviderDraftId);
+        }, stable: stable);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task OpenComposerPreservesNewEditsAfterServerRemovalButDoesNotDuplicateAQueuedMessage(bool queued)
@@ -428,7 +464,7 @@ public sealed class DraftSentRecoveryTests
 
     private sealed class SentHandler : HttpMessageHandler
     {
-        public string Mode { get; init; } = "sent";
+        public string Mode { get; set; } = "sent";
         public bool DraftPresent { get; set; }
         public string RegularId { get; set; } = "old-id";
         public bool Ambiguous { get; set; }
@@ -440,6 +476,7 @@ public sealed class DraftSentRecoveryTests
         public Func<Task>? BeforeDraftSnapshot { get; init; }
         public bool FailSnapshot { get; init; }
         public bool PaginatedSnapshot { get; init; }
+        public bool HasUnsupportedAttachments { get; init; }
         public Func<Task>? BeforeSend { get; init; }
         public List<(HttpMethod Method, Uri Uri, bool ImmutableIds)> Requests { get; } = [];
 
@@ -448,7 +485,7 @@ public sealed class DraftSentRecoveryTests
             id, isDraft = true, parentFolderId = "drafts", subject = "Subject", lastModifiedDateTime = UpdatedAt,
             toRecipients = new[] { new { emailAddress = new { name = "", address = "recipient@example.test" } } },
             ccRecipients = Array.Empty<object>(), bccRecipients = Array.Empty<object>(),
-            body = new { contentType = "text", content = "Original body" }, hasAttachments = false
+            body = new { contentType = "text", content = "Original body" }, hasAttachments = HasUnsupportedAttachments
         });
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
@@ -470,7 +507,8 @@ public sealed class DraftSentRecoveryTests
                 CreateCount++;
                 return Json(DraftJson(RegularId));
             }
-            if (uri.AbsolutePath.EndsWith("/messages/" + RegularId + "/attachments")) return Json("{\"value\":[]}");
+            if (uri.AbsolutePath.EndsWith("/messages/" + RegularId + "/attachments"))
+                return Json(HasUnsupportedAttachments ? "{\"value\":[{\"id\":\"item\",\"@odata.type\":\"#microsoft.graph.itemAttachment\"}]}" : "{\"value\":[]}");
             if (uri.AbsolutePath.EndsWith("/messages/" + RegularId))
             {
                 if (Mode == "original") return Json("{\"isDraft\":false,\"parentFolderId\":\"sent\"}");
