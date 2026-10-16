@@ -83,8 +83,11 @@ public sealed class McpContentTests
         });
     }
 
-    [Fact]
-    public async Task ResponseDraftUsesProviderThreadAndExactRecipientsThenAcceptsAttachment()
+    [Theory]
+    [InlineData(MailResponseKind.Reply)]
+    [InlineData(MailResponseKind.ReplyAll)]
+    [InlineData(MailResponseKind.Forward)]
+    public async Task ResponseDraftUsesProviderThreadAndExactRecipientsThenAcceptsAttachment(MailResponseKind kind)
     {
         await WithTools(async (store, tools, fake, account, mailbox, setSettings) =>
         {
@@ -92,11 +95,12 @@ public sealed class McpContentTests
             var message = new MailMessage(mailbox.Id, "source", "thread", "<source@example.com>", "inbox", "Source subject",
                 new("Sender", "sender@example.com"), [], DateTimeOffset.UtcNow, "Snippet", "Full source content", false, true, false, MailImportance.Normal, [], null);
             await store.ApplySyncPageAsync("seed", new([message], null, false));
-            var result = JsonSerializer.SerializeToElement(await tools.CreateResponseDraft(mailbox.Id, "source", MailResponseKind.Reply,
+            var result = JsonSerializer.SerializeToElement(await tools.CreateResponseDraft(mailbox.Id, "source", kind,
                 "accounts@example.com", "Please review"));
             var id = result.GetProperty("Id").GetString()!;
             var saved = (await store.GetLocalDraftAsync(id))!;
             Assert.Equal("remote-response", saved.ProviderDraftId);
+            Assert.Equal("immutable-response", saved.ProviderImmutableId);
             Assert.Equal("accounts@example.com", saved.To);
             Assert.Equal("", saved.Cc); Assert.Equal("", saved.Bcc);
             Assert.Contains("Full source content", saved.Body);
@@ -109,6 +113,7 @@ public sealed class McpContentTests
             await tools.CompleteAttachmentUpload(mailbox.Id, upload.Id);
             saved = (await store.GetLocalDraftAsync(id))!;
             Assert.Equal("remote-response", saved.ProviderDraftId);
+            Assert.Equal("immutable-response", saved.ProviderImmutableId);
             Assert.Equal(bytes, Assert.Single(saved.Attachments).ContentBytes);
             Assert.False(saved.IsQueued);
             await tools.SetMailState(mailbox.Id, "source", isRead: false, isFlagged: true, isPinned: true);
@@ -167,7 +172,7 @@ public sealed class McpContentTests
                 "GetPageContentAsync" => new NotePageContent("page", "section", account.AccountId, account.ProviderId, "<p>Notes</p>"),
                 "CreatePageAsync" => page,
                 "CreateResponseDraftAsync" => new CloudDraft("remote-response", account.AccountId, ((Mailbox)args[1]!).Id,
-                    ((DraftMessage)args[4]!) with { Cc = [new("Unexpected", "other@example.com")] }, now, ConversationId: "thread"),
+                    ((DraftMessage)args[4]!) with { Cc = [new("Unexpected", "other@example.com")] }, now, ConversationId: "thread", ProviderImmutableId: "immutable-response"),
                 _ when method.ReturnType == typeof(Task) => null,
                 _ => throw new InvalidOperationException("Unexpected provider call: " + method.Name)
             };

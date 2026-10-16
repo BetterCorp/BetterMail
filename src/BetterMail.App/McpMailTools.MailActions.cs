@@ -56,7 +56,8 @@ internal sealed partial class McpMailTools
         var local = new LocalDraft(Guid.NewGuid().ToString("N"), sender.Account.AccountId, mailboxId,
             Recipients(to), Recipients(cc), Recipients(bcc), content.Subject, content.Body, content.Attachments ?? [], now,
             IsHtml: content.IsHtml, ProviderDraftId: remote.ProviderId, ProviderUpdatedAt: remote.UpdatedAt,
-            ProviderETag: remote.ETag, ConversationIdentity: BetterMail.Core.ConversationThread.ThreadIdentity(source));
+            ProviderETag: remote.ETag, ConversationIdentity: BetterMail.Core.ConversationThread.ThreadIdentity(source),
+            ProviderImmutableId: remote.ProviderImmutableId);
         Authorize(mailboxId, true);
         await store.SaveLocalDraftAsync(local);
         await refreshAndSync();
