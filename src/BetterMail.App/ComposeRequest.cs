@@ -2,6 +2,8 @@ using BetterMail.Core;
 
 namespace BetterMail.App;
 
+internal sealed class DraftRemovedException() : InvalidOperationException("The original draft has left Drafts.");
+
 public enum ComposeIntent
 {
     NewMail,

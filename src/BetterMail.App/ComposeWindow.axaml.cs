@@ -128,7 +128,7 @@ public sealed partial class ComposeWindow : Window
             return;
         }
         await CaptureEditorBodyAsync();
-        await viewModel.FlushDraftAsync();
+        if (!await viewModel.FlushDraftAsync()) return;
         _closeAfterSave = true;
         Close();
     }

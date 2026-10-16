@@ -47,6 +47,7 @@ public sealed class MailContentRenderer
             "align", "alt", "bgcolor", "border", "cellpadding", "cellspacing", "color", "colspan", "dir",
             "class", "data-bettermail-signature", "height", "href", "lang", "rowspan", "src", "style", "title", "valign", "width"
         ]);
+        _sanitizer.AllowedAttributes.Add("data-bettermail-signature");
         _sanitizer.AllowedCssProperties.Clear();
         _sanitizer.AllowedCssProperties.UnionWith(
         [
@@ -131,6 +132,51 @@ public sealed class MailContentRenderer
         lock (_sanitizer)
         {
             return SanitizeHtml(content ?? "", [], allowRemoteContent: true);
+        }
+    }
+
+    // Compare authored content after the browser has normalized HTML. Empty editor
+    // scaffolding and unchanged automatic signatures do not constitute a message.
+    internal string ComposeContentKey(string content, IReadOnlySet<string>? automaticSignatures = null)
+    {
+        lock (_sanitizer)
+        {
+            var document = _htmlParser.ParseDocument(SanitizeComposeHtml(content));
+            string Key(INode node)
+            {
+                if (node is IText text)
+                    return System.Net.WebUtility.HtmlEncode(text.Data.Replace('\u00a0', ' ')
+                        .Replace("\u200b", "").Replace("\ufeff", "").Trim());
+                if (node is not IElement element) return "";
+                if (element.HasAttribute("data-bettermail-signature") &&
+                    automaticSignatures?.Contains(ComposeContentKey(element.OuterHtml)) == true) return "";
+                var children = string.Concat(element.ChildNodes.Select(Key));
+                if (children.Length == 0 && element.LocalName is not ("img" or "hr" or "table")) return "";
+                var attributes = string.Concat(element.Attributes.OrderBy(attribute => attribute.Name, StringComparer.Ordinal)
+                    .Select(attribute => $" {attribute.Name}=\"{System.Net.WebUtility.HtmlEncode(attribute.Value)}\""));
+                return $"<{element.LocalName}{attributes}>{children}</{element.LocalName}>";
+            }
+            return string.Concat(document.Body!.ChildNodes.Select(Key));
+        }
+    }
+
+    internal (string Html, bool Removed) RemoveAutomaticSignature(string content, string signatureKey, bool beforeQuote)
+    {
+        lock (_sanitizer)
+        {
+            var document = _htmlParser.ParseDocument(SanitizeComposeHtml(content));
+            var signature = document.QuerySelectorAll("[data-bettermail-signature]")
+                .FirstOrDefault(element => ComposeContentKey(element.OuterHtml) == signatureKey);
+            if (signature is null) return (content, false);
+            // Remove the two spacing breaks inserted alongside the automatic block.
+            for (var i = 0; i < 2; i++)
+            {
+                var sibling = beforeQuote ? signature.NextSibling : signature.PreviousSibling;
+                if (sibling is not IElement { LocalName: "br" } lineBreak) break;
+                lineBreak.Remove();
+            }
+            signature.Remove();
+            return (document.Body!.InnerHtml, true);
         }
     }
 

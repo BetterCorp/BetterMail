@@ -5116,10 +5116,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     {
         if (_store is null)
         {
-            return;
+            throw new InvalidOperationException("The encrypted mail store is unavailable. The draft has not been saved.");
         }
 
-        await _store.SaveLocalDraftAsync(draft);
+        if (!await _store.TrySaveLocalDraftAsync(draft))
+        {
+            if (await _store.IsDraftPendingDeletionAsync(draft.Id)) throw new DraftRemovedException();
+            throw new InvalidOperationException("This draft is already queued or sent. Your changes have not been saved.");
+        }
         await RefreshDraftsAsync();
     }
 

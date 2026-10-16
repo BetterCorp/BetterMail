@@ -414,7 +414,7 @@ public sealed class EncryptedMailStoreTests
                 ProviderDraftId: "remote", SyncedLocalUpdatedAt: baseline);
             await store.SaveLocalDraftAsync(draft, token);
             if (editDuringCheck) await store.SaveLocalDraftAsync(draft with { Body = "New local edit", UpdatedAt = baseline.AddSeconds(1) }, token);
-            Assert.Equal(!editDuringCheck, await store.TryRemoveConfirmedSentDraftAsync(draft, token));
+            Assert.Equal(!editDuringCheck, await store.TryRemoveSynchronizedDraftAsync(draft, token));
             if (editDuringCheck)
                 Assert.Equal("New local edit", (await store.GetLocalDraftAsync(draft.Id, token))!.Body);
             else

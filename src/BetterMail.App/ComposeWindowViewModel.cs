@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.Net.Mail;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
+using System.Text.Json;
 using System.Windows.Input;
 using BetterMail.Core;
 
@@ -15,7 +17,13 @@ public sealed class ComposeWindowViewModel : ViewModelBase
     private readonly TimeSpan _autosaveDelay;
     private readonly MailContentRenderer _renderer = new();
     private readonly SemaphoreSlim _draftGate = new(1, 1);
-    private readonly string _draftId;
+    private string _draftId;
+    private readonly bool _isResponse;
+    private readonly ComposeContentState _defaultResponseState;
+    private readonly HashSet<string> _automaticSignatures = new(StringComparer.Ordinal);
+    private readonly ConditionalWeakTable<DraftAttachment, string> _attachmentHashes = new();
+    private string? _lastSavedState;
+    private bool _hasSavedDraft;
     private readonly ComposeIntent _intent;
     private readonly string? _conversationIdentity;
     private CancellationTokenSource? _autosaveCancellation;
@@ -31,7 +39,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
     private bool _requestReadReceipt;
     private bool _requestDeliveryReceipt;
     private bool _manageSignature;
-    private string? _managedSignatureBlock;
+    private string? _managedSignatureKey;
 
     public ComposeWindowViewModel(
         IReadOnlyList<MailAccount> accounts,
@@ -71,6 +79,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         _saveDraft = saveDraft;
         _deleteDraft = deleteDraft;
         _autosaveDelay = autosaveDelay ?? TimeSpan.FromMilliseconds(600);
+        var defaultBody = _body;
         _manageSignature = request.DraftId is null;
         ApplySignatureForSender(_selectedSender);
         foreach (var attachment in request.Attachments ?? [])
@@ -80,7 +89,11 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         SendCommand = new AsyncCommand(SendAsync, () => SelectedSender is not null && !IsSending && !IsUploadingAttachment);
         DeleteCommand = new AsyncCommand(DeleteSavedDraftAsync, () => _deleteDraft is not null && !IsSending && !IsUploadingAttachment);
         RemoveAttachmentCommand = new AsyncCommand<DraftAttachment>(RemoveAttachmentAsync);
-        if (HasContent())
+        _isResponse = request.DraftId is null && request.Intent is not ComposeIntent.NewMail;
+        _defaultResponseState = ContentState(_renderer.ComposeContentKey(defaultBody));
+        _hasSavedDraft = request.DraftId is not null;
+        if (_hasSavedDraft) _lastSavedState = SavedState();
+        else if (HasContent())
         {
             ScheduleAutosave();
         }
@@ -153,16 +166,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
     public string Body
     {
         get => _body;
-        set
-        {
-            if (_managedSignatureBlock is not null &&
-                !value.Contains(_managedSignatureBlock, StringComparison.Ordinal))
-            {
-                _manageSignature = false;
-                _managedSignatureBlock = null;
-            }
-            SetAndSchedule(ref _body, value);
-        }
+        set => SetAndSchedule(ref _body, value);
     }
 
     public string? Error
@@ -293,16 +297,18 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         return Task.CompletedTask;
     }
 
-    public async Task FlushDraftAsync()
+    public async Task<bool> FlushDraftAsync()
     {
         _autosaveCancellation?.Cancel();
         try
         {
             await SaveDraftNowAsync();
+            return true;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             ReportError($"Draft could not be saved: {exception.Message}");
+            return false;
         }
     }
 
@@ -329,7 +335,7 @@ public sealed class ComposeWindowViewModel : ViewModelBase
             }
 
             _autosaveCancellation?.Cancel();
-            await SaveDraftNowAsync();
+            await SaveDraftNowAsync(force: true);
             var outgoing = _renderer.PrepareOutgoingHtml(Body, Attachments.ToArray());
             await _send(SelectedSender, _draftId, new DraftMessage(
                 Subject.Trim(),
@@ -391,34 +397,33 @@ public sealed class ComposeWindowViewModel : ViewModelBase
             return;
         }
 
-        if (_managedSignatureBlock is not null)
+        var beforeQuotedContent = _intent is ComposeIntent.Reply or ComposeIntent.ReplyAll or ComposeIntent.Forward;
+        if (_managedSignatureKey is not null)
         {
-            var existing = _body.IndexOf(_managedSignatureBlock, StringComparison.Ordinal);
-            if (existing < 0)
+            var result = _renderer.RemoveAutomaticSignature(_body, _managedSignatureKey, beforeQuotedContent);
+            if (!result.Removed)
             {
                 _manageSignature = false;
-                _managedSignatureBlock = null;
+                _managedSignatureKey = null;
                 return;
             }
-            _body = _body.Remove(existing, _managedSignatureBlock.Length);
+            _body = result.Html;
         }
 
         var signature = _signatureForSender(sender, _intent);
         if (signature is null || string.IsNullOrWhiteSpace(signature.Html))
         {
-            _managedSignatureBlock = null;
+            _managedSignatureKey = null;
             RaisePropertyChanged(nameof(Body));
             return;
         }
         var block = $"<!--bettermail-signature-start--><div data-bettermail-signature=\"{signature.Id}\">{signature.Html}</div><!--bettermail-signature-end-->";
-        var beforeQuotedContent = _intent is ComposeIntent.Reply or ComposeIntent.ReplyAll or ComposeIntent.Forward;
-        _managedSignatureBlock = string.IsNullOrWhiteSpace(_body)
+        _managedSignatureKey = _renderer.ComposeContentKey(block);
+        _automaticSignatures.Add(_managedSignatureKey);
+        var signatureBlock = string.IsNullOrWhiteSpace(_body)
             ? block
             : beforeQuotedContent ? $"{block}<br><br>" : $"<br><br>{block}";
-        if (_managedSignatureBlock is not null)
-        {
-            _body = beforeQuotedContent ? _managedSignatureBlock + _body : _body + _managedSignatureBlock;
-        }
+        _body = beforeQuotedContent ? signatureBlock + _body : _body + signatureBlock;
         RaisePropertyChanged(nameof(Body));
     }
 
@@ -452,10 +457,9 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         }
     }
 
-    private async Task SaveDraftNowAsync()
+    private async Task SaveDraftNowAsync(bool force = false)
     {
-        var sender = SelectedSender;
-        if (_saveDraft is null || _sent || sender is null)
+        if (_saveDraft is null || _sent || SelectedSender is null)
         {
             return;
         }
@@ -463,21 +467,33 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         await _draftGate.WaitAsync();
         try
         {
-            if (_sent)
+            var sender = SelectedSender;
+            if (_sent || sender is null)
             {
                 return;
             }
-            if (!HasContent())
+            var state = SavedState();
+            // Opening or closing an existing draft must not manufacture a local edit.
+            if (state == _lastSavedState)
             {
-                if (_deleteDraft is not null)
+                DraftStatus = _hasSavedDraft ? "Saved" : "";
+                return;
+            }
+            if (!force && !HasContent())
+            {
+                if (_hasSavedDraft && _deleteDraft is not null)
                 {
                     await _deleteDraft(_draftId);
+                    // Deletion leaves a tombstone. Subsequent typing starts a new draft.
+                    _draftId = Guid.NewGuid().ToString("N");
+                    _hasSavedDraft = false;
+                    _lastSavedState = null;
                 }
                 DraftStatus = "";
                 return;
             }
 
-            await _saveDraft(new LocalDraft(
+            var draft = new LocalDraft(
                 _draftId,
                 sender.Account.AccountId,
                 sender.Mailbox.Id,
@@ -490,7 +506,21 @@ public sealed class ComposeWindowViewModel : ViewModelBase
                 DateTimeOffset.UtcNow,
                 IsHtml: true,
                 ConversationIdentity: _conversationIdentity, Importance: Importance, IsFlagged: IsFlagged,
-                RequestReadReceipt: RequestReadReceipt, RequestDeliveryReceipt: RequestDeliveryReceipt));
+                RequestReadReceipt: RequestReadReceipt, RequestDeliveryReceipt: RequestDeliveryReceipt);
+            try
+            {
+                await _saveDraft(draft);
+            }
+            catch (DraftRemovedException)
+            {
+                // The server removed the synchronized copy while this editor was open.
+                // Preserve subsequent edits without resurrecting its deleted identity.
+                var recovered = draft with { Id = Guid.NewGuid().ToString("N") };
+                await _saveDraft(recovered);
+                _draftId = recovered.Id;
+            }
+            _hasSavedDraft = true;
+            _lastSavedState = state;
             DraftStatus = "Saved";
         }
         finally
@@ -524,13 +554,46 @@ public sealed class ComposeWindowViewModel : ViewModelBase
         }
     }
 
-    private bool HasContent() =>
-        !string.IsNullOrWhiteSpace(To) ||
-        !string.IsNullOrWhiteSpace(Cc) ||
-        !string.IsNullOrWhiteSpace(Bcc) ||
-        !string.IsNullOrWhiteSpace(Subject) ||
-        !string.IsNullOrWhiteSpace(Body) ||
-        Attachments.Count > 0 || Importance != MailImportance.Normal || IsFlagged || RequestReadReceipt || RequestDeliveryReceipt;
+    private sealed record ComposeContentState(string To, string Cc, string Bcc, string Subject, string Body,
+        string Attachments, MailImportance Importance, bool IsFlagged, bool RequestReadReceipt, bool RequestDeliveryReceipt);
+
+    private ComposeContentState ContentState(string body) => new(
+        To, Cc, Bcc, Subject, body,
+        JsonSerializer.Serialize(Attachments.Select(attachment => new
+        {
+            attachment.Name, attachment.ContentType, attachment.IsInline, attachment.ContentId,
+            Hash = _attachmentHashes.GetValue(attachment, item => Convert.ToHexString(SHA256.HashData(item.ContentBytes)))
+        }).ToArray()),
+        Importance, IsFlagged, RequestReadReceipt, RequestDeliveryReceipt);
+
+    private string SavedState() => JsonSerializer.Serialize(new
+    {
+        Account = SelectedSender?.Account.AccountId, Mailbox = SelectedSender?.Mailbox.Id,
+        Content = ContentState(_renderer.SanitizeComposeHtml(Body))
+    });
+
+    private bool HasContent()
+    {
+        var body = _renderer.ComposeContentKey(Body, _automaticSignatures);
+        if (_isResponse)
+        {
+            var current = ContentState(body);
+            // Removing generated defaults does not itself author a response.
+            return current with
+            {
+                To = string.IsNullOrWhiteSpace(To) ? _defaultResponseState.To : To,
+                Cc = string.IsNullOrWhiteSpace(Cc) ? _defaultResponseState.Cc : Cc,
+                Bcc = string.IsNullOrWhiteSpace(Bcc) ? _defaultResponseState.Bcc : Bcc,
+                Subject = string.IsNullOrWhiteSpace(Subject) ? _defaultResponseState.Subject : Subject,
+                Body = body.Length == 0 ? _defaultResponseState.Body : body,
+                Attachments = Attachments.Count == 0 ? _defaultResponseState.Attachments : current.Attachments
+            } != _defaultResponseState;
+        }
+        return !string.IsNullOrWhiteSpace(To) || !string.IsNullOrWhiteSpace(Cc) ||
+            !string.IsNullOrWhiteSpace(Bcc) || !string.IsNullOrWhiteSpace(Subject) ||
+            body.Length > 0 || Attachments.Count > 0 || Importance != MailImportance.Normal ||
+            IsFlagged || RequestReadReceipt || RequestDeliveryReceipt;
+    }
 
     public static IReadOnlyList<BetterMail.Core.MailAddress> ParseRecipients(string value) => MailAddressList.Parse(value);
 }
