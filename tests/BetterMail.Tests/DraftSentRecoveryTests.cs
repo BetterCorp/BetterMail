@@ -1,12 +1,99 @@
 using System.Net;
 using System.Text.Json;
 using BetterMail.Core;
+using BetterMail.App;
 using BetterMail.Microsoft365;
 
 namespace BetterMail.Tests;
 
 public sealed class DraftSentRecoveryTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenComposerPreservesNewEditsAfterServerRemovalButDoesNotDuplicateAQueuedMessage(bool queued)
+    {
+        await WithDraft(async (store, account, mailbox, draft, directory, token) =>
+        {
+            var main = new MainWindowViewModel(store, Path.GetDirectoryName(directory)!, _ => { }, _ => { }, null);
+            main.Accounts.Add(account);
+            main.Mailboxes.Add(mailbox);
+            var vm = new ComposeWindowViewModel([account], [mailbox],
+                new ComposeRequest(draft.To, draft.Subject, draft.Body, DraftId: draft.Id,
+                    Attachments: draft.Attachments, IsHtml: draft.IsHtml), (_, _, _) => Task.CompletedTask,
+                main.SaveLocalDraftAsync, autosaveDelay: TimeSpan.FromHours(1));
+            if (queued)
+                await store.SaveLocalDraftAsync(draft with { IsQueued = true }, token);
+            else
+                Assert.True(await store.TryRemoveSynchronizedDraftAsync(draft, token));
+
+            vm.Body = "<p>Work typed after removal</p>";
+            Assert.Equal(!queued, await vm.FlushDraftAsync());
+            var remaining = Assert.Single(await store.GetLocalDraftsAsync(token));
+            if (queued)
+            {
+                Assert.Equal(draft.Id, remaining.Id);
+                Assert.True(remaining.IsQueued);
+                Assert.Equal(draft.Body, remaining.Body);
+            }
+            else
+            {
+                Assert.NotEqual(draft.Id, remaining.Id);
+                Assert.Equal(remaining.Id, vm.DraftId);
+                Assert.Contains("Work typed after removal", remaining.Body);
+                Assert.Null(remaining.ProviderDraftId);
+                Assert.Null(remaining.ProviderImmutableId);
+                Assert.Equal(draft.Attachments[0].ContentBytes, remaining.Attachments[0].ContentBytes);
+            }
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ClosingAReopenedDraftThenSendingInOutlookClearsItsLocalCopyAfterRestart(bool stable)
+    {
+        await WithDraft(async (store, account, mailbox, draft, path, token) =>
+        {
+            var vm = new ComposeWindowViewModel([account], [mailbox],
+                new ComposeRequest(draft.To, draft.Subject, draft.Body, DraftId: draft.Id,
+                    Attachments: draft.Attachments, IsHtml: draft.IsHtml), (_, _, _) => Task.CompletedTask,
+                value => store.SaveLocalDraftAsync(value, token),
+                autosaveDelay: TimeSpan.Zero);
+            Assert.True(await vm.FlushDraftAsync());
+            Assert.Equal(draft.UpdatedAt, (await store.GetLocalDraftAsync(draft.Id, token))!.UpdatedAt);
+
+            // Also defend the persisted revision against redundant saves by other callers.
+            await store.SaveLocalDraftAsync(draft with { UpdatedAt = draft.UpdatedAt.AddMinutes(1) }, token);
+            Assert.Equal(draft.UpdatedAt, (await store.GetLocalDraftAsync(draft.Id, token))!.UpdatedAt);
+            await using var restarted = new EncryptedMailStore(path, new string('A', 64));
+            await restarted.InitializeAsync(token);
+            var handler = new SentHandler { DraftPresent = false };
+            using var http = Client(handler);
+            var result = await new DraftSynchronizationService(Provider(http), restarted).SynchronizeAsync(account, mailbox, token);
+            Assert.Equal(DraftSyncStatus.RemovedRemote, Assert.Single(result.Items).Status);
+            Assert.Empty(await restarted.GetLocalDraftsAsync(token));
+            Assert.Equal(0, handler.SendCount);
+        }, stable: stable);
+    }
+
+    [Fact]
+    public async Task ServerRemovalPreservesUnsyncedBodyAndAttachments()
+    {
+        await WithDraft(async (store, account, mailbox, draft, _, token) =>
+        {
+            await store.SaveLocalDraftAsync(draft with { Body = "New unsynced answer", UpdatedAt = draft.UpdatedAt.AddMinutes(1) }, token);
+            var handler = new SentHandler();
+            using var http = Client(handler);
+            var result = await new DraftSynchronizationService(Provider(http), store).SynchronizeAsync(account, mailbox, token);
+            Assert.Equal(DraftSyncStatus.MissingRemote, Assert.Single(result.Items).Status);
+            var kept = Assert.Single(await store.GetLocalDraftsAsync(token));
+            Assert.Equal("New unsynced answer", kept.Body);
+            Assert.Equal(draft.Attachments[0].ContentBytes, kept.Attachments[0].ContentBytes);
+            Assert.Empty(await store.GetMailActionsAsync(token));
+        });
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -29,11 +116,11 @@ public sealed class DraftSentRecoveryTests
             await restarted.InitializeAsync(token);
             var result = await new DraftSynchronizationService(provider, restarted).SynchronizeAsync(account, mailbox, token);
 
-            Assert.Equal(DraftSyncStatus.RemovedSent, Assert.Single(result.Items).Status);
+            Assert.Equal(DraftSyncStatus.RemovedRemote, Assert.Single(result.Items).Status);
             Assert.Empty(await restarted.GetLocalDraftsAsync(token));
             Assert.Empty(await restarted.GetMailActionsAsync(token));
             Assert.True((await restarted.GetMailActionAsync("delete:" + draft.Id, token))!.Accepted);
-            Assert.Equal(3, handler.Requests.Count);
+            Assert.Single(handler.Requests);
             Assert.All(handler.Requests, request => Assert.StartsWith(
                 shared ? "/v1.0/users/shared%2Bops%40example.test/" : "/v1.0/me/", request.Uri.AbsolutePath));
             Assert.All(handler.Requests, request => Assert.Equal(HttpMethod.Get, request.Method));
@@ -44,18 +131,18 @@ public sealed class DraftSentRecoveryTests
     [InlineData("missing")]
     [InlineData("still-draft")]
     [InlineData("other-folder")]
-    public async Task UnconfirmedDraftIsKeptWithItsContents(string mode)
+    public async Task ServerRemovalClearsSynchronizedCopyWithoutClaimingSendAcceptance(string mode)
     {
         await WithDraft(async (store, account, mailbox, draft, _, token) =>
         {
-            using var http = Client(new SentHandler { Mode = mode });
+            var handler = new SentHandler { Mode = mode };
+            using var http = Client(handler);
             var result = await new DraftSynchronizationService(Provider(http), store).SynchronizeAsync(account, mailbox, token);
-            Assert.Equal(DraftSyncStatus.MissingRemote, Assert.Single(result.Items).Status);
-            var remaining = Assert.Single(await store.GetLocalDraftsAsync(token));
-            Assert.Equal(draft.Body, remaining.Body);
-            Assert.Equal(draft.ProviderDraftId, remaining.ProviderDraftId);
-            Assert.Equal("attachment"u8.ToArray(), Assert.Single(remaining.Attachments).ContentBytes);
+            Assert.Equal(DraftSyncStatus.RemovedRemote, Assert.Single(result.Items).Status);
+            Assert.Empty(await store.GetLocalDraftsAsync(token));
             Assert.Empty(await store.GetMailActionsAsync(token));
+            Assert.All(handler.Requests, request => Assert.EndsWith("/mailFolders/drafts/messages", request.Uri.AbsolutePath));
+            Assert.Null(await store.GetMailActionAsync("send:" + draft.Id, token));
         });
     }
 
@@ -89,7 +176,7 @@ public sealed class DraftSentRecoveryTests
     [InlineData("duplicate")]
     [InlineData("empty-target")]
     [InlineData("translation-missing")]
-    public async Task UnavailableTranslationDoesNotInventAnIdentityOrConvertAnAlreadyMissingId(string mode)
+    public async Task LegacyDraftRemovalDoesNotDependOnTranslatingAnAlreadyMissingId(string mode)
     {
         await WithDraft(async (store, account, mailbox, draft, _, token) =>
         {
@@ -101,8 +188,8 @@ public sealed class DraftSentRecoveryTests
             handler.DraftPresent = false;
             handler.Requests.Clear();
             var result = await service.SynchronizeAsync(account, mailbox, token);
-            Assert.Equal(DraftSyncStatus.MissingRemote, Assert.Single(result.Items).Status);
-            Assert.Equal(draft.Body, Assert.Single(await store.GetLocalDraftsAsync(token)).Body);
+            Assert.Equal(DraftSyncStatus.RemovedRemote, Assert.Single(result.Items).Status);
+            Assert.Empty(await store.GetLocalDraftsAsync(token));
             Assert.All(handler.Requests, request => Assert.Equal(HttpMethod.Get, request.Method));
         }, stable: false);
     }
@@ -125,26 +212,28 @@ public sealed class DraftSentRecoveryTests
         }, stable: false);
     }
 
-    [Fact]
-    public async Task LookupFailurePreservesDraftAndReportsTheActualFailure()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedDraftSnapshotPreservesLocalCopy(bool failOnLaterPage)
     {
         await WithDraft(async (store, account, mailbox, draft, _, token) =>
         {
-            using var http = Client(new SentHandler { Mode = "forbidden" });
-            var result = await new DraftSynchronizationService(Provider(http), store).SynchronizeAsync(account, mailbox, token);
-            Assert.Equal(DraftSyncStatus.Failed, Assert.Single(result.Items).Status);
+            using var http = Client(new SentHandler { FailSnapshot = true, PaginatedSnapshot = failOnLaterPage });
+            await Assert.ThrowsAsync<HttpRequestException>(() =>
+                new DraftSynchronizationService(Provider(http), store).SynchronizeAsync(account, mailbox, token));
             Assert.Equal(draft.Body, Assert.Single(await store.GetLocalDraftsAsync(token)).Body);
         });
     }
 
     [Fact]
-    public async Task EditDuringSentLookupPreventsRemoval()
+    public async Task EditDuringDraftSnapshotPreventsRemoval()
     {
         await WithDraft(async (store, account, mailbox, draft, _, token) =>
         {
             using var http = Client(new SentHandler
             {
-                BeforeStableLookup = () => store.SaveLocalDraftAsync(
+                BeforeDraftSnapshot = () => store.SaveLocalDraftAsync(
                     draft with { Body = "New unsynced work", UpdatedAt = draft.UpdatedAt.AddMinutes(1) }, token)
             });
             var result = await new DraftSynchronizationService(Provider(http), store).SynchronizeAsync(account, mailbox, token);
@@ -202,14 +291,14 @@ public sealed class DraftSentRecoveryTests
     }
 
     [Fact]
-    public async Task LegacyIdentityCanStillConfirmSentWhenItRemainsResolvable()
+    public async Task LegacyIdentityDoesNotNeedToRemainResolvableToRemoveSynchronizedCopy()
     {
         await WithDraft(async (store, account, mailbox, _, _, token) =>
         {
             var handler = new SentHandler { Mode = "original" };
             using var http = Client(handler);
             var result = await new DraftSynchronizationService(Provider(http), store).SynchronizeAsync(account, mailbox, token);
-            Assert.Equal(DraftSyncStatus.RemovedSent, Assert.Single(result.Items).Status);
+            Assert.Equal(DraftSyncStatus.RemovedRemote, Assert.Single(result.Items).Status);
             Assert.Empty(await store.GetLocalDraftsAsync(token));
             Assert.All(handler.Requests, request => Assert.Equal(HttpMethod.Get, request.Method));
         }, stable: false);
@@ -348,7 +437,9 @@ public sealed class DraftSentRecoveryTests
         public int SendCount { get; private set; }
         public int CreateCount { get; private set; }
         public int TranslationAttempts { get; private set; }
-        public Func<Task>? BeforeStableLookup { get; init; }
+        public Func<Task>? BeforeDraftSnapshot { get; init; }
+        public bool FailSnapshot { get; init; }
+        public bool PaginatedSnapshot { get; init; }
         public Func<Task>? BeforeSend { get; init; }
         public List<(HttpMethod Method, Uri Uri, bool ImmutableIds)> Requests { get; } = [];
 
@@ -366,7 +457,13 @@ public sealed class DraftSentRecoveryTests
             var immutable = request.Headers.TryGetValues("Prefer", out var preferences) && preferences.Contains("IdType=\"ImmutableId\"");
             Requests.Add((request.Method, uri, immutable));
             if (uri.AbsolutePath.EndsWith("/mailFolders/drafts/messages"))
+            {
+                if (BeforeDraftSnapshot is not null) await BeforeDraftSnapshot();
+                if (PaginatedSnapshot && !uri.Query.Contains("page=2"))
+                    return Json("{\"value\":[],\"@odata.nextLink\":\"https://graph.microsoft.com/v1.0/me/mailFolders/drafts/messages?page=2\"}");
+                if (FailSnapshot) return new(HttpStatusCode.Forbidden);
                 return Json(DraftPresent ? "{\"value\":[" + DraftJson(RegularId) + (Ambiguous ? "," + DraftJson("other-id") : "") + "]}" : "{\"value\":[]}");
+            }
             if (uri.AbsolutePath.EndsWith("/messages") && request.Method == HttpMethod.Post)
             {
                 DraftPresent = true;
@@ -422,7 +519,6 @@ public sealed class DraftSentRecoveryTests
             if (uri.AbsolutePath.EndsWith("/messages/stable-id"))
             {
                 Assert.True(immutable);
-                if (BeforeStableLookup is not null) await BeforeStableLookup();
                 return Mode switch
                 {
                     "forbidden" => new(HttpStatusCode.Forbidden),

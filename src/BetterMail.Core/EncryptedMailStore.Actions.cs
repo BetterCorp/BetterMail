@@ -278,7 +278,7 @@ public sealed partial class EncryptedMailStore
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }, cancellationToken);
 
-    public Task<bool> TryRemoveConfirmedSentDraftAsync(LocalDraft expected, CancellationToken cancellationToken = default) =>
+    public Task<bool> TryRemoveSynchronizedDraftAsync(LocalDraft expected, CancellationToken cancellationToken = default) =>
         WithLockAsync(async connection =>
         {
             if (expected.IsQueued || expected.ProviderDraftId is null || expected.SyncedLocalUpdatedAt != expected.UpdatedAt) return false;

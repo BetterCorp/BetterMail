@@ -5,6 +5,143 @@ namespace BetterMail.Tests;
 
 public sealed class ComposeWindowViewModelTests
 {
+    [Fact]
+    public async Task ClearingResponseDefaultsCancelsButExplicitlySendingUntouchedResponseStillQueuesIt()
+    {
+        var account = new MailAccount("microsoft365", "account", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+        var saves = new List<LocalDraft>();
+        var sends = new List<string>();
+        ComposeWindowViewModel Create() => new([account], [new(account.AccountId, account.EmailAddress, "Me")],
+            new ComposeRequest("to@example.com", "Re: Original", "<blockquote>Original</blockquote>", IsHtml: true, Intent: ComposeIntent.Reply),
+            (_, id, _) => { sends.Add(id); return Task.CompletedTask; },
+            draft => { saves.Add(draft); return Task.CompletedTask; }, autosaveDelay: TimeSpan.FromHours(1));
+        var cleared = Create();
+        cleared.To = "";
+        cleared.Subject = "";
+        cleared.Body = "<p><br></p>";
+        Assert.True(await cleared.FlushDraftAsync());
+        Assert.Empty(saves);
+        var send = Create();
+        await ((AsyncCommand)send.SendCommand).ExecuteAsync();
+        Assert.Equal(Assert.Single(saves).Id, Assert.Single(sends));
+    }
+
+    [Theory]
+    [InlineData(ComposeIntent.NewMail)]
+    [InlineData(ComposeIntent.Reply)]
+    [InlineData(ComposeIntent.ReplyAll)]
+    [InlineData(ComposeIntent.Forward)]
+    public async Task ClosingUntouchedComposerDoesNotSaveGeneratedDefaults(ComposeIntent intent)
+    {
+        var account = new MailAccount("microsoft365", "account", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+        var shared = new Mailbox(account.AccountId, "shared@example.com", "Shared", IsShared: true, CanSendAs: true);
+        var request = intent == ComposeIntent.NewMail ? new ComposeRequest() : new ComposeRequest(
+            "to@example.com", "Re: Original", "<div class='bettermail-quoted-message'>Original message</div>",
+            Cc: "copy@example.com", IsHtml: true, Intent: intent);
+        var saves = 0;
+        var deletes = 0;
+        var vm = new ComposeWindowViewModel([account], [new(account.AccountId, account.EmailAddress, "Me"), shared],
+            request, (_, _, _) => Task.CompletedTask,
+            _ => { saves++; return Task.CompletedTask; }, _ => { deletes++; return Task.CompletedTask; },
+            TimeSpan.Zero, signatureForSender: (sender, _) => new(sender.Mailbox.Id, $"<b>Default signature {sender.Mailbox.Address}</b>"));
+
+        vm.SelectedSender = vm.Senders[1];
+        // Browser serialization removes comments and normalizes quotes; empty blocks
+        // may also be inserted when focus enters/leaves the contenteditable element.
+        vm.Body = "<p><br></p>" + new MailContentRenderer().SanitizeComposeHtml(vm.Body) + "<div>&nbsp;</div>";
+        vm.SelectedSender = vm.Senders[0];
+        Assert.Contains(account.EmailAddress, vm.Body);
+        Assert.DoesNotContain(shared.Address, vm.Body);
+        Assert.True(await vm.FlushDraftAsync());
+
+        Assert.Equal(0, saves);
+        Assert.Equal(0, deletes);
+    }
+
+    [Theory]
+    [InlineData(ComposeIntent.NewMail)]
+    [InlineData(ComposeIntent.Reply)]
+    public async Task ClearingAuthoredContentDeletesAutosaveAndFurtherTypingUsesANewIdentity(ComposeIntent intent)
+    {
+        var account = new MailAccount("microsoft365", "account", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+        var saved = new List<LocalDraft>();
+        var deleted = new List<string>();
+        var vm = new ComposeWindowViewModel([account], [new(account.AccountId, account.EmailAddress, "Me")],
+            intent == ComposeIntent.NewMail ? new ComposeRequest() : new ComposeRequest("to@example.com", "Re: Original",
+                "<blockquote>Original</blockquote>", IsHtml: true, Intent: intent), (_, _, _) => Task.CompletedTask,
+            draft => { saved.Add(draft); return Task.CompletedTask; },
+            id => { deleted.Add(id); return Task.CompletedTask; }, TimeSpan.FromHours(1),
+            signatureForSender: (_, _) => new("signature", "<p>Signature</p>"));
+        var defaults = vm.Body;
+        vm.Body = "<p>My answer</p>" + defaults;
+        Assert.True(await vm.FlushDraftAsync());
+        var first = Assert.Single(saved);
+        vm.Body = "<p><br></p>" + defaults;
+        Assert.True(await vm.FlushDraftAsync());
+        Assert.Equal(first.Id, Assert.Single(deleted));
+        vm.Body = "<p>A different answer</p>" + defaults;
+        Assert.True(await vm.FlushDraftAsync());
+        Assert.Equal(2, saved.Count);
+        Assert.NotEqual(first.Id, saved[1].Id);
+    }
+
+    [Theory]
+    [InlineData("recipient")]
+    [InlineData("subject")]
+    [InlineData("signature")]
+    [InlineData("image")]
+    [InlineData("attachment")]
+    public async Task ResponseChangesBeyondGeneratedDefaultsAreSaved(string change)
+    {
+        var account = new MailAccount("microsoft365", "account", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+        LocalDraft? saved = null;
+        var vm = new ComposeWindowViewModel([account], [new(account.AccountId, account.EmailAddress, "Me")],
+            new ComposeRequest("to@example.com", "Re: Original", "<blockquote>Original</blockquote>", IsHtml: true, Intent: ComposeIntent.Reply),
+            (_, _, _) => Task.CompletedTask, draft => { saved = draft; return Task.CompletedTask; },
+            autosaveDelay: TimeSpan.FromHours(1), signatureForSender: (_, _) => new("signature", "<p>Signature</p>"));
+        switch (change)
+        {
+            case "recipient": vm.Cc = "added@example.com"; break;
+            case "subject": vm.Subject = "Changed subject"; break;
+            case "signature": vm.Body = vm.Body.Replace("Signature", "My edited signature"); break;
+            case "image": vm.Body = "<img src='https://example.com/image.png'>" + vm.Body; break;
+            case "attachment": vm.AddAttachment(new("file.txt", "text/plain", [1])); break;
+        }
+        Assert.True(await vm.FlushDraftAsync());
+        Assert.NotNull(saved);
+    }
+
+    [Fact]
+    public async Task ReopeningAndClosingExistingDraftDoesNotAutosaveOrChangeItsRevision()
+    {
+        var account = new MailAccount("microsoft365", "account", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+        var saves = 0;
+        var vm = new ComposeWindowViewModel([account], [new(account.AccountId, account.EmailAddress, "Me")],
+            new ComposeRequest("to@example.com", "Subject", "<p>Saved answer</p>", DraftId: "saved", IsHtml: true),
+            (_, _, _) => Task.CompletedTask, _ => { saves++; return Task.CompletedTask; }, autosaveDelay: TimeSpan.Zero);
+        Assert.True(await vm.FlushDraftAsync());
+        Assert.Equal(0, saves);
+        vm.Body += "<p>More work</p>";
+        Assert.True(await vm.FlushDraftAsync());
+        Assert.True(await vm.FlushDraftAsync());
+        Assert.Equal(1, saves);
+    }
+
+    [Fact]
+    public async Task FailedFlushPreventsClosingAndCanBeRetried()
+    {
+        var account = new MailAccount("microsoft365", "account", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+        var fail = true;
+        var vm = new ComposeWindowViewModel([account], [new(account.AccountId, account.EmailAddress, "Me")],
+            new ComposeRequest(Body: "Work"), (_, _, _) => Task.CompletedTask,
+            _ => fail ? Task.FromException(new IOException("Disk unavailable")) : Task.CompletedTask,
+            autosaveDelay: TimeSpan.FromHours(1));
+        Assert.False(await vm.FlushDraftAsync());
+        Assert.Contains("Disk unavailable", vm.Error);
+        fail = false;
+        Assert.True(await vm.FlushDraftAsync());
+    }
+
     [Theory]
     [InlineData(20971521, 0, true)]
     [InlineData(2, 20971520, true)]

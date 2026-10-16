@@ -11,7 +11,8 @@ public enum DraftSyncStatus
     MissingRemote,
     UnsupportedAttachment,
     Failed,
-    RemovedSent
+    RemovedSent,
+    RemovedRemote
 }
 
 public sealed record DraftSyncItem(
@@ -101,18 +102,21 @@ public sealed class DraftSynchronizationService(IMailProvider provider, IDraftSt
                 }
                 if (remote is null)
                 {
+                    // Draft membership and delivery are separate facts. A complete Drafts
+                    // snapshot is authoritative for synchronized copies, including legacy
+                    // IDs that no longer resolve after an Outlook send or deletion. Never
+                    // interpret this removal as send acceptance in the outbox.
                     if (local.SyncedLocalUpdatedAt == local.UpdatedAt &&
-                        await provider.IsDraftSentAsync(account, mailbox, local.ProviderImmutableId ?? local.ProviderDraftId, cancellationToken).ConfigureAwait(false) &&
-                        await store.TryRemoveConfirmedSentDraftAsync(local, cancellationToken).ConfigureAwait(false))
+                        await store.TryRemoveSynchronizedDraftAsync(local, cancellationToken).ConfigureAwait(false))
                     {
-                        results.Add(new(local.Id, local.ProviderDraftId, DraftSyncStatus.RemovedSent));
+                        results.Add(new(local.Id, local.ProviderDraftId, DraftSyncStatus.RemovedRemote));
                         continue;
                     }
                     results.Add(new(
                         local.Id,
                         local.ProviderDraftId,
                         DraftSyncStatus.MissingRemote,
-                        "Not found in server drafts; sending could not be confirmed. Your local copy is kept. Discard it explicitly if no longer needed."));
+                        "The server draft was sent, deleted or moved while this copy had local changes. Your unsynced work is kept."));
                     continue;
                 }
                 // Identity capture must not imply that either copy's content was synchronized.

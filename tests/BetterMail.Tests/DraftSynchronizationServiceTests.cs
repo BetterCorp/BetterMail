@@ -60,7 +60,7 @@ public sealed class DraftSynchronizationServiceTests
             ProviderUpdatedAt = baseline,
             ProviderETag = "old"
         };
-        var missing = Local("missing", "Keep me", baseline) with
+        var missing = Local("missing", "Keep me", baseline.AddMinutes(1)) with
         {
             ProviderDraftId = "gone",
             SyncedLocalUpdatedAt = baseline,
@@ -103,9 +103,9 @@ public sealed class DraftSynchronizationServiceTests
 
     [Theory]
     [InlineData(true, false, true)]
-    [InlineData(false, false, false)]
+    [InlineData(false, false, true)]
     [InlineData(true, true, false)]
-    public async Task MissingDraftOnlyRemovesUnchangedConfirmedSentCopy(bool sent, bool edited, bool removed)
+    public async Task MissingDraftRemovesSynchronizedCopiesAndPreservesUnsyncedChanges(bool sent, bool edited, bool removed)
     {
         var baseline = DateTimeOffset.UtcNow.AddHours(-1);
         var draft = Local("stale", "Draft", edited ? baseline.AddMinutes(1) : baseline) with
@@ -113,7 +113,7 @@ public sealed class DraftSynchronizationServiceTests
         var store = new DraftStore([draft]);
         var provider = new DraftProvider { DraftWasSent = sent };
         var result = await new DraftSynchronizationService(provider, store).SynchronizeAsync(Account, Mailbox, TestContext.Current.CancellationToken);
-        Assert.Equal(removed ? DraftSyncStatus.RemovedSent : DraftSyncStatus.MissingRemote, Assert.Single(result.Items).Status);
+        Assert.Equal(removed ? DraftSyncStatus.RemovedRemote : DraftSyncStatus.MissingRemote, Assert.Single(result.Items).Status);
         Assert.Equal(removed ? 0 : 1, store.Drafts.Count);
     }
 
@@ -149,7 +149,7 @@ public sealed class DraftSynchronizationServiceTests
     {
         public List<LocalDraft> Drafts { get; } = [.. drafts];
         public int HydrationCount { get; private set; }
-        public Task<bool> TryRemoveConfirmedSentDraftAsync(LocalDraft expected, CancellationToken cancellationToken = default) =>
+        public Task<bool> TryRemoveSynchronizedDraftAsync(LocalDraft expected, CancellationToken cancellationToken = default) =>
             Task.FromResult(Drafts.RemoveAll(draft => draft.Id == expected.Id && draft.UpdatedAt == expected.UpdatedAt && !draft.IsQueued) > 0);
 
         public Task SaveLocalDraftAsync(LocalDraft draft, CancellationToken cancellationToken = default)

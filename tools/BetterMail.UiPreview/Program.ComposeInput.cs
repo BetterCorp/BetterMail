@@ -78,6 +78,41 @@ internal static partial class Program
         }
         finally { window.Close(); main.Close(); }
 
+        await CheckUntouchedCloseAsync(ComposeIntent.NewMail);
+        await CheckUntouchedCloseAsync(ComposeIntent.Reply);
+
+        async Task CheckUntouchedCloseAsync(ComposeIntent intent)
+        {
+            var saves = 0;
+            var deletes = 0;
+            var request = intent == ComposeIntent.NewMail ? new ComposeRequest() : new ComposeRequest(
+                "recipient@example.test", "Re: Original", "<blockquote>Original message</blockquote>", IsHtml: true, Intent: intent);
+            var untouched = new ComposeWindow([account], [new(account.AccountId, account.EmailAddress, "Author")], request,
+                (_, _, _) => throw new InvalidOperationException("This test must never send mail."),
+                _ => { saves++; return Task.CompletedTask; }, _ => { deletes++; return Task.CompletedTask; },
+                (_, _) => new("default", "<p>Default signature</p>"));
+            var untouchedWeb = untouched.FindControl<RichHtmlEditor>("Composer")!.FindControl<NativeWebView>("Editor")!;
+            var loaded = new TaskCompletionSource();
+            var closed = new TaskCompletionSource();
+            untouchedWeb.NavigationCompleted += (_, args) =>
+            {
+                if (args.IsSuccess) loaded.TrySetResult();
+                else loaded.TrySetException(new InvalidOperationException("Untouched composer failed to load."));
+            };
+            untouched.Closed += (_, _) => closed.TrySetResult();
+            try
+            {
+                untouched.Show();
+                await loaded.Task.WaitAsync(TimeSpan.FromSeconds(15));
+                untouched.Close();
+                await closed.Task.WaitAsync(TimeSpan.FromSeconds(15));
+                if (saves != 0 || deletes != 0)
+                    throw new InvalidOperationException($"Closing untouched {intent} persisted generated defaults ({saves} saves, {deletes} deletes).");
+                Console.WriteLine($"Untouched {intent} close passed with the real HTML editor and default signature.");
+            }
+            finally { untouched.Close(); }
+        }
+
         async Task ExpectText(string expected)
         {
             var expectedJson = System.Text.Json.JsonSerializer.Serialize(expected);

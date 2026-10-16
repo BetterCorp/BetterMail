@@ -1176,12 +1176,15 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
         return 3;
     }
 
-    public async Task SaveLocalDraftAsync(LocalDraft draft, CancellationToken cancellationToken = default)
+    public Task SaveLocalDraftAsync(LocalDraft draft, CancellationToken cancellationToken = default) =>
+        TrySaveLocalDraftAsync(draft, cancellationToken);
+
+    public async Task<bool> TrySaveLocalDraftAsync(LocalDraft draft, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(draft.Id);
         ArgumentException.ThrowIfNullOrWhiteSpace(draft.AccountId);
         ArgumentException.ThrowIfNullOrWhiteSpace(draft.MailboxId);
-        await WithLockAsync(async connection =>
+        return await WithLockAsync(async connection =>
         {
             await using (var guard = connection.CreateCommand())
             {
@@ -1193,7 +1196,7 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
                 guard.Parameters.AddWithValue("$id", draft.Id);
                 guard.Parameters.AddWithValue("$mailbox", draft.MailboxId);
                 guard.Parameters.AddWithValue("$provider", (object?)draft.ProviderDraftId ?? DBNull.Value);
-                if (await guard.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is not null) return;
+                if (await guard.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is not null) return false;
             }
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
             await using var command = connection.CreateCommand();
@@ -1216,7 +1219,18 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
                     subject = excluded.subject,
                     body = excluded.body,
                     attachments_json = excluded.attachments_json,
-                    updated_at = excluded.updated_at,
+                    updated_at = CASE
+                        WHEN excluded.synced_local_updated_at IS NOT excluded.updated_at
+                            AND excluded.account_id = local_drafts.account_id AND excluded.mailbox_id = local_drafts.mailbox_id
+                            AND excluded.recipients = local_drafts.recipients AND excluded.cc = local_drafts.cc AND excluded.bcc = local_drafts.bcc
+                            AND excluded.subject = local_drafts.subject AND excluded.body = local_drafts.body
+                            AND excluded.attachments_json = local_drafts.attachments_json AND excluded.is_html = local_drafts.is_html
+                            AND excluded.conversation_identity IS local_drafts.conversation_identity
+                            AND excluded.is_queued = local_drafts.is_queued AND excluded.send_accepted = local_drafts.send_accepted
+                            AND excluded.importance = local_drafts.importance AND excluded.is_flagged = local_drafts.is_flagged
+                            AND excluded.request_read_receipt = local_drafts.request_read_receipt
+                            AND excluded.request_delivery_receipt = local_drafts.request_delivery_receipt
+                        THEN local_drafts.updated_at ELSE excluded.updated_at END,
                     is_html = excluded.is_html,
                     provider_draft_id = CASE
                         WHEN excluded.account_id = local_drafts.account_id AND excluded.mailbox_id = local_drafts.mailbox_id
@@ -1286,6 +1300,7 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
                     draft.AccountId, draft.MailboxId, draft.Id, MailActionKind.Send, draft.Subject,
                     draft.UpdatedAt, Accepted: draft.SendAccepted), cancellationToken).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return saved > 0;
         }, cancellationToken).ConfigureAwait(false);
     }
 
