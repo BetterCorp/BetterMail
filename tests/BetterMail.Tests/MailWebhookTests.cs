@@ -202,6 +202,85 @@ public sealed class MailWebhookTests
         });
     }
 
+    [Fact]
+    public async Task SubscriptionCreationRetryPreservesThePersistedValidationSecret()
+    {
+        await WithStore(async store =>
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            var ct = timeout.Token;
+            await using var relay = await RelayServer.StartAsync(ct);
+            var account = new MailAccount("microsoft365", "lost-create", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+            await store.SaveAccountAsync(account, ct);
+            await store.SaveMailWebhookConfigurationAsync(account.ProviderId, account.AccountId, new(Enabled: true), ct);
+            await store.SaveBetterTunnelsConfigurationAsync(new(true, "test-token", "senior@example.com"), ct);
+            var provider = new WebhookProvider { LoseFirstCreation = true };
+            await using var tunnels = new TunnelsSettingsViewModel(store, () => provider, server: relay.Address);
+            await tunnels.InitializeAsync();
+            await provider.Created.Task.WaitAsync(ct);
+            tunnels.NotifySyncIdle();
+            await UntilAsync(async () =>
+                (await store.GetMailWebhookConfigurationAsync(account.ProviderId, account.AccountId, ct)).SubscriptionId == "sub", ct);
+            Assert.Equal(2, provider.CreationStates.Count);
+            Assert.Equal(provider.CreationStates[0], provider.CreationStates[1]);
+        });
+    }
+
+    [Fact]
+    public async Task FailedSubscriptionMaintenanceDoesNotBlockAcceptedRefreshWork()
+    {
+        await WithStore(async store =>
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            var ct = timeout.Token;
+            var account = new MailAccount("microsoft365", "maintenance-failure", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+            await store.SaveAccountAsync(account, ct);
+            await store.SaveMailWebhookConfigurationAsync(account.ProviderId, account.AccountId,
+                new(Enabled: true, SubscriptionId: "orphan"), ct);
+            await store.MarkMailWebhookPendingAsync(account.ProviderId, account.AccountId, ct);
+            var synced = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var provider = new WebhookProvider { FailDeletion = true };
+            await using var tunnels = new TunnelsSettingsViewModel(store, () => provider, _ =>
+            { synced.TrySetResult(); return Task.FromResult(true); });
+            await tunnels.InitializeAsync();
+            await synced.Task.WaitAsync(ct);
+            await UntilAsync(async () => await store.GetPendingMailWebhookVersionAsync(account.ProviderId, account.AccountId, ct) == 0, ct);
+        });
+    }
+
+    [Fact]
+    public async Task ConcurrentAndRepeatedDisposalWaitsForOneCleanup()
+    {
+        await WithStore(async store =>
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            var ct = timeout.Token;
+            var account = new MailAccount("microsoft365", "disposal", "tenant", "me@example.com", "Me", ProviderCapabilities.Mail);
+            await store.SaveAccountAsync(account, ct);
+            await store.SaveMailWebhookConfigurationAsync(account.ProviderId, account.AccountId, new(Enabled: true), ct);
+            await store.MarkMailWebhookPendingAsync(account.ProviderId, account.AccountId, ct);
+            var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            await using var tunnels = new TunnelsSettingsViewModel(store, () => new WebhookProvider(), _ =>
+            { started.TrySetResult(); return release.Task; });
+            await tunnels.InitializeAsync();
+            await started.Task.WaitAsync(ct);
+            try
+            {
+                var first = tunnels.DisposeAsync().AsTask();
+                var second = tunnels.DisposeAsync().AsTask();
+                Assert.False(second.IsCompleted);
+                release.TrySetResult(true);
+                await Task.WhenAll(first, second).WaitAsync(ct);
+                await tunnels.DisposeAsync();
+            }
+            finally { release.TrySetResult(true); }
+        });
+    }
+
     [Theory]
     [InlineData("/hooks/private?validationToken=a&validationToken=b")]
     [InlineData("/hooks/private?validationToken=a&other=b")]
@@ -233,16 +312,27 @@ public sealed class MailWebhookTests
 
     private sealed class WebhookProvider : IMailWebhookProvider
     {
+        public bool FailDeletion { get; init; }
+        public bool LoseFirstCreation { get; init; }
+        public List<string> CreationStates { get; } = [];
         public TaskCompletionSource Created { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Deleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Renewed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool SupportsMailWebhooks(MailAccount account) => account.ProviderId == "microsoft365";
         public Task<MailWebhookSubscription> CreateMailWebhookAsync(MailAccount account, string notificationUrl, string clientState, CancellationToken cancellationToken = default)
-        { Created.TrySetResult(); return Task.FromResult(new MailWebhookSubscription("sub", DateTimeOffset.UtcNow.AddDays(6))); }
+        {
+            CreationStates.Add(clientState);
+            Created.TrySetResult();
+            if (LoseFirstCreation && CreationStates.Count == 1) throw new HttpRequestException("Simulated lost creation response.");
+            return Task.FromResult(new MailWebhookSubscription("sub", DateTimeOffset.UtcNow.AddDays(6)));
+        }
         public Task<MailWebhookSubscription> RenewMailWebhookAsync(MailAccount account, string subscriptionId, CancellationToken cancellationToken = default)
         { Renewed.TrySetResult(); return Task.FromResult(new MailWebhookSubscription(subscriptionId, DateTimeOffset.UtcNow.AddDays(6))); }
         public Task DeleteMailWebhookAsync(MailAccount account, string subscriptionId, CancellationToken cancellationToken = default)
-        { Deleted.TrySetResult(); return Task.CompletedTask; }
+        {
+            if (FailDeletion) throw new HttpRequestException("Simulated maintenance failure.");
+            Deleted.TrySetResult(); return Task.CompletedTask;
+        }
     }
 
     private sealed class RelayServer(WebApplication app) : IAsyncDisposable

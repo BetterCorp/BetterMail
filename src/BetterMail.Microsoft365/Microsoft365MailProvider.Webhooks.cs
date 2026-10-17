@@ -13,6 +13,20 @@ public sealed partial class Microsoft365MailProvider
         if (!Uri.TryCreate(notificationUrl, UriKind.Absolute, out var uri) || uri.Scheme != "https" ||
             uri.UserInfo.Length != 0 || uri.Fragment.Length != 0)
             throw new ArgumentException("Mail webhooks require an HTTPS notification URL.", nameof(notificationUrl));
+        try
+        {
+            return await CreateMailWebhookCoreAsync(account, notificationUrl, clientState, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpRequestException error) when (error.StatusCode == HttpStatusCode.Conflict)
+        {
+            if (!await RemoveMatchingMailWebhookAsync(account, notificationUrl, cancellationToken).ConfigureAwait(false)) throw;
+            return await CreateMailWebhookCoreAsync(account, notificationUrl, clientState, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<MailWebhookSubscription> CreateMailWebhookCoreAsync(MailAccount account, string notificationUrl,
+        string clientState, CancellationToken cancellationToken)
+    {
         // Basic notifications keep message content on the normal authenticated Graph/delta path.
         using var document = await SendJsonForResponseAsync(account, HttpMethod.Post, "subscriptions", new
         {
@@ -26,6 +40,34 @@ public sealed partial class Microsoft365MailProvider
         }, cancellationToken).ConfigureAwait(false);
         return new(document.RootElement.GetProperty("id").GetString()!,
             document.RootElement.GetProperty("expirationDateTime").GetDateTimeOffset());
+    }
+
+    private async Task<bool> RemoveMatchingMailWebhookAsync(MailAccount account, string notificationUrl, CancellationToken ct)
+    {
+        var collection = new Uri(_httpClient.BaseAddress!, "subscriptions");
+        string? endpoint = "subscriptions";
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        for (var page = 0; endpoint is not null && page < 100 && visited.Add(endpoint); page++)
+        {
+            using var document = await GetJsonAsync(account, endpoint, ct).ConfigureAwait(false);
+            foreach (var subscription in document.RootElement.GetProperty("value").EnumerateArray())
+            {
+                if (subscription.GetProperty("notificationUrl").GetString() != notificationUrl ||
+                    subscription.GetProperty("resource").GetString() != "me/messages" ||
+                    !new HashSet<string>((subscription.GetProperty("changeType").GetString() ?? "").Split(','), StringComparer.OrdinalIgnoreCase)
+                        .SetEquals(["created", "updated", "deleted"])) continue;
+                // Graph omits clientState on reads. Recreate only this installation's exact URL/resource
+                // instead of adopting a subscription whose validation secret cannot be verified.
+                await DeleteMailWebhookAsync(account, subscription.GetProperty("id").GetString()!, ct).ConfigureAwait(false);
+                return true;
+            }
+            endpoint = document.RootElement.TryGetProperty("@odata.nextLink", out var next) ? next.GetString() : null;
+            if (endpoint is not null && (!Uri.TryCreate(endpoint, UriKind.Absolute, out var nextUri) ||
+                nextUri.Scheme != collection.Scheme || nextUri.Authority != collection.Authority ||
+                nextUri.AbsolutePath != collection.AbsolutePath || nextUri.UserInfo.Length != 0 || nextUri.Fragment.Length != 0))
+                throw new InvalidDataException("Graph returned an invalid subscription page link.");
+        }
+        return false;
     }
 
     public async Task<MailWebhookSubscription> RenewMailWebhookAsync(MailAccount account, string subscriptionId,

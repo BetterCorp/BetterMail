@@ -59,7 +59,9 @@ public sealed class TunnelsSettingsViewModel : ViewModelBase, IAsyncDisposable
     private string _publicBaseUrl = "";
     private string _status = "Public connection stopped. A BetterTunnels Senior account is required.";
     private bool _initialized;
-    private bool _disposed;
+    private volatile bool _disposed;
+    private readonly object _disposeLock = new();
+    private Task? _disposeTask;
 
     public TunnelsSettingsViewModel(EncryptedMailStore? store, Func<IMailWebhookProvider?>? provider = null,
         Func<MailAccount, Task<bool>>? syncAccount = null, Uri? server = null)
@@ -331,6 +333,11 @@ public sealed class TunnelsSettingsViewModel : ViewModelBase, IAsyncDisposable
                     try
                     {
                         await MaintainAccountAsync(choice, ct);
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception) { choice.Status = "Webhook subscription needs attention; polling remains active. Check sign-in and public connectivity."; }
+                    try
+                    {
                         if (choice.Enabled)
                         {
                             var version = await _store!.GetPendingMailWebhookVersionAsync(choice.Account.ProviderId, choice.Account.AccountId, ct);
@@ -377,7 +384,7 @@ public sealed class TunnelsSettingsViewModel : ViewModelBase, IAsyncDisposable
             if (saved.SubscriptionId.Length > 0 && (saved.NotificationUrl != url || removed))
             {
                 await provider.DeleteMailWebhookAsync(account, saved.SubscriptionId, token);
-                saved = saved with { SubscriptionId = "", ExpiresAt = null };
+                saved = saved with { SubscriptionId = "", ExpiresAt = null, ClientState = "" };
                 await _store.SaveMailWebhookConfigurationAsync(account.ProviderId, account.AccountId, saved, token);
             }
             if (saved.SubscriptionId.Length > 0 && (forceRenew || saved.ExpiresAt is null || saved.ExpiresAt < DateTimeOffset.UtcNow.AddDays(1)))
@@ -395,7 +402,14 @@ public sealed class TunnelsSettingsViewModel : ViewModelBase, IAsyncDisposable
             }
             if (saved.SubscriptionId.Length == 0)
             {
-                saved = saved with { ClientState = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)), NotificationUrl = url };
+                // Reuse a persisted creation intent after a lost response or restart. Rotating its
+                // secret here would invalidate notifications from an already-created subscription.
+                saved = saved with
+                {
+                    ClientState = saved.NotificationUrl == url && saved.ClientState.Length == 64
+                        ? saved.ClientState : Convert.ToHexString(RandomNumberGenerator.GetBytes(32)),
+                    NotificationUrl = url
+                };
                 // Save the secret before Graph validates and delivers the initial notifications.
                 await _store.SaveMailWebhookConfigurationAsync(account.ProviderId, account.AccountId, saved, token);
                 var created = await provider.CreateMailWebhookAsync(account, url, saved.ClientState, token);
@@ -421,7 +435,12 @@ public sealed class TunnelsSettingsViewModel : ViewModelBase, IAsyncDisposable
         try { await MaintainAccountAsync(choice, _lifetime.Token); } catch (Exception) { /* Local disable is authoritative; a remote subscription will expire. */ }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
+    {
+        lock (_disposeLock) return new(_disposeTask ??= DisposeCoreAsync());
+    }
+
+    private async Task DisposeCoreAsync()
     {
         _disposed = true;
         _loginCancellation?.Cancel();
@@ -430,6 +449,6 @@ public sealed class TunnelsSettingsViewModel : ViewModelBase, IAsyncDisposable
         try { await DisconnectAsync(); }
         finally { _gate.Release(); }
         if (_worker is not null) await _worker;
-        if (_webhooks is not null) await _webhooks.DisposeAsync();
+        if (Interlocked.Exchange(ref _webhooks, null) is { } webhooks) await webhooks.DisposeAsync();
     }
 }
