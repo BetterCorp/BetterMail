@@ -189,6 +189,7 @@ public sealed partial class App : Application
         mainWindow.Show();
         startupWindow.Close();
         await viewModel.InitializeAsync();
+        await viewModel.Tunnels.InitializeAsync();
         await viewModel.Mcp.InitializeAsync();
         await mainWindow.RestorePreviewWindowsAsync();
         _ready = true;
@@ -311,7 +312,11 @@ public sealed partial class App : Application
 
     private async Task DisposeStoreAsync()
     {
-        if (_viewModel is { } viewModel) await viewModel.Mcp.DisposeAsync();
+        if (_viewModel is { } viewModel)
+        {
+            await viewModel.Tunnels.DisposeAsync();
+            await viewModel.Mcp.DisposeAsync();
+        }
         var store = Interlocked.Exchange(ref _store, null);
         if (store is not null)
         {

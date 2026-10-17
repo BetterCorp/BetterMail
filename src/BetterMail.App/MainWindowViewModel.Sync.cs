@@ -53,18 +53,22 @@ public sealed partial class MainWindowViewModel
             ownFailures.IsEmpty ? null : string.Join(Environment.NewLine, ownFailures)));
     }
 
-    private async Task SyncAsync()
+    private async Task SyncAsync() => await SyncAccountsAsync();
+
+    private Task<bool> SyncWebhookAccountAsync(MailAccount account) => SyncAccountsAsync(account);
+
+    private async Task<bool> SyncAccountsAsync(MailAccount? webhookAccount = null)
     {
         var provider = _provider;
         var store = _store;
         if (IsBusy || provider is null || store is null || Accounts.Count == 0)
         {
-            return;
+            return false;
         }
         Interlocked.Exchange(ref _syncPending, 1);
         if (Interlocked.CompareExchange(ref _syncRunning, 1, 0) != 0)
         {
-            return;
+            return false;
         }
 
         StopContactPhotoSync();
@@ -96,7 +100,10 @@ public sealed partial class MainWindowViewModel
                 if (BusyActions.Any(action => action.Kind != MailActionKind.Send && action.Error is not null))
                     actions.Detail = "Needs attention — review Busy";
                 var engine = new SyncEngine(provider, store);
-                var mailboxes = Mailboxes.ToArray();
+                var scopedAccount = webhookAccount;
+                webhookAccount = null; // Any additional full-sync request must retain its full scope.
+                var mailboxes = Mailboxes.Where(mailbox => scopedAccount is null ||
+                    (mailbox.AccountId == scopedAccount.AccountId && !mailbox.IsShared)).ToArray();
                 await RunSyncStepAsync(mail, async () =>
                 {
                     var work = (from account in Accounts.ToArray()
@@ -174,7 +181,9 @@ public sealed partial class MainWindowViewModel
                 _ = SyncAsync();
             }
             else StartContactPhotoSync();
+            Tunnels.NotifySyncIdle();
         }
+        return mailFailures.IsEmpty;
     }
 
     private CancellationTokenSource? _contactPhotoSyncCancellation;

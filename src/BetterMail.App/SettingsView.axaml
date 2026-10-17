@@ -117,21 +117,52 @@
           </Border>
           <Border Classes="settingsCard" IsEnabled="{Binding IsAvailable}">
             <StackPanel Spacing="10">
-              <TextBlock Text="BetterTunnels public MCP link" FontSize="18" FontWeight="SemiBold" />
-              <TextBlock Text="Requires a BetterTunnels Senior account. Sign in, then create a link to explicitly enable remote access. BetterMail must stay open. Enabled links reconnect automatically on startup." TextWrapping="Wrap" />
-              <WrapPanel>
-                <Button Content="Sign in to BetterTunnels" Command="{Binding SignInTunnelCommand}" Margin="0,0,8,8" />
-                <Button Content="Create public link" Command="{Binding StartTunnelCommand}" Margin="0,0,8,8" />
-                <Button Content="Stop public link" Command="{Binding StopTunnelCommand}" Margin="0,0,8,8" />
-                <Button Content="Sign out" Command="{Binding SignOutTunnelCommand}" Margin="0,0,8,8" />
-              </WrapPanel>
-              <TextBlock Text="{Binding TunnelStatus}" TextWrapping="Wrap" AutomationProperties.Name="BetterTunnels status" />
+              <TextBlock Text="Public MCP access" FontSize="18" FontWeight="SemiBold" />
+              <ToggleSwitch Content="Enable public MCP access" IsChecked="{Binding PublicEnabled}" />
+              <TextBlock Text="Apply MCP settings to change public access. A connected Senior tunnel is required. Account webhooks have their own controls." TextWrapping="Wrap" />
+              <TextBlock Text="{Binding PublicStatus}" TextWrapping="Wrap" />
               <TextBox Text="{Binding PublicEndpointUrl}" IsReadOnly="True" AutomationProperties.Name="Public MCP endpoint URL" />
-              <Button Content="Copy public link" Click="CopyMcpValueClicked" CommandParameter="public" />
-              <TextBlock Text="Use this HTTPS URL in your MCP client with the same Authorization header shown above. Your mailbox and editing permissions still apply. Stopping the link keeps local MCP available." TextWrapping="Wrap" />
+              <WrapPanel>
+                <Button Content="Copy public MCP link" Click="CopyMcpValueClicked" CommandParameter="public" Margin="0,0,8,8" />
+                <Button Content="Manage Tunnels/Web" Click="OpenTunnelsSettingsClicked" Margin="0,0,8,8" />
+              </WrapPanel>
+              <TextBlock Text="Use this HTTPS URL with your MCP Authorization header. Disabling public MCP leaves account webhooks and local MCP available." TextWrapping="Wrap" />
             </StackPanel>
           </Border>
           <TextBlock Text="{Binding Status}" TextWrapping="Wrap" AutomationProperties.Name="MCP status" />
+        </StackPanel>
+      </ScrollViewer>
+      <ScrollViewer IsVisible="{Binding ShowTunnelsSettings}">
+        <StackPanel MaxWidth="920" HorizontalAlignment="Stretch" Spacing="18" DataContext="{Binding Tunnels}">
+          <TextBlock Text="Tunnels/Web" FontSize="22" FontWeight="SemiBold" />
+          <TextBlock Text="Manage the public connection used by MCP and mail webhooks. Each feature has its own enable control. BetterMail must remain open and online." TextWrapping="Wrap" />
+          <Border Classes="settingsCard" IsEnabled="{Binding IsAvailable}">
+            <StackPanel Spacing="10">
+              <TextBlock Text="BetterTunnels" FontSize="18" FontWeight="SemiBold" />
+              <TextBlock Text="Requires a BetterTunnels Senior account. Sign in, then connect. Saved connections resume automatically on startup." TextWrapping="Wrap" />
+              <TextBlock Text="{Binding AccountEmail}" TextWrapping="Wrap" />
+              <WrapPanel>
+                <Button Content="Sign in to BetterTunnels" Command="{Binding SignInCommand}" Margin="0,0,8,8" />
+                <Button Content="Connect" Command="{Binding ConnectCommand}" Margin="0,0,8,8" />
+                <Button Content="Disconnect" Command="{Binding DisconnectCommand}" Margin="0,0,8,8" />
+                <Button Content="Sign out" Command="{Binding SignOutCommand}" Margin="0,0,8,8" />
+              </WrapPanel>
+              <TextBlock Text="{Binding Status}" TextWrapping="Wrap" AutomationProperties.Name="BetterTunnels status" />
+              <TextBox Text="{Binding PublicBaseUrl}" IsReadOnly="True" AutomationProperties.Name="Public web address" />
+              <TextBlock Text="{Binding Usage}" TextWrapping="Wrap" />
+              <TextBlock Text="Disconnect stops public MCP and webhook delivery while preserving their settings. Local MCP and periodic mail sync remain available." TextWrapping="Wrap" Opacity="0.7" />
+            </StackPanel>
+          </Border>
+          <Border Classes="settingsCard">
+            <StackPanel Spacing="10">
+              <TextBlock Text="Choose what uses this connection" FontSize="18" FontWeight="SemiBold" />
+              <TextBlock Text="Public MCP access is controlled in MCP. Mail webhooks are enabled per account in Accounts. You can use either, both, or neither." TextWrapping="Wrap" />
+              <WrapPanel>
+                <Button Content="Manage MCP" Click="OpenMcpSettingsClicked" Margin="0,0,8,8" />
+                <Button Content="Manage account webhooks" Click="OpenAccountSettingsClicked" Margin="0,0,8,8" />
+              </WrapPanel>
+            </StackPanel>
+          </Border>
         </StackPanel>
       </ScrollViewer>
       <ScrollViewer IsVisible="{Binding ShowAppearanceSettings}">
@@ -585,6 +616,13 @@
                                 AutomationProperties.Name="{Binding EmailAddress, StringFormat='Remove {0}'}" />
                       </WrapPanel>
                     </Grid>
+                    <StackPanel Spacing="7" DataContext="{Binding Webhooks}">
+                      <ToggleSwitch Content="Enable mail webhooks" IsChecked="{Binding Enabled}" IsEnabled="{Binding CanEnable}"
+                                    AutomationProperties.Name="Enable mail webhooks" />
+                      <TextBlock Text="{Binding Scope}" TextWrapping="Wrap" Opacity="0.7" />
+                      <TextBlock Text="{Binding Status}" TextWrapping="Wrap" AutomationProperties.Name="Mail webhook status" />
+                      <Button Content="Manage Tunnels/Web" Click="OpenTunnelsSettingsClicked" HorizontalAlignment="Left" />
+                    </StackPanel>
                     <StackPanel IsVisible="{Binding HasSharedMailboxes}" Spacing="7">
                       <TextBlock Text="Shared mailboxes" FontSize="12" FontWeight="SemiBold" Opacity="0.68" />
                       <ItemsControl ItemsSource="{Binding SharedMailboxes}">

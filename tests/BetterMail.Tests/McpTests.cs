@@ -226,8 +226,8 @@ public sealed class McpTests
             settings.Enabled = true;
             Assert.Contains("Disabled", settings.Status);
             Assert.False((await store.GetMcpConfigurationAsync()).Configuration.Enabled);
-            await settings.StartTunnelCommand.ExecuteAsync();
-            Assert.Contains("Enable MCP", settings.TunnelStatus);
+            await settings.Tunnels.ConnectCommand.ExecuteAsync();
+            Assert.Contains("Sign in", settings.Tunnels.Status);
             Assert.False((await store.GetBetterTunnelsConfigurationAsync()).Enabled);
             await settings.ApplyCommand.ExecuteAsync();
             Assert.Contains("MCP stopped", settings.Status);
@@ -238,13 +238,12 @@ public sealed class McpTests
             using var http = new HttpClient();
             using var unauthorized = await http.GetAsync(settings.EndpointUrl, TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
-            await store.SaveBetterTunnelsConfigurationAsync(new(true, "test-device-token", "test@example.com"));
-            await settings.StopTunnelCommand.ExecuteAsync();
-            Assert.Equal(new BetterTunnelsConfiguration(false, "test-device-token", "test@example.com"), await store.GetBetterTunnelsConfigurationAsync());
+            await settings.Tunnels.DisconnectCommand.ExecuteAsync();
+            Assert.False((await store.GetBetterTunnelsConfigurationAsync()).Enabled);
             using var stillLocal = await http.GetAsync(settings.EndpointUrl, TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.Unauthorized, stillLocal.StatusCode);
-            await settings.SignOutTunnelCommand.ExecuteAsync();
-            Assert.Equal(new BetterTunnelsConfiguration(), await store.GetBetterTunnelsConfigurationAsync());
+            await settings.Tunnels.SignOutCommand.ExecuteAsync();
+            Assert.Empty((await store.GetBetterTunnelsConfigurationAsync()).Token);
 
             await settings.RotateKeyCommand.ExecuteAsync();
             var rotated = await store.GetMcpConfigurationAsync();

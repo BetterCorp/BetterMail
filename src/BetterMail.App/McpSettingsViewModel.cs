@@ -39,8 +39,14 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
     private string _status = "Disabled";
     private bool _disposed;
     private bool _initialized;
+    private bool _publicEnabled;
+    private readonly bool _ownsTunnels;
+    public TunnelsSettingsViewModel Tunnels { get; }
+    public string PublicEndpointUrl => Tunnels.PublicMcpUrl;
+    public string PublicStatus => Tunnels.Status;
+    public bool PublicEnabled { get => _publicEnabled; set => SetProperty(ref _publicEnabled, value); }
 
-    public McpSettingsViewModel(EncryptedMailStore? store, Func<Task> refreshAndSync, Func<ComposeSender, string, DraftMessage, Task> queueSend, EvidenceService? evidence = null, Func<IFilesProvider?>? filesProvider = null, Func<IMailProvider?>? mailProvider = null)
+    public McpSettingsViewModel(EncryptedMailStore? store, Func<Task> refreshAndSync, Func<ComposeSender, string, DraftMessage, Task> queueSend, EvidenceService? evidence = null, Func<IFilesProvider?>? filesProvider = null, Func<IMailProvider?>? mailProvider = null, TunnelsSettingsViewModel? tunnels = null)
     {
         _store = store;
         _refreshAndSync = refreshAndSync;
@@ -50,10 +56,9 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
         _mailProvider = mailProvider;
         ApplyCommand = new(ApplyAsync, () => IsAvailable);
         RotateKeyCommand = new(RotateKeyAsync, () => IsAvailable);
-        SignInTunnelCommand = new(SignInTunnelAsync, () => IsAvailable);
-        StartTunnelCommand = new(StartTunnelAsync, () => IsAvailable);
-        StopTunnelCommand = new(() => StopTunnelAsync(false), () => IsAvailable);
-        SignOutTunnelCommand = new(() => StopTunnelAsync(true), () => IsAvailable);
+        _ownsTunnels = tunnels is null;
+        Tunnels = tunnels ?? new(store);
+        Tunnels.PropertyChanged += TunnelsChanged;
     }
 
     public bool IsAvailable => _store is not null && _initialized && !_disposed;
@@ -80,6 +85,14 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
             _endpointPath = saved.EndpointPath;
             RaisePropertyChanged(nameof(AccessKey));
             RaisePropertyChanged(nameof(EndpointUrl));
+            if (_ownsTunnels) await Tunnels.InitializeAsync();
+            // Existing explicitly enabled public links retain public MCP access on upgrade.
+            PublicEnabled = saved.Configuration.PublicEnabled ?? (await _store.GetBetterTunnelsConfigurationAsync()).Enabled;
+            if (saved.Configuration.PublicEnabled is null)
+            {
+                saved = (saved.Configuration with { PublicEnabled = PublicEnabled }, saved.AccessKey, saved.EndpointPath);
+                await _store.SaveMcpConfigurationAsync(saved.Configuration);
+            }
             Enabled = saved.Configuration.Enabled;
             Port = saved.Configuration.Port;
             AllowWrites = saved.Configuration.AllowWrites;
@@ -92,7 +105,6 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
             RaisePropertyChanged(nameof(IsAvailable));
             ApplyCommand.Refresh();
             RotateKeyCommand.Refresh();
-            RefreshTunnelCommands();
         }
         catch (Exception exception) { Status = "MCP unavailable: " + exception.Message; }
     }
@@ -121,7 +133,7 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
     private Task ApplyAsync() => ReconfigureAsync(new(Enabled, Port, AllowWrites, AllowWrites && AllowSending,
         Mailboxes.Where(item => item.IsSelected).Select(item => item.Id).ToArray(),
         Drives.Where(item => item.IsSelected).Select(item => item.Id).ToArray(),
-        Workspaces.Where(item => item.IsSelected).Select(item => item.Id).ToArray()), persist: true);
+        Workspaces.Where(item => item.IsSelected).Select(item => item.Id).ToArray(), PublicEnabled), persist: true);
 
     private async Task ReconfigureAsync(McpConfiguration configuration, bool persist)
     {
@@ -131,7 +143,7 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
             if (_store is null || _disposed) return;
             // Revoke new requests before waiting for the old listener to drain.
             Volatile.Write(ref _active, new());
-            await DisconnectTunnelAsync();
+            Tunnels.ConfigureMcp(null);
             if (_endpoint is { } previous)
             {
                 _endpoint = null;
@@ -151,7 +163,7 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
             _endpoint = new(tools, configuration.Port, _endpointPath, () => Volatile.Read(ref _active).Enabled, () => Volatile.Read(ref _accessKey));
             await _endpoint.StartAsync();
             Status = $"Listening at {_endpoint.Address} · {configuration.MailboxIds?.Length ?? 0} allowed mailboxes";
-            await RestoreTunnelAsync();
+            Tunnels.ConfigureMcp((configuration.PublicEnabled ?? PublicEnabled) ? new Uri(_endpoint.Address) : null);
         }
         catch (Exception exception)
         {
@@ -182,13 +194,13 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
 
     public async ValueTask DisposeAsync()
     {
-        _loginCancellation?.Cancel();
+        Tunnels.PropertyChanged -= TunnelsChanged;
         Volatile.Write(ref _active, new());
         await _gate.WaitAsync();
         try
         {
             _disposed = true;
-            await DisconnectTunnelAsync();
+            Tunnels.ConfigureMcp(null);
             if (_endpoint is { } endpoint)
             {
                 _endpoint = null;
@@ -196,5 +208,12 @@ public sealed partial class McpSettingsViewModel : ViewModelBase, IAsyncDisposab
             }
         }
         finally { _gate.Release(); }
+        if (_ownsTunnels) await Tunnels.DisposeAsync();
+    }
+
+    private void TunnelsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        RaisePropertyChanged(nameof(PublicEndpointUrl));
+        RaisePropertyChanged(nameof(PublicStatus));
     }
 }

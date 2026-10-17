@@ -11,9 +11,10 @@ public sealed record McpConfiguration(
     bool AllowSending = false,
     string[]? MailboxIds = null,
     string[]? DriveAccountIds = null,
-    string[]? WorkspaceAccountIds = null);
+    string[]? WorkspaceAccountIds = null,
+    bool? PublicEnabled = null);
 
-public sealed record BetterTunnelsConfiguration(bool Enabled = false, string Token = "", string Email = "");
+public sealed record BetterTunnelsConfiguration(bool Enabled = false, string Token = "", string Email = "", int Port = 0);
 
 public sealed partial class EncryptedMailStore
 {

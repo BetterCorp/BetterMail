@@ -1,67 +1,63 @@
-﻿# BetterTunnels MCP setup
+# BetterTunnels public connectivity
 
-BetterMail includes BetterTunnels under **Settings > MCP > BetterTunnels public MCP link**.
-A **Senior** account is required for a stable HTTPS link without visitor sign-in.
-Local MCP does not require a BetterTunnels account.
+BetterMail manages BetterTunnels in **Settings > Tunnels/Web**. A **Senior** account
+is required for public HTTPS access without visitor sign-in. BetterMail must remain
+open and online; the tunnel does not host mail independently of the app.
 
 ## Connect
 
-1. Enable MCP, choose allowed mailboxes and permissions, and **Apply MCP settings**.
-2. Select **Sign in to BetterTunnels** and complete sign-in in your browser.
-   BetterMail checks your account package with BetterTunnels.
-3. Select **Create public link** to explicitly enable remote access.
-4. Once connected, select **Copy public link**. Add that entire HTTPS URL as a
-   Streamable HTTP MCP server in your client.
-5. Set the HTTP header name to `Authorization`. Use **Copy header value** for its
-   value (`Bearer ` followed by your current BetterMail access key).
-6. Save and restart your client's MCP connection.
+1. Open **Settings > Tunnels/Web**, select **Sign in to BetterTunnels**, and complete
+   browser sign-in. BetterMail checks your account package.
+2. Select **Connect**. The page shows the public connection status and which features
+   use it. Enabled connections resume on startup and reconnect after network failures.
+3. Enable the features you want separately:
+   - **MCP:** enable the local endpoint, choose permitted mailboxes/accounts and
+     permissions, enable **Public MCP access**, and apply MCP settings. Copy the
+     complete public MCP URL from the MCP page. Configure your MCP client's
+     `Authorization` header with **Copy header value** (`Bearer ` plus the access key).
+   - **Accounts:** enable **mail webhooks** for each supported account. See
+     [mail webhook delivery](mail-webhooks.md).
 
-The URL ends in `/bm/<installation-token>`. That private path is generated once
-from 32 cryptographically random bytes and saved in the encrypted mail database.
-Restarts, app updates, port changes, and access-key rotation preserve it. The MCP
-key is never included in the URL. Changing the local port can change the tunnel
-hostname, so copy the new complete URL afterward.
-
-Attaching the BetterMail desktop window selects computer control; it does not
-register an MCP server. Use your client's MCP server setup instead.
+Both feature pages link to Tunnels/Web. Public MCP, account webhooks, both, or neither
+can be enabled. Local MCP works independently of public connectivity.
 
 ## Stop, reconnect, and sign out
 
-- **Stop public link** immediately disconnects remote access and disables automatic
-  reconnection. Local MCP stays available. It also cancels pending browser sign-in.
-- **Sign out** stops the link and removes BetterMail's saved BetterTunnels credential.
-- Disabling MCP or exiting BetterMail disconnects the tunnel. An explicitly enabled
-  public link resumes when MCP runs again, after verifying Senior access.
-- Temporary network failures reconnect automatically. The app checks Senior access
-  on every reconnect and once per minute while connected; an invalid session or
-  lost entitlement stops access. If the account session expires or the network's
-  public IP changes, sign in again and create the link again.
-- BetterMail must remain open and online. A stable hostname does not host mail
-  independently of the app.
+- Disabling public MCP removes public MCP access while leaving webhooks connected.
+- Disabling an account's webhooks removes its subscription while leaving MCP connected.
+- **Disconnect** stops both public features and disables automatic reconnection.
+  Their individual choices are preserved. Local MCP and periodic mail sync continue.
+- **Sign out** also removes the saved BetterTunnels credential.
+- Temporary network failures reconnect automatically. BetterMail checks Senior access
+  on each reconnect and once per minute while connected. Lost entitlement or an
+  invalid session stops the connection. If the session expires or your public IP
+  changes, sign in again and connect.
+- Closing BetterMail disconnects public access. On resume, normal sync catches up and
+  enabled webhook subscriptions are renewed or recreated as necessary.
+
+Existing enabled public MCP links migrate with public MCP access enabled. Their
+private path and saved tunnel identity remain stable. Changing the local MCP port
+does not change the tunnel identity. MCP permissions and the bearer key still apply.
 
 ## Security and implementation
 
-BetterTunnels credentials are stored in the encrypted mail database separately
-from the rotatable MCP key. No CLI installation, child process, token arguments,
-or plaintext token file is required. BetterMail uses .NET's HTTP and WebSocket
-clients with the BetterTunnels v1 HTTP relay protocol.
+BetterTunnels credentials and webhook subscription secrets are stored in the encrypted
+mail database, separately from the rotatable MCP key. No CLI installation, child
+process, token arguments, or plaintext token file is required. BetterMail uses .NET
+HTTP/WebSocket clients with the BetterTunnels v1 HTTP relay protocol.
 
-Forwarding is restricted to the private MCP path and explicit GET routes below it
-for evidence records, original `.eml` downloads, captured files, and exports. Record
-IDs must be hexadecimal; arbitrary paths, traversal, query strings, and writes to
-these download routes are rejected. The loopback target remains fixed.
-The relay sets the local Host header correctly, preserving MCP's loopback checks.
-MCP still verifies the client's bearer key, allowed mailboxes, and write/send
-permissions. Origin headers are preserved: an arbitrary browser origin is rejected.
-Clients must support server-side Streamable HTTP and a configured authorization
-header; this does not enable direct cross-origin browser JavaScript access.
+The shared connection forwards only explicitly permitted routes to fixed loopback
+targets. Public MCP must be enabled independently; evidence routes remain GET-only
+with validated record IDs. Webhooks have their own POST-only route and provider
+validation, without access to MCP tools or its key. Only the webhook validation
+query `validationToken` is permitted; arbitrary paths and query strings are rejected.
+Origin headers are preserved and arbitrary browser origins are rejected.
 
-Requests and frames are bounded, HTTP responses stream through the tunnel, and
-cancellation/shutdown closes pending requests. HTTP redirects are not followed.
-The integration does not expose other local services or relay arbitrary WebSockets.
+Requests/frames are bounded, responses stream through the relay, and shutdown closes
+pending requests. Redirects are not followed. Other local services and arbitrary
+WebSockets are not exposed.
 
-Automated tests use a local BetterTunnels protocol server and a real BetterMail MCP
-listener to verify sign-in, Senior gating, authenticated initialization, bad-key and
-Origin rejection, key rotation, path restrictions, reconnect, and entitlement loss.
-A live Senior-account browser sign-in and external ChatGPT connection still need
-verification against the hosted service.
+Automated tests use local HTTP/WebSocket servers and real listeners to check all four
+feature combinations, independent disablement, subscription lifecycle recovery,
+validation, bearer authentication, forwarding restrictions, reconnect, and entitlement
+loss. Hosted BetterTunnels/Graph delivery still needs verification with a real account.

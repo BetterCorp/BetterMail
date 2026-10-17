@@ -140,6 +140,16 @@ public sealed partial class SettingsView : UserControl
         }
     }
 
+    private void SelectSettingsTab(string name)
+    {
+        if (DataContext is MainWindowViewModel model)
+            model.SelectedSettingsTab = model.SettingsTabs.Single(tab => tab.Name == name);
+    }
+
+    private void OpenTunnelsSettingsClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => SelectSettingsTab("Tunnels/Web");
+    private void OpenMcpSettingsClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => SelectSettingsTab("MCP");
+    private void OpenAccountSettingsClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => SelectSettingsTab("Accounts");
+
     private async void CopyMcpValueClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (sender is Button { DataContext: McpSettingsViewModel settings, CommandParameter: string value } &&

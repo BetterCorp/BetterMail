@@ -3,7 +3,8 @@ namespace BetterMail.Core;
 public sealed class MailProviderRouter(IEnumerable<(string ProviderId, IMailProvider Provider)> providers) :
     IMailProvider,
     IMailRecoveryProvider,
-    ISharedMailboxProvider
+    ISharedMailboxProvider,
+    IMailWebhookProvider
 {
     private readonly IReadOnlyDictionary<string, IMailProvider> _providers = providers.ToDictionary(
         static item => item.ProviderId,
@@ -74,6 +75,16 @@ public sealed class MailProviderRouter(IEnumerable<(string ProviderId, IMailProv
         For(account) is ISharedMailboxProvider shared
             ? shared.ValidateSharedMailboxAsync(account, address, cancellationToken)
             : Task.FromException<Mailbox>(new NotSupportedException("This provider does not support shared mailboxes."));
+
+    public bool SupportsMailWebhooks(MailAccount account) =>
+        _providers.TryGetValue(account.ProviderId, out var provider) &&
+        provider is IMailWebhookProvider webhooks && webhooks.SupportsMailWebhooks(account);
+    public Task<MailWebhookSubscription> CreateMailWebhookAsync(MailAccount account, string notificationUrl, string clientState, CancellationToken cancellationToken = default) =>
+        ((IMailWebhookProvider)For(account)).CreateMailWebhookAsync(account, notificationUrl, clientState, cancellationToken);
+    public Task<MailWebhookSubscription> RenewMailWebhookAsync(MailAccount account, string subscriptionId, CancellationToken cancellationToken = default) =>
+        ((IMailWebhookProvider)For(account)).RenewMailWebhookAsync(account, subscriptionId, cancellationToken);
+    public Task DeleteMailWebhookAsync(MailAccount account, string subscriptionId, CancellationToken cancellationToken = default) =>
+        ((IMailWebhookProvider)For(account)).DeleteMailWebhookAsync(account, subscriptionId, cancellationToken);
 
     private IMailProvider For(MailAccount account) =>
         _providers.TryGetValue(account.ProviderId, out var provider)
