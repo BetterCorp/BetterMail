@@ -58,13 +58,18 @@ public sealed class GoogleAuthService(
         }
     }
 
-    internal async Task<string> GetAccessTokenAsync(
-        string accountId,
-        CancellationToken cancellationToken = default)
+    internal Task<string> GetAccessTokenAsync(string accountId, CancellationToken cancellationToken = default) =>
+        GetAccessTokenCoreAsync(accountId, null, cancellationToken);
+
+    internal Task<string> RefreshRejectedAccessTokenAsync(string accountId, string rejectedAccessToken,
+        CancellationToken cancellationToken = default) => GetAccessTokenCoreAsync(accountId, rejectedAccessToken, cancellationToken);
+
+    private async Task<string> GetAccessTokenCoreAsync(string accountId, string? rejectedAccessToken,
+        CancellationToken cancellationToken)
     {
         var token = await tokenStore.GetProviderTokenAsync(Id, accountId, cancellationToken).ConfigureAwait(false)
             ?? throw ReauthenticationRequired();
-        if (token.ExpiresAt > DateTimeOffset.UtcNow.AddMinutes(2))
+        if (CanReuseAccessToken(token, rejectedAccessToken))
         {
             return token.AccessToken;
         }
@@ -75,11 +80,12 @@ public sealed class GoogleAuthService(
         {
             token = await tokenStore.GetProviderTokenAsync(Id, accountId, cancellationToken).ConfigureAwait(false)
                 ?? throw ReauthenticationRequired();
-            if (token.ExpiresAt > DateTimeOffset.UtcNow.AddMinutes(2))
+            if (CanReuseAccessToken(token, rejectedAccessToken))
             {
                 return token.AccessToken;
             }
 
+            if (string.IsNullOrWhiteSpace(token.RefreshToken)) throw ReauthenticationRequired();
             var fields = RefreshTokenFields(options, token.RefreshToken);
             using var response = await _http.PostAsync(
                 "https://oauth2.googleapis.com/token",
@@ -90,22 +96,33 @@ public sealed class GoogleAuthService(
             var refreshed = token with
             {
                 AccessToken = RequiredString(root, "access_token"),
+                RefreshToken = root.TryGetProperty("refresh_token", out var refresh) &&
+                    refresh.ValueKind == JsonValueKind.String && refresh.GetString() is { Length: > 0 } rotated
+                        ? rotated : token.RefreshToken,
                 ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(root.GetProperty("expires_in").GetInt32()),
                 Scopes = root.TryGetProperty("scope", out var scope) ? scope.GetString() ?? token.Scopes : token.Scopes
             };
             await tokenStore.SaveProviderTokenAsync(refreshed, cancellationToken).ConfigureAwait(false);
             return refreshed.AccessToken;
         }
-        catch (HttpRequestException exception) when (
+        catch (GoogleOAuthException exception) when (exception.ErrorCode == "invalid_grant" &&
             exception.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized)
         {
             throw ReauthenticationRequired(exception);
+        }
+        catch (GoogleOAuthException exception) when (exception.ErrorCode is "invalid_client" or "unauthorized_client")
+        {
+            throw new HttpRequestException("Google rejected BetterMail's OAuth client configuration. Update BetterMail or contact the app administrator.",
+                exception, exception.StatusCode);
         }
         finally
         {
             refreshLock.Release();
         }
     }
+
+    private static bool CanReuseAccessToken(ProviderToken token, string? rejectedAccessToken) =>
+        token.AccessToken.Length > 0 && token.AccessToken != rejectedAccessToken && token.ExpiresAt > DateTimeOffset.UtcNow.AddMinutes(2);
 
     internal static Uri AuthorizationUri(
         string clientId,
@@ -336,9 +353,28 @@ public sealed class GoogleAuthService(
         var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            throw new HttpRequestException($"Google returned {(int)response.StatusCode}: {GoogleError(json)}", null, response.StatusCode);
+            throw new GoogleOAuthException(OAuthErrorCode(json), response.StatusCode,
+                $"Google returned {(int)response.StatusCode}: {GoogleError(json)}");
         }
         return JsonDocument.Parse(json);
+    }
+
+    private static string? OAuthErrorCode(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == JsonValueKind.Object &&
+                document.RootElement.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.String
+                    ? error.GetString() : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    private sealed class GoogleOAuthException(string? errorCode, HttpStatusCode status, string message)
+        : HttpRequestException(message, null, status)
+    {
+        public string? ErrorCode { get; } = errorCode;
     }
 
     private static string GoogleError(string json)
