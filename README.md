@@ -382,6 +382,18 @@ BetterMail requests `gmail.modify`, plus OpenID email/profile scopes. `gmail.mod
 publicly distributed OAuth app must complete Google's consent-screen verification requirements.
 Development users added as OAuth test users can sign in before verification.
 
+Access tokens refresh silently from the encrypted saved refresh token. A Gmail `401` causes one
+silent refresh and one retry, with concurrent requests sharing the refresh. Returned replacement
+refresh tokens are preserved. Only a rejected refresh grant (`invalid_grant`) asks for account
+reauthentication; OAuth client configuration and temporary service errors are reported separately.
+
+If Google sign-in is required roughly every week, check the OAuth consent screen's publishing
+status: external apps in **Testing** receive refresh tokens that expire after seven days when
+requesting Gmail scopes. This is a Google policy and cannot be extended by the desktop client.
+Use an appropriately configured production OAuth app and complete the required verification.
+Revocation, password changes, and account policies can also invalidate refresh tokens. See
+[Google's token-expiration guidance](https://developers.google.com/identity/protocols/oauth2#expiration).
+
 ## Shared mailboxes
 
 Microsoft Graph cannot enumerate every shared mailbox or determine all effective Send As and
