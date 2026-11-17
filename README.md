@@ -198,6 +198,10 @@ original MIME through `read_mail_raw`; assemble its base64 chunks and verify the
 SHA-256 before saving as `.eml`. Each chunk fetches the provider source again, so restart
 if its hash or size changes between requests.
 
+Opening an attached `.eml` previews its sender, recipients, subject, date, body, and attachments.
+For a file on your computer, use **More → Open .eml file** in Mail or choose BetterMail as the
+app for `.eml` files in your desktop's file association settings. Previews are limited to 50 MB.
+
 Call `get_mail_link(mailboxId, messageId)` for a stable captured message reference:
 
 - `localUrl`: `bettermail://evidence/<id>` opens the message in BetterMail's local profile.

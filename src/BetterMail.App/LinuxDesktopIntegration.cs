@@ -46,7 +46,7 @@ internal static class LinuxDesktopIntegration
             Icon={EscapeValue(iconPath)}
             StartupWMClass=BetterMail
             Categories=Network;Email;
-            MimeType=x-scheme-handler/mailto;x-scheme-handler/bettermail;
+            MimeType=x-scheme-handler/mailto;x-scheme-handler/bettermail;message/rfc822;
             Terminal=false
 
             """;

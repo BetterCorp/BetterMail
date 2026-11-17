@@ -31,6 +31,11 @@ public sealed partial class App : Application
         {
             activatableLifetime.Activated += (_, args) =>
             {
+                if (args is FileActivatedEventArgs { Kind: ActivationKind.File } fileArgs)
+                {
+                    foreach (var file in fileArgs.Files)
+                        AppActivation.Publish(file.Path.AbsoluteUri);
+                }
                 if (args.Kind == ActivationKind.OpenUri &&
                     args.GetType().GetProperty("Uri")?.GetValue(args) is Uri uri)
                 {
@@ -238,6 +243,10 @@ public sealed partial class App : Application
         else if (MailtoParser.TryParse(activation, out var request))
         {
             await _viewModel.OpenComposeAsync(request);
+        }
+        else if (EmlFileActivation.TryGetPath(activation, out var path))
+        {
+            await _mainWindow.OpenEmlFileAsync(path);
         }
     }
 

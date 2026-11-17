@@ -311,6 +311,8 @@
                   <Button Classes="command" Content="{Binding ToggleReadText}" HorizontalContentAlignment="Left" Click="MessageReadClicked" AutomationProperties.Name="{Binding ToggleReadText}" />
                   <Button Classes="command" Content="Save as .eml" HorizontalContentAlignment="Left" Command="{Binding ExportMailCommand}" AutomationProperties.Name="Save original email as .eml" />
                   <Button Classes="command" Content="View headers" HorizontalContentAlignment="Left" Command="{Binding ViewHeadersCommand}" AutomationProperties.Name="View internet message headers" />
+                  <Border Height="1" Background="{DynamicResource BetterMailDividerBrush}" Margin="4" />
+                  <Button Classes="command" Content="Open .eml file" HorizontalContentAlignment="Left" Click="OpenEmlFileClicked" AutomationProperties.Name="Open email file from this computer" />
                 </StackPanel>
               </Flyout>
             </Button.Flyout>

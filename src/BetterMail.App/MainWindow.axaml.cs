@@ -1222,6 +1222,55 @@ public sealed partial class MainWindow : Window
             _viewModel?.FilesProvider, _viewModel?.Accounts.ToArray()));
     }
 
+    private async void OpenEmlFileClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Open email file",
+                AllowMultiple = false,
+                FileTypeFilter = [new FilePickerFileType("Email message") { Patterns = ["*.eml"] }]
+            });
+            if (files.FirstOrDefault() is not { } file) return;
+            await using var stream = await file.OpenReadAsync();
+            await ShowEmlFileAsync(file.Name, stream);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            _viewModel?.ReportError($"Could not open email file: {exception.Message}");
+        }
+    }
+
+    internal async Task OpenEmlFileAsync(string path)
+    {
+        try
+        {
+            await using var stream = File.OpenRead(path);
+            await ShowEmlFileAsync(Path.GetFileName(path), stream);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            _viewModel?.ReportError($"Could not open email file: {exception.Message}");
+        }
+    }
+
+    private async Task ShowEmlFileAsync(string name, Stream source)
+    {
+        if (!string.Equals(Path.GetExtension(name), ".eml", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Choose a .eml file.");
+        using var content = new MemoryStream();
+        var buffer = new byte[81920];
+        int read;
+        while ((read = await source.ReadAsync(buffer)) != 0)
+        {
+            if (content.Length + read > FilePreviewWindow.MaximumEmailPreviewBytes)
+                throw new InvalidDataException("Email previews are limited to 50 MB.");
+            content.Write(buffer, 0, read);
+        }
+        IndependentWindow.Show(new FilePreviewWindow(name, "message/rfc822", content.Length, content.ToArray()));
+    }
+
 }
 
 internal enum ResponsiveLayoutMode

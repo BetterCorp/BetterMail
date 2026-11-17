@@ -6,5 +6,5 @@ Exec=BetterMail %u
 Icon=BetterMail
 StartupWMClass=BetterMail
 Categories=Network;Email;
-MimeType=x-scheme-handler/mailto;x-scheme-handler/bettermail;
+MimeType=x-scheme-handler/mailto;x-scheme-handler/bettermail;message/rfc822;
 Terminal=false
