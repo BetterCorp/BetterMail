@@ -85,11 +85,12 @@ public sealed class MailContentRenderer
         bool isHtml,
         IReadOnlyList<MailAttachment>? attachments = null,
         bool allowRemoteContent = false,
-        long maxInlineImageCharacters = long.MaxValue)
+        long maxInlineImageCharacters = long.MaxValue,
+        bool detectHtml = true)
     {
         lock (_sanitizer)
         {
-            return RenderCore(content, isHtml, attachments, allowRemoteContent, maxInlineImageCharacters);
+            return RenderCore(content, isHtml, attachments, allowRemoteContent, maxInlineImageCharacters, detectHtml);
         }
     }
 
@@ -227,9 +228,10 @@ public sealed class MailContentRenderer
         bool isHtml,
         IReadOnlyList<MailAttachment>? attachments = null,
         bool allowRemoteContent = false,
-        long maxInlineImageCharacters = long.MaxValue)
+        long maxInlineImageCharacters = long.MaxValue,
+        bool detectHtml = true)
     {
-        var renderAsHtml = IsHtmlContent(content, isHtml);
+        var renderAsHtml = detectHtml ? IsHtmlContent(content, isHtml) : isHtml;
         var body = renderAsHtml
             ? AdaptDarkText(SanitizeHtml(content ?? "", attachments ?? [], allowRemoteContent, maxInlineImageCharacters))
             : $"<pre>{System.Net.WebUtility.HtmlEncode(content ?? "")}</pre>";

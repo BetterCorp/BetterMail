@@ -196,7 +196,7 @@ public sealed partial class FilePreviewWindow : Window
 
         var html = await Task.Run(() => new MailContentRenderer().RenderDocument(
             message.Body, message.IsHtml, message.InlineParts,
-            maxInlineImageCharacters: 16 * 1024 * 1024));
+            maxInlineImageCharacters: 16 * 1024 * 1024, detectHtml: false));
         if (_closed) return;
         if (Encoding.UTF8.GetByteCount(html) <= NavigateToStringLimitBytes)
         {

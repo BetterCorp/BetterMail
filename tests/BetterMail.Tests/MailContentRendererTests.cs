@@ -22,6 +22,15 @@ public sealed class MailContentRendererTests
     }
 
     [Fact]
+    public void EmailFilePreviewKeepsPlainMimeMarkupAsText()
+    {
+        var html = new MailContentRenderer().RenderDocument("<div>Example</div>", false, detectHtml: false);
+
+        Assert.Contains("&lt;div&gt;Example&lt;/div&gt;", html);
+        Assert.DoesNotContain("<div>Example</div>", html);
+    }
+
+    [Fact]
     public void ConvertsEmbeddedComposeImagesToSafeInlineAttachments()
     {
         var renderer = new MailContentRenderer();
