@@ -34,7 +34,7 @@ public sealed class EmlMessagePreviewTests
             --outer--
             """;
 
-        var parsed = EmlMessagePreview.Parse(Encoding.UTF8.GetBytes(eml.Replace("\n", "\r\n")));
+        var parsed = EmlMessagePreview.Parse(Encoding.UTF8.GetBytes(eml.ReplaceLineEndings("\r\n")));
 
         Assert.Equal("Revisión", parsed.Subject);
         Assert.Contains("José Alvarez", parsed.From);
@@ -57,11 +57,13 @@ public sealed class EmlMessagePreviewTests
     }
 
     [Theory]
-    [InlineData("/tmp/forwarded.eml", "/tmp/forwarded.eml")]
-    [InlineData("file:///tmp/forwarded%20mail.EML", "/tmp/forwarded mail.EML")]
-    public void LocalFileActivationFindsEmailFiles(string value, string expected)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LocalFileActivationFindsEmailFiles(bool useFileUri)
     {
-        Assert.True(EmlFileActivation.TryGetPath(value, out var path));
+        var expected = Path.Combine(Path.GetTempPath(), "forwarded mail.EML");
+        var activation = useFileUri ? new Uri(expected).AbsoluteUri : expected;
+        Assert.True(EmlFileActivation.TryGetPath(activation, out var path));
         Assert.Equal(expected, path);
         Assert.False(EmlFileActivation.TryGetPath("https://example.com/forwarded.eml", out _));
     }

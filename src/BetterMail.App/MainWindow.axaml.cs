@@ -1236,7 +1236,7 @@ public sealed partial class MainWindow : Window
             await using var stream = await file.OpenReadAsync();
             await ShowEmlFileAsync(file.Name, stream);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or InvalidDataException)
         {
             _viewModel?.ReportError($"Could not open email file: {exception.Message}");
         }
@@ -1249,7 +1249,7 @@ public sealed partial class MainWindow : Window
             await using var stream = File.OpenRead(path);
             await ShowEmlFileAsync(Path.GetFileName(path), stream);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or InvalidDataException)
         {
             _viewModel?.ReportError($"Could not open email file: {exception.Message}");
         }
