@@ -20,7 +20,8 @@ internal static class Program
 
         var activation = args.FirstOrDefault(argument =>
             argument.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase) ||
-            argument.StartsWith("bettermail:", StringComparison.OrdinalIgnoreCase)) ?? "activate";
+            argument.StartsWith("bettermail:", StringComparison.OrdinalIgnoreCase) ||
+            EmlFileActivation.TryGetPath(argument, out _)) ?? "activate";
         AppActivationRelay? relay = null;
         if (OperatingSystem.IsMacOS())
         {

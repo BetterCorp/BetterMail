@@ -16,7 +16,7 @@ public sealed class LinuxDesktopIntegrationTests
             var iconPath = Path.Combine(directory, "icons", "hicolor", "512x512", "apps", "BetterMail.png");
             Assert.Equal(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }, File.ReadAllBytes(iconPath)[..8]);
             Assert.Contains("StartupWMClass=BetterMail", File.ReadAllText(desktopPath));
-            Assert.Contains("MimeType=x-scheme-handler/mailto;x-scheme-handler/bettermail;", File.ReadAllText(desktopPath));
+            Assert.Contains("MimeType=x-scheme-handler/mailto;x-scheme-handler/bettermail;message/rfc822;", File.ReadAllText(desktopPath));
             Assert.Contains("Icon=" + iconPath.Replace("\\", "\\\\"), File.ReadAllText(desktopPath));
 
             var moved = Path.Combine(directory, "Moved Mail.AppImage");
@@ -24,7 +24,7 @@ public sealed class LinuxDesktopIntegrationTests
             var desktop = File.ReadAllText(desktopPath);
             Assert.DoesNotContain("Original Mail.AppImage", desktop);
             Assert.Contains("Moved Mail.AppImage\" %u", desktop);
-            Assert.Single(Directory.GetFiles(Path.GetDirectoryName(desktopPath)!));
+            Assert.Single(Directory.GetFiles(Path.GetDirectoryName(desktopPath)!, "*.desktop"));
             Assert.False(File.Exists(Path.Combine(directory, "applications", "mimeapps.list")));
         }
         finally { Directory.Delete(directory, true); }

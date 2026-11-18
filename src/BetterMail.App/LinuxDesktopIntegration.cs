@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 
 namespace BetterMail.App;
@@ -46,11 +47,34 @@ internal static class LinuxDesktopIntegration
             Icon={EscapeValue(iconPath)}
             StartupWMClass=BetterMail
             Categories=Network;Email;
-            MimeType=x-scheme-handler/mailto;x-scheme-handler/bettermail;
+            MimeType=x-scheme-handler/mailto;x-scheme-handler/bettermail;message/rfc822;
             Terminal=false
 
             """;
         File.WriteAllText(Path.Combine(applications, "bettermail.desktop"), desktop);
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo("update-desktop-database")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                ArgumentList = { applications }
+            });
+            if (process is not null && !process.WaitForExit(5000))
+            {
+                process.Kill();
+                Trace.TraceWarning("Timed out updating the desktop MIME cache.");
+            }
+            else if (process is { ExitCode: not 0 })
+            {
+                Trace.TraceWarning("Could not update the desktop MIME cache.");
+            }
+        }
+        catch (Exception exception) when (exception is Win32Exception or IOException or InvalidOperationException)
+        {
+            // The launcher still works when this optional desktop utility is unavailable.
+            Trace.TraceWarning("Could not update the desktop MIME cache: {0}", exception.GetType().Name);
+        }
     }
 
     private static string EscapeValue(string value) => value.Replace("\\", "\\\\").Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");

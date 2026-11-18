@@ -11,12 +11,15 @@ internal enum FilePreviewKind
     Unsupported,
     Image,
     Pdf,
-    Text
+    Text,
+    Email
 }
 
 public sealed partial class FilePreviewWindow : Window
 {
     private const int MaximumTextPreviewBytes = 5 * 1024 * 1024;
+    internal const int MaximumEmailPreviewBytes = 50 * 1024 * 1024;
+    private const int NavigateToStringLimitBytes = 2 * 1024 * 1024;
     private static readonly HashSet<string> ImageTypes = new(StringComparer.OrdinalIgnoreCase)
     {
         "image/bmp", "image/gif", "image/jpeg", "image/png", "image/tiff", "image/webp"
@@ -38,10 +41,12 @@ public sealed partial class FilePreviewWindow : Window
     private IFilesProvider? _filesProvider;
     private IReadOnlyList<MailAccount> _driveAccounts = [];
     private AttachmentDriveSaveWindow? _driveWindow;
+    private bool _closed;
 
     public FilePreviewWindow()
     {
         InitializeComponent();
+        _ = new ReadOnlyWebViewLinks(EmlBodyPreview);
     }
 
     public FilePreviewWindow(string name, string contentType, long size, byte[]? content,
@@ -65,6 +70,11 @@ public sealed partial class FilePreviewWindow : Window
     {
         var extension = Path.GetExtension(name);
         var mediaType = contentType.Split(';', 2)[0].Trim();
+        if (string.Equals(extension, ".eml", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mediaType, "message/rfc822", StringComparison.OrdinalIgnoreCase))
+        {
+            return FilePreviewKind.Email;
+        }
         if (string.Equals(mediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(extension, ".pdf", StringComparison.OrdinalIgnoreCase))
         {
@@ -94,6 +104,12 @@ public sealed partial class FilePreviewWindow : Window
 
             switch (PreviewKindFor(_name, _contentType))
             {
+                case FilePreviewKind.Email when _content.Length <= MaximumEmailPreviewBytes:
+                    await ShowEmailAsync(await Task.Run(() => EmlMessagePreview.Parse(_content)));
+                    break;
+                case FilePreviewKind.Email:
+                    ShowUnavailable("Email previews are limited to 50 MB. Save this file to view it.");
+                    break;
                 case FilePreviewKind.Image:
                     _bitmap = await Task.Run(() =>
                     {
@@ -109,6 +125,11 @@ public sealed partial class FilePreviewWindow : Window
                     _temporaryDirectory = directory.FullName;
                     var path = Path.Combine(directory.FullName, "preview.pdf");
                     await File.WriteAllBytesAsync(path, _content);
+                    if (_closed)
+                    {
+                        CleanupTemporaryDirectory();
+                        break;
+                    }
                     PdfPreview.Source = new Uri(path, UriKind.Absolute);
                     PdfPreview.IsVisible = true;
                     break;
@@ -131,6 +152,10 @@ public sealed partial class FilePreviewWindow : Window
                     break;
             }
         }
+        catch (FormatException)
+        {
+            ShowUnavailable("This file does not contain a valid email message.");
+        }
         catch
         {
             ShowUnavailable("BetterMail could not render this file. You can still save it.");
@@ -138,6 +163,59 @@ public sealed partial class FilePreviewWindow : Window
         finally
         {
             LoadingPreview.IsVisible = false;
+        }
+    }
+
+    private async Task ShowEmailAsync(EmlMessagePreview message)
+    {
+        if (_closed) return;
+        EmlSubject.Text = message.Subject;
+        EmlFrom.Text = $"From: {message.From}";
+        EmlTo.Text = $"To: {message.To}";
+        EmlCc.Text = $"Cc: {message.Cc}";
+        EmlCc.IsVisible = !string.IsNullOrWhiteSpace(message.Cc);
+        EmlDate.Text = message.Date;
+        foreach (var attachment in message.Attachments)
+        {
+            var button = new Button
+            {
+                Content = attachment.Name,
+                MaxWidth = 240,
+                Margin = new Avalonia.Thickness(0, 0, 6, 4),
+                [Avalonia.Automation.AutomationProperties.NameProperty] = $"Preview attachment {attachment.Name}"
+            };
+            ToolTip.SetTip(button, attachment.Name);
+            button.Classes.Add("command");
+            button.Click += (_, _) => IndependentWindow.Show(new FilePreviewWindow(
+                attachment.Name, attachment.ContentType, attachment.Size, attachment.ContentBytes,
+                _filesProvider, _driveAccounts));
+            EmlAttachmentList.Children.Add(button);
+        }
+        EmlAttachmentList.IsVisible = message.Attachments.Count > 0;
+        EmlPreview.IsVisible = true;
+
+        var html = await Task.Run(() => new MailContentRenderer().RenderDocument(
+            message.Body, message.IsHtml, message.InlineParts,
+            maxInlineImageCharacters: 16 * 1024 * 1024, detectHtml: false));
+        if (_closed) return;
+        if (Encoding.UTF8.GetByteCount(html) <= NavigateToStringLimitBytes)
+        {
+            EmlBodyPreview.NavigateToString(html, new Uri("about:blank"));
+        }
+        else
+        {
+            try
+            {
+                var directory = Directory.CreateTempSubdirectory("BetterMail-preview-");
+                _temporaryDirectory = directory.FullName;
+                var path = Path.Combine(directory.FullName, "message.html");
+                await File.WriteAllTextAsync(path, html, Encoding.UTF8);
+                if (!_closed) EmlBodyPreview.Source = new Uri(path, UriKind.Absolute);
+            }
+            finally
+            {
+                if (_closed) CleanupTemporaryDirectory();
+            }
         }
     }
 
@@ -197,7 +275,13 @@ public sealed partial class FilePreviewWindow : Window
 
     private void WindowClosed(object? sender, EventArgs e)
     {
+        _closed = true;
         _bitmap?.Dispose();
+        CleanupTemporaryDirectory();
+    }
+
+    private void CleanupTemporaryDirectory()
+    {
         if (_temporaryDirectory is null)
         {
             return;
@@ -205,10 +289,12 @@ public sealed partial class FilePreviewWindow : Window
         try
         {
             Directory.Delete(_temporaryDirectory, recursive: true);
+            _temporaryDirectory = null;
         }
+        catch (DirectoryNotFoundException) { _temporaryDirectory = null; }
         catch
         {
-            // ponytail: the OS temp directory handles crash/lock leftovers; add a startup sweep only if these accumulate.
+            // An in-flight WebView or file write can briefly retain the directory. Its continuation retries cleanup.
         }
     }
 

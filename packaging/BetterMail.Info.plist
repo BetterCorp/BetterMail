@@ -20,5 +20,14 @@
       <key>CFBundleURLSchemes</key><array><string>mailto</string><string>bettermail</string></array>
     </dict>
   </array>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>Email message</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key><array><string>public.email-message</string></array>
+    </dict>
+  </array>
 </dict>
 </plist>

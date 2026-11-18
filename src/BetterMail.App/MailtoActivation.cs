@@ -7,6 +7,22 @@ using Microsoft.Win32;
 
 namespace BetterMail.App;
 
+internal static class EmlFileActivation
+{
+    public static bool TryGetPath(string? value, out string path)
+    {
+        path = "";
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        if (Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.IsFile)
+            value = uri.LocalPath;
+        if (!Path.IsPathFullyQualified(value) ||
+            !string.Equals(Path.GetExtension(value), ".eml", StringComparison.OrdinalIgnoreCase))
+            return false;
+        path = value;
+        return true;
+    }
+}
+
 internal static class MailtoParser
 {
     public static bool TryParse(string? value, out ComposeRequest request)
@@ -191,6 +207,7 @@ internal static class DefaultMailApp
 {
     private const string ApplicationName = "BetterMail";
     private const string ProgId = "BetterCorp.BetterMail.mailto";
+    private const string EmlProgId = "BetterCorp.BetterMail.eml";
     private const string CapabilitiesPath = @"Software\BetterCorp\BetterMail\Capabilities";
 
     public static void Register()
@@ -217,11 +234,20 @@ internal static class DefaultMailApp
                 link.SetValue("URL Protocol", "");
                 link.CreateSubKey(@"shell\open\command").SetValue("", $"\"{executable}\" \"%1\"");
             }
+            using (var eml = Registry.CurrentUser.CreateSubKey($@"Software\Classes\{EmlProgId}"))
+            {
+                eml.SetValue("", "Email message");
+                eml.CreateSubKey("DefaultIcon").SetValue("", $"{executable},0");
+                eml.CreateSubKey(@"shell\open\command").SetValue("", $"\"{executable}\" \"%1\"");
+            }
+            Registry.CurrentUser.CreateSubKey(@"Software\Classes\.eml\OpenWithProgids")
+                .SetValue(EmlProgId, Array.Empty<byte>(), RegistryValueKind.None);
             using (var capabilities = Registry.CurrentUser.CreateSubKey(CapabilitiesPath))
             {
                 capabilities.SetValue("ApplicationName", ApplicationName);
                 capabilities.SetValue("ApplicationDescription", "Fast local-first Microsoft 365 mail");
                 capabilities.CreateSubKey("UrlAssociations").SetValue("mailto", ProgId);
+                capabilities.CreateSubKey("FileAssociations").SetValue(".eml", EmlProgId);
             }
             Registry.CurrentUser.CreateSubKey(@"Software\RegisteredApplications")
                 .SetValue(ApplicationName, CapabilitiesPath);
@@ -243,6 +269,9 @@ internal static class DefaultMailApp
         {
             Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\bettermail", false);
             Registry.CurrentUser.DeleteSubKeyTree($@"Software\Classes\{ProgId}", false);
+            Registry.CurrentUser.DeleteSubKeyTree($@"Software\Classes\{EmlProgId}", false);
+            using (var openWith = Registry.CurrentUser.OpenSubKey(@"Software\Classes\.eml\OpenWithProgids", writable: true))
+                openWith?.DeleteValue(EmlProgId, false);
             Registry.CurrentUser.DeleteSubKeyTree(@"Software\BetterCorp\BetterMail", false);
             using var registered = Registry.CurrentUser.OpenSubKey(@"Software\RegisteredApplications", writable: true);
             registered?.DeleteValue(ApplicationName, false);

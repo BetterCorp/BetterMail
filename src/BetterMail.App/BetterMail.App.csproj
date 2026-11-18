@@ -41,6 +41,7 @@
     <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="Svg.Skia" />
     <PackageReference Include="HtmlSanitizer" />
+    <PackageReference Include="MimeKit" />
     <PackageReference Include="Velopack" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" />
   </ItemGroup>

@@ -84,11 +84,13 @@ public sealed class MailContentRenderer
         string? content,
         bool isHtml,
         IReadOnlyList<MailAttachment>? attachments = null,
-        bool allowRemoteContent = false)
+        bool allowRemoteContent = false,
+        long maxInlineImageCharacters = long.MaxValue,
+        bool detectHtml = true)
     {
         lock (_sanitizer)
         {
-            return RenderCore(content, isHtml, attachments, allowRemoteContent);
+            return RenderCore(content, isHtml, attachments, allowRemoteContent, maxInlineImageCharacters, detectHtml);
         }
     }
 
@@ -225,11 +227,13 @@ public sealed class MailContentRenderer
         string? content,
         bool isHtml,
         IReadOnlyList<MailAttachment>? attachments = null,
-        bool allowRemoteContent = false)
+        bool allowRemoteContent = false,
+        long maxInlineImageCharacters = long.MaxValue,
+        bool detectHtml = true)
     {
-        var renderAsHtml = IsHtmlContent(content, isHtml);
+        var renderAsHtml = detectHtml ? IsHtmlContent(content, isHtml) : isHtml;
         var body = renderAsHtml
-            ? AdaptDarkText(SanitizeHtml(content ?? "", attachments ?? [], allowRemoteContent))
+            ? AdaptDarkText(SanitizeHtml(content ?? "", attachments ?? [], allowRemoteContent, maxInlineImageCharacters))
             : $"<pre>{System.Net.WebUtility.HtmlEncode(content ?? "")}</pre>";
         var imagePolicy = allowRemoteContent ? "data: http: https:" : "data:";
         var colorScheme = ThemeMode switch
@@ -310,7 +314,8 @@ public sealed class MailContentRenderer
     private string SanitizeHtml(
         string content,
         IReadOnlyList<MailAttachment> attachments,
-        bool allowRemoteContent)
+        bool allowRemoteContent,
+        long maxInlineImageCharacters = long.MaxValue)
     {
         var document = _sanitizer.SanitizeDom(content);
         var inlineImages = attachments
@@ -335,6 +340,7 @@ public sealed class MailContentRenderer
             link.SetAttribute("href", uri.AbsoluteUri);
         }
 
+        long inlineImageCharacters = 0;
         foreach (var image in document.QuerySelectorAll("img").ToArray())
         {
             var source = image.GetAttribute("src")?.Trim();
@@ -358,7 +364,16 @@ public sealed class MailContentRenderer
                     attachment.ContentBytes is { Length: > 0 and <= 10485760 } bytes &&
                     SafeInlineImageTypes.Contains(attachment.ContentType))
                 {
-                    image.SetAttribute("src", $"data:{attachment.ContentType};base64,{Convert.ToBase64String(bytes)}");
+                    var dataLength = 13L + attachment.ContentType.Length + ((bytes.Length + 2L) / 3L * 4L);
+                    if (dataLength <= maxInlineImageCharacters - inlineImageCharacters)
+                    {
+                        image.SetAttribute("src", $"data:{attachment.ContentType};base64,{Convert.ToBase64String(bytes)}");
+                        inlineImageCharacters += dataLength;
+                    }
+                    else
+                    {
+                        ReplaceImageWithPlaceholder(document, image, "Inline picture unavailable");
+                    }
                 }
                 else
                 {

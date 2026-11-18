@@ -8,6 +8,29 @@ namespace BetterMail.Tests;
 public sealed class MailContentRendererTests
 {
     [Fact]
+    public void EmailFilePreviewBoundsRepeatedInlineImageExpansion()
+    {
+        var renderer = new MailContentRenderer();
+        var inline = new MailAttachment("image", "logo.png", "image/png", 8, true, "logo", [1, 2, 3, 4, 5, 6, 7, 8]);
+
+        var html = renderer.RenderDocument(
+            "<img alt='Logo' src='cid:logo'><img alt='Logo' src='cid:logo'><img alt='Logo' src='cid:logo'>",
+            true, [inline], maxInlineImageCharacters: 40);
+
+        Assert.Equal(1, html.Split("data:image/png;base64,", StringSplitOptions.None).Length - 1);
+        Assert.Contains("Inline picture unavailable", html);
+    }
+
+    [Fact]
+    public void EmailFilePreviewKeepsPlainMimeMarkupAsText()
+    {
+        var html = new MailContentRenderer().RenderDocument("<div>Example</div>", false, detectHtml: false);
+
+        Assert.Contains("&lt;div&gt;Example&lt;/div&gt;", html);
+        Assert.DoesNotContain("<div>Example</div>", html);
+    }
+
+    [Fact]
     public void ConvertsEmbeddedComposeImagesToSafeInlineAttachments()
     {
         var renderer = new MailContentRenderer();
