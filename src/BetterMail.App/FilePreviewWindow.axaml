@@ -55,7 +55,7 @@
             <SelectableTextBlock x:Name="EmlTo" TextWrapping="Wrap" />
             <SelectableTextBlock x:Name="EmlCc" TextWrapping="Wrap" IsVisible="False" />
             <SelectableTextBlock x:Name="EmlDate" FontSize="11" Opacity="0.62" />
-            <StackPanel x:Name="EmlAttachmentList" Orientation="Horizontal" Spacing="6" IsVisible="False" />
+            <WrapPanel x:Name="EmlAttachmentList" Orientation="Horizontal" IsVisible="False" />
           </StackPanel>
         </ScrollViewer>
         <NativeWebView x:Name="EmlBodyPreview" Grid.Row="1"

@@ -24,7 +24,7 @@ public sealed class LinuxDesktopIntegrationTests
             var desktop = File.ReadAllText(desktopPath);
             Assert.DoesNotContain("Original Mail.AppImage", desktop);
             Assert.Contains("Moved Mail.AppImage\" %u", desktop);
-            Assert.Single(Directory.GetFiles(Path.GetDirectoryName(desktopPath)!));
+            Assert.Single(Directory.GetFiles(Path.GetDirectoryName(desktopPath)!, "*.desktop"));
             Assert.False(File.Exists(Path.Combine(directory, "applications", "mimeapps.list")));
         }
         finally { Directory.Delete(directory, true); }

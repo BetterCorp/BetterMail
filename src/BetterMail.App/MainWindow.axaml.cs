@@ -1268,7 +1268,8 @@ public sealed partial class MainWindow : Window
                 throw new InvalidDataException("Email previews are limited to 50 MB.");
             content.Write(buffer, 0, read);
         }
-        IndependentWindow.Show(new FilePreviewWindow(name, "message/rfc822", content.Length, content.ToArray()));
+        IndependentWindow.Show(new FilePreviewWindow(name, "message/rfc822", content.Length, content.ToArray(),
+            _viewModel?.FilesProvider, _viewModel?.Accounts.ToArray()));
     }
 
 }

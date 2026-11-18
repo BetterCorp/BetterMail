@@ -41,6 +41,7 @@ public sealed partial class FilePreviewWindow : Window
     private IFilesProvider? _filesProvider;
     private IReadOnlyList<MailAccount> _driveAccounts = [];
     private AttachmentDriveSaveWindow? _driveWindow;
+    private bool _closed;
 
     public FilePreviewWindow()
     {
@@ -124,6 +125,11 @@ public sealed partial class FilePreviewWindow : Window
                     _temporaryDirectory = directory.FullName;
                     var path = Path.Combine(directory.FullName, "preview.pdf");
                     await File.WriteAllBytesAsync(path, _content);
+                    if (_closed)
+                    {
+                        CleanupTemporaryDirectory();
+                        break;
+                    }
                     PdfPreview.Source = new Uri(path, UriKind.Absolute);
                     PdfPreview.IsVisible = true;
                     break;
@@ -162,6 +168,7 @@ public sealed partial class FilePreviewWindow : Window
 
     private async Task ShowEmailAsync(EmlMessagePreview message)
     {
+        if (_closed) return;
         EmlSubject.Text = message.Subject;
         EmlFrom.Text = $"From: {message.From}";
         EmlTo.Text = $"To: {message.To}";
@@ -173,8 +180,11 @@ public sealed partial class FilePreviewWindow : Window
             var button = new Button
             {
                 Content = attachment.Name,
+                MaxWidth = 240,
+                Margin = new Avalonia.Thickness(0, 0, 6, 4),
                 [Avalonia.Automation.AutomationProperties.NameProperty] = $"Preview attachment {attachment.Name}"
             };
+            ToolTip.SetTip(button, attachment.Name);
             button.Classes.Add("command");
             button.Click += (_, _) => IndependentWindow.Show(new FilePreviewWindow(
                 attachment.Name, attachment.ContentType, attachment.Size, attachment.ContentBytes,
@@ -185,18 +195,27 @@ public sealed partial class FilePreviewWindow : Window
         EmlPreview.IsVisible = true;
 
         var html = await Task.Run(() => new MailContentRenderer().RenderDocument(
-            message.Body, message.IsHtml, message.InlineParts));
+            message.Body, message.IsHtml, message.InlineParts,
+            maxInlineImageCharacters: 16 * 1024 * 1024));
+        if (_closed) return;
         if (Encoding.UTF8.GetByteCount(html) <= NavigateToStringLimitBytes)
         {
             EmlBodyPreview.NavigateToString(html, new Uri("about:blank"));
         }
         else
         {
-            var directory = Directory.CreateTempSubdirectory("BetterMail-preview-");
-            _temporaryDirectory = directory.FullName;
-            var path = Path.Combine(directory.FullName, "message.html");
-            await File.WriteAllTextAsync(path, html, Encoding.UTF8);
-            EmlBodyPreview.Source = new Uri(path, UriKind.Absolute);
+            try
+            {
+                var directory = Directory.CreateTempSubdirectory("BetterMail-preview-");
+                _temporaryDirectory = directory.FullName;
+                var path = Path.Combine(directory.FullName, "message.html");
+                await File.WriteAllTextAsync(path, html, Encoding.UTF8);
+                if (!_closed) EmlBodyPreview.Source = new Uri(path, UriKind.Absolute);
+            }
+            finally
+            {
+                if (_closed) CleanupTemporaryDirectory();
+            }
         }
     }
 
@@ -256,7 +275,13 @@ public sealed partial class FilePreviewWindow : Window
 
     private void WindowClosed(object? sender, EventArgs e)
     {
+        _closed = true;
         _bitmap?.Dispose();
+        CleanupTemporaryDirectory();
+    }
+
+    private void CleanupTemporaryDirectory()
+    {
         if (_temporaryDirectory is null)
         {
             return;
@@ -264,10 +289,12 @@ public sealed partial class FilePreviewWindow : Window
         try
         {
             Directory.Delete(_temporaryDirectory, recursive: true);
+            _temporaryDirectory = null;
         }
+        catch (DirectoryNotFoundException) { _temporaryDirectory = null; }
         catch
         {
-            // ponytail: the OS temp directory handles crash/lock leftovers; add a startup sweep only if these accumulate.
+            // An in-flight WebView or file write can briefly retain the directory. Its continuation retries cleanup.
         }
     }
 
