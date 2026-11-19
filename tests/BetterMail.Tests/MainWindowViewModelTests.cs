@@ -1527,6 +1527,7 @@ public sealed class MainWindowViewModelTests
             await ((AsyncCommand)viewModel.SubmitGlobalSearchCommand).ExecuteAsync();
             Assert.Equal("Drive", viewModel.ActiveModule);
             Assert.Empty(viewModel.WorkspaceSearchResults);
+            Assert.Equal("Planning", viewModel.DriveWorkspace.SearchQuery);
             Assert.Equal(driveMatches.Select(file => file.ProviderId).Order(),
                 viewModel.DriveWorkspace.SearchResults.Select(result => result.File.ProviderId).Order());
         }
@@ -1604,6 +1605,17 @@ public sealed class MainWindowViewModelTests
             Assert.Equal(remote.Body, (await store.GetMessageAsync(mailbox.Id, remote.ProviderId, cancellationToken))?.Body);
             Assert.Contains(await store.SearchAsync("Needle", cancellationToken: cancellationToken),
                 message => message.ProviderId == remote.ProviderId);
+
+            // A failed local search must never carry matches from the previous query into a provider fallback.
+            typeof(EncryptedMailStore).GetField("_searchReaderDisposed",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.SetValue(store, true);
+            var replacement = remote with { ProviderId = "replacement", Subject = "Different match" };
+            provider.SearchResults = [replacement];
+            viewModel.SearchText = "type:mail Different";
+            await ((AsyncCommand)viewModel.SearchCommand).ExecuteAsync();
+            await ((AsyncCommand)viewModel.OpenAllGlobalMailResultsCommand).ExecuteAsync();
+            Assert.Equal(replacement.ProviderId, Assert.Single(viewModel.Messages).ProviderId);
+            Assert.Contains("Different", viewModel.SearchResultSummary);
         }
         finally
         {

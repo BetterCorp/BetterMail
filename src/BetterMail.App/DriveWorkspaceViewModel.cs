@@ -21,6 +21,7 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
     private DriveItemEntry? _selectedItem;
     private DriveSearchResult? _selectedSearchResult;
     private DriveAccountFilter? _selectedAccountFilter;
+    private IReadOnlyList<CloudFile>? _globalSearchFiles;
     private DriveItemEntry? _pendingDelete;
     private string _searchQuery = "";
     private string _newFolderName = "";
@@ -146,7 +147,15 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         {
             if (SetProperty(ref _selectedAccountFilter, value) && IsSearchMode)
             {
-                _ = SearchAsync();
+                if (_globalSearchFiles is { } files)
+                {
+                    SetSearchResults(files, SelectedSearchAccounts());
+                    SelectedSearchResult = null;
+                }
+                else
+                {
+                    _ = SearchAsync();
+                }
             }
         }
     }
@@ -311,6 +320,7 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
             CollectionUpdates.Reconcile(CurrentItems, Entries(node), static entry => entry.Identity);
             SelectedItem = null;
             SelectedSearchResult = null;
+            _globalSearchFiles = null;
             IsSearchMode = false;
         }
         finally
@@ -452,6 +462,9 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
     internal void ShowGlobalSearchResults(string query, IReadOnlyList<CloudFile> files)
     {
         ++_searchVersion;
+        ++_navigationVersion;
+        IsNavigating = false;
+        _globalSearchFiles = files;
         SearchQuery = query;
         OperationError = null;
         SetProperty(ref _selectedAccountFilter, AccountFilters[0], nameof(SelectedAccountFilter));
@@ -471,8 +484,9 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
             return;
         }
         var version = _runningSearchVersion = ++_searchVersion;
+        _globalSearchFiles = null;
         var selectedAccount = SelectedAccountFilter?.Account;
-        IReadOnlyList<MailAccount> accounts = selectedAccount is null ? _accounts : [selectedAccount];
+        var accounts = SelectedSearchAccounts();
         IsBusy = true;
         try
         {
@@ -527,6 +541,9 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         }
     }
 
+    private IReadOnlyList<MailAccount> SelectedSearchAccounts() =>
+        SelectedAccountFilter?.Account is { } account ? [account] : _accounts;
+
     private void SetSearchResults(IEnumerable<CloudFile> files, IReadOnlyList<MailAccount> accounts)
     {
         var results = from file in files
@@ -565,6 +582,7 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
     private Task ClearSearchAsync()
     {
         ++_searchVersion;
+        _globalSearchFiles = null;
         SearchQuery = "";
         SearchResults.Clear();
         SelectedSearchResult = null;

@@ -49,19 +49,23 @@ public sealed class MessageReadTests
                 Assert.All(thread, item => Assert.Null(item.Body));
                 vm.Messages.Add(message with { Body = null });
                 vm.SelectedMessage = vm.Messages[0];
-                async Task WaitForBodyAsync()
+                async Task WaitForBodyAsync(string messageId)
                 {
-                    while (vm.ConversationThread.SelectedMessage?.Message.Body != body ||
+                    while (vm.ConversationThread.SelectedMessage?.Message.ProviderId != messageId ||
+                           vm.ConversationThread.SelectedMessage.Message.Body != body ||
                            vm.ConversationThread.SelectedMessage?.BodyHtml.Contains("Full cached message", StringComparison.Ordinal) != true)
                         await Task.Delay(10, token);
                 }
-                await WaitForBodyAsync().WaitAsync(TimeSpan.FromSeconds(5), token);
+                await WaitForBodyAsync(message.ProviderId).WaitAsync(TimeSpan.FromSeconds(5), token);
                 Assert.Equal(body, vm.SelectedMessage!.Body);
                 Assert.Null(vm.Messages[0].Body);
                 vm.Messages.Add(reply with { Body = null });
-                vm.SelectedMessage = vm.Messages[1];
-                await WaitForBodyAsync().WaitAsync(TimeSpan.FromSeconds(5), token);
+                await ((AsyncCommand)vm.SelectNextMessageCommand).ExecuteAsync();
+                await WaitForBodyAsync(reply.ProviderId).WaitAsync(TimeSpan.FromSeconds(5), token);
                 Assert.Equal(reply.ProviderId, vm.SelectedMessage!.ProviderId);
+                await ((AsyncCommand)vm.SelectPreviousMessageCommand).ExecuteAsync();
+                await WaitForBodyAsync(message.ProviderId).WaitAsync(TimeSpan.FromSeconds(5), token);
+                Assert.Equal(message.ProviderId, vm.SelectedMessage!.ProviderId);
                 Assert.All(vm.Messages, item => Assert.Null(item.Body));
                 TestContext.Current.TestOutputHelper!.WriteLine($"Full body, thread and reading pane while writer/folder gates held: {clock.ElapsedMilliseconds} ms");
                 await transaction.CommitAsync(token);
@@ -82,6 +86,40 @@ public sealed class MessageReadTests
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(() => obsolete);
             }
             finally { readerGate.Release(); }
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task ReplyAndForwardQuoteTheFullBodyOfASummary()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "bettermail-compose-source-" + Guid.NewGuid());
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), new string('E', 64));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "account", "tenant", "me@example.test", "Me", ProviderCapabilities.Mail);
+            var mailbox = new Mailbox(account.AccountId, account.EmailAddress, "Me");
+            await store.SaveAccountAsync(account, token);
+            await store.SaveMailboxAsync(mailbox, token);
+            var message = new MailMessage(mailbox.Id, "message", "thread", null, "inbox", "Subject",
+                new("Sender", "sender@example.test"), [], DateTimeOffset.UtcNow, "Short preview",
+                "<p>Original text beyond the preview.</p>", true, true, false, MailImportance.Normal, [], null);
+            await store.ApplySyncPageAsync("seed", new([message], null, false), token);
+            var vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null);
+            vm.Accounts.Add(account);
+            vm.Mailboxes.Add(mailbox);
+            var requests = new List<ComposeRequest>();
+            vm.ComposeRequested += requests.Add;
+            var summary = message with { Body = null };
+
+            await vm.HandlePreviewActionAsync(new(ConversationAction.Reply, summary));
+            await vm.HandlePreviewActionAsync(new(ConversationAction.ReplyAll, summary));
+            await vm.HandlePreviewActionAsync(new(ConversationAction.Forward, summary));
+
+            Assert.Equal([ComposeIntent.Reply, ComposeIntent.ReplyAll, ComposeIntent.Forward], requests.Select(request => request.Intent));
+            Assert.All(requests, request => Assert.Contains("Original text beyond the preview.", request.Body));
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }

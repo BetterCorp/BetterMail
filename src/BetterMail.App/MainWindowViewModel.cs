@@ -2117,11 +2117,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         lock (_globalSearchResultsGate)
         {
             GlobalSearchResults.Clear();
+            _latestMailSearchResults.Clear();
         }
         _latestDriveSearchResults = [];
         if (_store is null || query.Length == 0)
         {
-            ClearLatestMailSearchResults();
             IsGlobalSearchRunning = false;
             IsGlobalSearchOpen = false;
             return;
@@ -2156,7 +2156,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         catch (FormatException exception)
         {
             SearchError = exception.Message;
-            ClearLatestMailSearchResults();
             IsGlobalSearchRunning = false;
             IsGlobalSearchOpen = true;
             return;
@@ -2164,10 +2163,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
         IsGlobalSearchRunning = true;
         IsGlobalSearchOpen = true;
-        if (!parsed.Includes("Mail"))
-        {
-            ClearLatestMailSearchResults();
-        }
         try
         {
             if (debounce)
@@ -2212,15 +2207,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 IsGlobalSearchRunning = false;
             }
         }
-    }
-
-    private void ClearLatestMailSearchResults()
-    {
-        if (_latestMailSearchResults.Count == 0)
-        {
-            return;
-        }
-        _latestMailSearchResults.Clear();
     }
 
     private async Task AddGlobalResultsAsync(
@@ -2272,16 +2258,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         var cachedMailboxes = Mailboxes.Count > 0 ? Mailboxes.ToArray() : await _store!.GetMailboxesAsync(cancellationToken);
         var mailboxIds = selectedAccounts.Count == 0 ? null : cachedMailboxes.Where(mailbox => selectedAccounts.Any(item =>
             item.MailboxId is { } id ? mailbox.Id == id : mailbox.AccountId == item.AccountId)).Select(mailbox => mailbox.Id).ToArray();
+        cancellationToken.ThrowIfCancellationRequested();
+        _latestMailMailboxIds = mailboxIds;
+        _latestMailAccount = account;
+        _latestMailQuery = query;
+        _latestMailFolders = folders;
         var messages = (await _store!.SearchFilteredMailAsync(query, folders, 500, cancellationToken,
                 account?.AccountId, account?.MailboxId, includeUnknownFolders: query.Values("in").Count == 0 && query.Values("notin").Count == 0, knownFolders: Folders.Select(folder => new MailFolderKey(folder.MailboxId, folder.ProviderId)).ToArray(), allowedMailboxIds: mailboxIds))
             .OrderByDescending(static message => message.ReceivedAt)
             .ThenByDescending(static message => message.ProviderId, StringComparer.Ordinal)
             .ToArray();
         cancellationToken.ThrowIfCancellationRequested();
-        _latestMailMailboxIds = mailboxIds;
-        _latestMailAccount = account;
-        _latestMailQuery = query;
-        _latestMailFolders = folders;
         _latestMailSearchResults.Clear();
         _latestMailSearchResults.AddRange(messages);
         return messages.Take(100)
@@ -2934,7 +2921,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 await ShowWorkspaceModuleAsync("Drive");
                 if (IsFilesModule && !IsGlobalSearchOpen && SearchText.Trim() == query)
                 {
-                    DriveWorkspace?.ShowGlobalSearchResults(query, files);
+                    DriveWorkspace?.ShowGlobalSearchResults(SearchQuery.Parse(query).Text, files);
                 }
                 break;
             default:
@@ -5287,11 +5274,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private async Task ReplyToAsync(MailMessage message, Action? accepted = null)
     {
-        var attachments = await LoadComposeSourceAttachmentsAsync(message, includeFiles: false);
-        if (attachments is null)
+        if (await LoadComposeSourceAsync(message, includeFiles: false) is not { } source)
         {
             return;
         }
+        (message, var attachments) = source;
         var (accountId, mailboxId) = ReplySender(message);
         await RequestComposeAsync(new ComposeRequest(
             message.From.Address,
@@ -5322,11 +5309,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        var attachments = await LoadComposeSourceAttachmentsAsync(message, includeFiles: false);
-        if (attachments is null)
+        if (await LoadComposeSourceAsync(message, includeFiles: false) is not { } source)
         {
             return;
         }
+        (message, var attachments) = source;
         var (accountId, mailboxId) = ReplySender(message);
         await RequestComposeAsync(new ComposeRequest(
             recipients[0],
@@ -5348,11 +5335,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private async Task ForwardMessageAsync(MailMessage message, Action? accepted = null)
     {
-        var attachments = await LoadComposeSourceAttachmentsAsync(message, includeFiles: true);
-        if (attachments is null)
+        if (await LoadComposeSourceAsync(message, includeFiles: true) is not { } source)
         {
             return;
         }
+        (message, var attachments) = source;
         var subject = PrefixSubject(message.Subject, "Fwd:");
         await RequestComposeAsync(new ComposeRequest(
             Subject: subject,
@@ -5367,6 +5354,37 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             IsHtml: true,
             Intent: ComposeIntent.Forward,
             ConversationIdentity: BetterMail.Core.ConversationThread.ThreadIdentity(message)), accepted);
+    }
+
+    private async Task<(MailMessage Message, IReadOnlyList<MailAttachment> Attachments)?> LoadComposeSourceAsync(
+        MailMessage message,
+        bool includeFiles)
+    {
+        if (message.Body is null && _store is not null)
+        {
+            try
+            {
+                var full = await GetCachedMessageAsync(message);
+                if (full?.Body is null && _provider is not null && TryGetMessageContext(message, out var account, out var mailbox))
+                {
+                    full = await _provider.GetMessageAsync(account, mailbox, message.ProviderId);
+                }
+                if (full is null || (full.Body is null && !string.IsNullOrEmpty(full.Preview)))
+                {
+                    Error = "The original message body is unavailable.";
+                    return null;
+                }
+                message = full;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                Error = $"The original message could not be loaded: {exception.Message}";
+                return null;
+            }
+        }
+
+        var attachments = await LoadComposeSourceAttachmentsAsync(message, includeFiles);
+        return attachments is null ? null : (message, attachments);
     }
 
     private async Task<IReadOnlyList<MailAttachment>?> LoadComposeSourceAttachmentsAsync(
@@ -5411,7 +5429,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             return Task.CompletedTask;
         }
-        var index = Messages.IndexOf(SelectedMessage);
+        var index = IndexOfMessage(SelectedMessage, startIndex: 0);
         if (index < 0)
         {
             return Task.CompletedTask;
