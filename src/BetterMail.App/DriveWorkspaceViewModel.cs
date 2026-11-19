@@ -21,6 +21,7 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
     private DriveItemEntry? _selectedItem;
     private DriveSearchResult? _selectedSearchResult;
     private DriveAccountFilter? _selectedAccountFilter;
+    private IReadOnlyList<CloudFile>? _globalSearchFiles;
     private DriveItemEntry? _pendingDelete;
     private string _searchQuery = "";
     private string _newFolderName = "";
@@ -31,6 +32,8 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
     private bool _initialized;
     private bool _isNavigating;
     private int _navigationVersion;
+    private int _searchVersion;
+    private int _runningSearchVersion;
     private DriveViewMode _viewMode;
 
     public DriveWorkspaceViewModel(
@@ -144,7 +147,15 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         {
             if (SetProperty(ref _selectedAccountFilter, value) && IsSearchMode)
             {
-                _ = SearchAsync();
+                if (_globalSearchFiles is { } files)
+                {
+                    SetSearchResults(files, SelectedSearchAccounts());
+                    SelectedSearchResult = null;
+                }
+                else
+                {
+                    _ = SearchAsync();
+                }
             }
         }
     }
@@ -244,7 +255,7 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         }
         if (Roots.Count > 0)
         {
-            await SelectDirectoryAsync(Roots[0], cancellationToken);
+            await SelectDirectoryAsync(Roots[0], preserveGlobalSearch: true, cancellationToken);
         }
     }
 
@@ -289,11 +300,15 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         }
         if (SelectedDirectory is null && Roots.Count > 0)
         {
-            await SelectDirectoryAsync(Roots[0], cancellationToken);
+            await SelectDirectoryAsync(Roots[0], preserveGlobalSearch: true, cancellationToken);
         }
     }
 
-    public async Task SelectDirectoryAsync(DriveTreeNode node, CancellationToken cancellationToken = default)
+    public Task SelectDirectoryAsync(DriveTreeNode node, CancellationToken cancellationToken = default) =>
+        SelectDirectoryAsync(node, preserveGlobalSearch: false, cancellationToken);
+
+    private async Task SelectDirectoryAsync(
+        DriveTreeNode node, bool preserveGlobalSearch, CancellationToken cancellationToken)
     {
         if (node.IsPlaceholder || node.Item?.IsFolder == false)
         {
@@ -308,8 +323,12 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
             SelectedDirectory = node;
             CollectionUpdates.Reconcile(CurrentItems, Entries(node), static entry => entry.Identity);
             SelectedItem = null;
-            SelectedSearchResult = null;
-            IsSearchMode = false;
+            if (!preserveGlobalSearch || _globalSearchFiles is null)
+            {
+                SelectedSearchResult = null;
+                _globalSearchFiles = null;
+                IsSearchMode = false;
+            }
         }
         finally
         {
@@ -447,37 +466,50 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
     private Task RefreshSelectedAsync() =>
         SelectedDirectory is null ? Task.CompletedTask : RefreshNodeAsync(SelectedDirectory);
 
+    internal void ShowGlobalSearchResults(string query, IReadOnlyList<CloudFile> files)
+    {
+        ++_searchVersion;
+        ++_navigationVersion;
+        IsNavigating = false;
+        _globalSearchFiles = files;
+        SearchQuery = query;
+        OperationError = null;
+        SetProperty(ref _selectedAccountFilter, AccountFilters[0], nameof(SelectedAccountFilter));
+        SetSearchResults(files, _accounts);
+        SelectedSearchResult = null;
+        IsSearchMode = true;
+        RefreshCommands();
+    }
+
     private async Task SearchAsync()
     {
         OperationError = null;
-        if (string.IsNullOrWhiteSpace(SearchQuery))
+        var query = SearchQuery.Trim();
+        if (query.Length == 0)
         {
             await ClearSearchAsync();
             return;
         }
+        var version = _runningSearchVersion = ++_searchVersion;
+        _globalSearchFiles = null;
+        var selectedAccount = SelectedAccountFilter?.Account;
+        var accounts = SelectedSearchAccounts();
         IsBusy = true;
         try
         {
-            var accounts = SelectedAccountFilter?.Account is { } account ? [account] : _accounts;
             if (_store is not null)
             {
                 var cached = await _store.SearchWorkspaceItemsAsync<CloudFile>(
-                    "drive-file", SearchQuery.Trim(), 200,
-                    SelectedAccountFilter?.Account?.AccountId);
-                CollectionUpdates.Reconcile(SearchResults, cached
-                    .Select(file => (File: file, Account: accounts.FirstOrDefault(
-                        candidate => candidate.AccountId == file.AccountId)))
-                    .Where(static item => item.Account is not null)
-                    .Select(static item => new DriveSearchResult(item.Account!, item.File))
-                    .OrderBy(static result => result.File.Name, StringComparer.OrdinalIgnoreCase),
-                    static result => result.Identity);
+                    "drive-file", query, 200, selectedAccount?.AccountId);
+                if (version != _searchVersion) return;
+                SetSearchResults(cached, accounts);
                 IsSearchMode = true;
             }
             var batches = await Task.WhenAll(accounts.Select(async candidate =>
             {
                 try
                 {
-                    var files = await _provider.SearchFilesAsync(candidate, SearchQuery.Trim());
+                    var files = await _provider.SearchFilesAsync(candidate, query);
                     if (_store is not null)
                     {
                         await _store.UpsertWorkspaceItemsAsync(
@@ -493,6 +525,7 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
                     return new DriveSearchBatch(candidate, [], exception.Message);
                 }
             }));
+            if (version != _searchVersion) return;
             foreach (var failed in batches.Where(static batch => batch.Error is not null))
             {
                 RecordIssue(failed.Account, failed.Error!);
@@ -511,8 +544,23 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         }
         finally
         {
-            IsBusy = false;
+            if (version == _runningSearchVersion) IsBusy = false;
         }
+    }
+
+    private IReadOnlyList<MailAccount> SelectedSearchAccounts() =>
+        SelectedAccountFilter?.Account is { } account ? [account] : _accounts;
+
+    private void SetSearchResults(IEnumerable<CloudFile> files, IReadOnlyList<MailAccount> accounts)
+    {
+        var results = from file in files
+                      let account = accounts.FirstOrDefault(candidate => candidate.AccountId == file.AccountId &&
+                          (file.AccountProviderId is null || candidate.ProviderId == file.AccountProviderId))
+                      where account is not null
+                      select new DriveSearchResult(account, file);
+        CollectionUpdates.Reconcile(SearchResults, results.DistinctBy(static result => result.Identity)
+            .OrderBy(static result => result.File.Name, StringComparer.OrdinalIgnoreCase),
+            static result => result.Identity);
     }
 
     private static CloudFile ToCloudFile(CloudDriveItem item) => new(
@@ -540,6 +588,8 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
 
     private Task ClearSearchAsync()
     {
+        ++_searchVersion;
+        _globalSearchFiles = null;
         SearchQuery = "";
         SearchResults.Clear();
         SelectedSearchResult = null;

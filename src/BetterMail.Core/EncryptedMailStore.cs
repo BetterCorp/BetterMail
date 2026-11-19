@@ -649,14 +649,24 @@ public sealed partial class EncryptedMailStore(string databasePath, string key) 
             await Task.Yield();
         }
     }
-    public async Task<MailMessage?> GetMessageAsync(
+    public Task<MailMessage?> GetMessageAsync(
         string mailboxId,
         string providerMessageId,
         CancellationToken cancellationToken = default) =>
+        GetMessageAsync(mailboxId, providerMessageId, includeBody: true, cancellationToken);
+
+    public Task<MailMessage?> GetMessageSummaryAsync(
+        string mailboxId,
+        string providerMessageId,
+        CancellationToken cancellationToken = default) =>
+        GetMessageAsync(mailboxId, providerMessageId, includeBody: false, cancellationToken);
+
+    private async Task<MailMessage?> GetMessageAsync(string mailboxId, string providerMessageId,
+        bool includeBody, CancellationToken cancellationToken) =>
         (await QueryReadingPaneMessagesAsync(
             "WHERE mailbox_id = $mailbox AND provider_id = $provider",
             1,
-            true,
+            includeBody,
             cancellationToken,
             ("$mailbox", mailboxId),
             ("$provider", providerMessageId)).ConfigureAwait(false)).SingleOrDefault();

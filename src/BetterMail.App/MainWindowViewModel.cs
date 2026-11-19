@@ -105,6 +105,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private int _selectionVersion;
     private CancellationTokenSource? _selectionWorkCancellation;
     private CancellationTokenSource? _globalSearchCancellation;
+    private bool _isGlobalSearchDebouncing;
     private CancellationTokenSource? _signInCancellation;
     // ponytail: one small shared result set; use UI-thread dispatch if search mutation grows.
     private readonly object _globalSearchResultsGate = new();
@@ -254,8 +255,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         SelectFolderCommand = new AsyncCommand<MailFolderItem>(SelectFolderAsync, allowConcurrent: true);
         LoadMoreMessagesCommand = new AsyncCommand(LoadMoreMessagesAsync, () => HasMoreMessages && !_isLoadingMoreMessages);
         SearchCommand = new AsyncCommand(() => StartGlobalSearchAsync(debounce: false, forceOpen: true), () => _store is not null, allowConcurrent: true);
+        SubmitGlobalSearchCommand = new AsyncCommand(SubmitGlobalSearchAsync, () => _store is not null, allowConcurrent: true);
         OpenGlobalSearchResultCommand = new AsyncCommand<GlobalSearchResult>(OpenGlobalSearchResultAsync);
         OpenGlobalSearchGroupCommand = new AsyncCommand<GlobalSearchResult>(OpenGlobalSearchGroupAsync);
+        OpenAllGlobalMailResultsCommand = new AsyncCommand(OpenAllGlobalMailResultsAsync, () =>
+            !IsGlobalSearchRunning && _latestMailSearchResults.Count > 0);
+        ClearWorkspaceSearchResultsCommand = new AsyncCommand(() =>
+        {
+            WorkspaceSearchResults = [];
+            return Task.CompletedTask;
+        });
         CloseGlobalSearchCommand = new AsyncCommand(CloseGlobalSearchAsync);
         ClearGlobalSearchCommand = new AsyncCommand(ClearGlobalSearchAsync);
         ClearSearchResultsCommand = new AsyncCommand(ClearSearchResultsAsync);
@@ -497,6 +506,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     public ICommand SearchCommand { get; }
     public ICommand OpenGlobalSearchResultCommand { get; }
     public ICommand OpenGlobalSearchGroupCommand { get; }
+    public ICommand SubmitGlobalSearchCommand { get; }
+    public ICommand OpenAllGlobalMailResultsCommand { get; }
+    public ICommand ClearWorkspaceSearchResultsCommand { get; }
     public ICommand CloseGlobalSearchCommand { get; }
     public ICommand ClearGlobalSearchCommand { get; }
     public ICommand ClearSearchResultsCommand { get; }
@@ -588,6 +600,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         set
         {
             var isMetadataUpdate = SameMessage(_selectedMessage, value);
+            if (isMetadataUpdate && value is { Body: null } && _selectedMessage?.Body is { } body)
+            {
+                value = value with { Body = body };
+            }
             if (SetProperty(ref _selectedMessage, value))
             {
                 if (isMetadataUpdate)
@@ -960,6 +976,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 ++_messageLoadVersion;
                 IsLoadingMessages = false;
             }
+            WorkspaceSearchResults = [];
 
             RaisePropertyChanged(nameof(IsMailModule));
             RaisePropertyChanged(nameof(IsWorkspaceModule));
@@ -1138,7 +1155,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     public bool IsGlobalSearchRunning
     {
         get => _isGlobalSearchRunning;
-        private set => SetProperty(ref _isGlobalSearchRunning, value);
+        private set
+        {
+            if (SetProperty(ref _isGlobalSearchRunning, value))
+            {
+                ((AsyncCommand)OpenAllGlobalMailResultsCommand).Refresh();
+            }
+        }
     }
 
     public bool IsSettingsOpen
@@ -2089,16 +2112,19 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         _globalSearchCancellation?.Dispose();
         _globalSearchCancellation = new CancellationTokenSource();
         var source = _globalSearchCancellation;
+        var token = source.Token;
+        _isGlobalSearchDebouncing = false;
         var rawQuery = SearchText.Trim();
         var query = rawQuery;
         SearchError = null;
         lock (_globalSearchResultsGate)
         {
             GlobalSearchResults.Clear();
+            _latestMailSearchResults.Clear();
         }
+        _latestDriveSearchResults = [];
         if (_store is null || query.Length == 0)
         {
-            ClearLatestMailSearchResults();
             IsGlobalSearchRunning = false;
             IsGlobalSearchOpen = false;
             return;
@@ -2133,23 +2159,21 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         catch (FormatException exception)
         {
             SearchError = exception.Message;
-            ClearLatestMailSearchResults();
             IsGlobalSearchRunning = false;
             IsGlobalSearchOpen = true;
             return;
         }
 
+        _isGlobalSearchDebouncing = debounce;
         IsGlobalSearchRunning = true;
         IsGlobalSearchOpen = true;
-        if (!parsed.Includes("Mail"))
-        {
-            ClearLatestMailSearchResults();
-        }
         try
         {
             if (debounce)
             {
-                await Task.Delay(300, source.Token);
+                await Task.Delay(300, token);
+                token.ThrowIfCancellationRequested();
+                _isGlobalSearchDebouncing = false;
             }
 
             var searches = new List<Task>();
@@ -2157,17 +2181,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             {
                 var localMailSearch = AddGlobalResultsAsync(
                     "Mail",
-                    SearchCachedMailGloballyAsync(parsed, searchFolders, source.Token),
+                    SearchCachedMailGloballyAsync(parsed, searchFolders, token),
                     source);
                 searches.Add(localMailSearch);
                 if (!parsed.HasMailFilters && query.Length > 0)
-                    searches.Add(EnrichMailSearchFromProviderAsync(query, localMailSearch, source));
+                    searches.Add(EnrichMailSearchFromProviderAsync(query, localMailSearch, token));
             }
-            AddSearch("People", () => SearchPeopleGloballyAsync(query, source.Token));
-            AddSearch("Calendar", () => SearchCalendarGloballyAsync(query, source.Token));
-            AddSearch("To Do", () => SearchTasksGloballyAsync(query, source.Token));
-            AddSearch("Drive", () => SearchDriveGloballyAsync(query, source.Token, parsed));
-            AddSearch("Notes", () => SearchNotesGloballyAsync(query, source.Token));
+            AddSearch("People", () => SearchPeopleGloballyAsync(query, token));
+            AddSearch("Calendar", () => SearchCalendarGloballyAsync(query, token));
+            AddSearch("To Do", () => SearchTasksGloballyAsync(query, token));
+            AddSearch("Drive", () => SearchDriveGloballyAsync(query, token, parsed));
+            AddSearch("Notes", () => SearchNotesGloballyAsync(query, token));
             await Task.WhenAll(searches);
 
             void AddSearch(string category, Func<Task<IReadOnlyList<GlobalSearchResult>>> search)
@@ -2186,18 +2210,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             if (ReferenceEquals(_globalSearchCancellation, source))
             {
+                _isGlobalSearchDebouncing = false;
                 IsGlobalSearchRunning = false;
             }
         }
-    }
-
-    private void ClearLatestMailSearchResults()
-    {
-        if (_latestMailSearchResults.Count == 0)
-        {
-            return;
-        }
-        _latestMailSearchResults.Clear();
     }
 
     private async Task AddGlobalResultsAsync(
@@ -2225,6 +2241,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             {
                 return;
             }
+            if (category == "Drive")
+            {
+                _latestDriveSearchResults = results.Select(result => result.Value).OfType<CloudFile>().ToArray();
+                results = results.Take(40).ToArray();
+            }
             foreach (var result in results
                 .Select(result => result with { AccountGroup = SearchGroupFor(result.Value) }))
             {
@@ -2244,16 +2265,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         var cachedMailboxes = Mailboxes.Count > 0 ? Mailboxes.ToArray() : await _store!.GetMailboxesAsync(cancellationToken);
         var mailboxIds = selectedAccounts.Count == 0 ? null : cachedMailboxes.Where(mailbox => selectedAccounts.Any(item =>
             item.MailboxId is { } id ? mailbox.Id == id : mailbox.AccountId == item.AccountId)).Select(mailbox => mailbox.Id).ToArray();
+        cancellationToken.ThrowIfCancellationRequested();
+        _latestMailMailboxIds = mailboxIds;
+        _latestMailAccount = account;
+        _latestMailQuery = query;
+        _latestMailFolders = folders;
         var messages = (await _store!.SearchFilteredMailAsync(query, folders, 500, cancellationToken,
                 account?.AccountId, account?.MailboxId, includeUnknownFolders: query.Values("in").Count == 0 && query.Values("notin").Count == 0, knownFolders: Folders.Select(folder => new MailFolderKey(folder.MailboxId, folder.ProviderId)).ToArray(), allowedMailboxIds: mailboxIds))
             .OrderByDescending(static message => message.ReceivedAt)
             .ThenByDescending(static message => message.ProviderId, StringComparer.Ordinal)
             .ToArray();
         cancellationToken.ThrowIfCancellationRequested();
-        _latestMailMailboxIds = mailboxIds;
-        _latestMailAccount = account;
-        _latestMailQuery = query;
-        _latestMailFolders = folders;
         _latestMailSearchResults.Clear();
         _latestMailSearchResults.AddRange(messages);
         return messages.Take(100)
@@ -2264,11 +2286,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private async Task EnrichMailSearchFromProviderAsync(
         string query,
         Task localResultsAdded,
-        CancellationTokenSource source)
+        CancellationToken token)
     {
         await localResultsAdded;
-        if (_provider is null || _store is null || source.IsCancellationRequested ||
-            !ReferenceEquals(_globalSearchCancellation, source))
+        if (_provider is null || _store is null || token.IsCancellationRequested)
         {
             return;
         }
@@ -2276,8 +2297,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         var remoteMessages = new List<MailMessage>();
         foreach (var mailbox in Mailboxes.Where(MailboxMatchesSearchFilters))
         {
-            source.Token.ThrowIfCancellationRequested();
-            if (await IsMailboxSearchCoverageCompleteAsync(mailbox, source.Token))
+            token.ThrowIfCancellationRequested();
+            if (await IsMailboxSearchCoverageCompleteAsync(mailbox, token))
             {
                 continue;
             }
@@ -2290,7 +2311,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
             try
             {
-                var found = await _provider.SearchMessagesAsync(account, mailbox, query, 250, source.Token);
+                var found = await _provider.SearchMessagesAsync(account, mailbox, query, 250, token);
                 if (found.Count == 0)
                 {
                     continue;
@@ -2298,10 +2319,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 await _store.ApplySyncPageAsync(
                     $"search-import:{mailbox.Id}",
                     new MailSyncPage(found, null, false),
-                    source.Token);
+                    token);
                 foreach (var message in found)
                 {
-                    var local = await _store.GetMessageAsync(message.MailboxId, message.ProviderId, source.Token);
+                    var local = await _store.GetMessageSummaryAsync(message.MailboxId, message.ProviderId, token);
                     if (local is not null && IsSearchableMail(local)) remoteMessages.Add(local);
                 }
             }
@@ -2311,8 +2332,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             }
         }
 
-        if (remoteMessages.Count == 0 || source.IsCancellationRequested ||
-            !ReferenceEquals(_globalSearchCancellation, source))
+        if (remoteMessages.Count == 0 || token.IsCancellationRequested)
         {
             return;
         }
@@ -2529,10 +2549,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         if (parsed.IsDrivePathSearch && parsed.Values("in").Count + parsed.Values("notin").Count > 0)
         {
             var ids = _queryAccounts.Count == 0 ? null : _queryAccounts.Where(item => item.MailboxId is null).Select(item => item.AccountId!).Distinct().ToArray();
-            return DriveResults(await _store!.SearchFilteredDriveFilesAsync(parsed, ids, cancellationToken: cancellationToken));
+            return DriveResults(await _store!.SearchFilteredDriveFilesAsync(parsed, ids, limit: 200, cancellationToken: cancellationToken));
         }
         var cached = await SearchSelectedWorkspaceCacheAsync<CloudFile>(
-            "drive-file", query, 40, cancellationToken);
+            "drive-file", query, 200, cancellationToken);
         if (cached.Count > 0 || _workspaceProvider is null)
         {
             return DriveResults(cached);
@@ -2553,7 +2573,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         }
         return DriveResults(files);
 
-        static IReadOnlyList<GlobalSearchResult> DriveResults(IEnumerable<CloudFile> source) => source.Take(40)
+        static IReadOnlyList<GlobalSearchResult> DriveResults(IEnumerable<CloudFile> source) => source
             .Select(item => new GlobalSearchResult("Drive", item.Name, item.Path, "Drive", item))
             .ToArray();
     }
@@ -2838,6 +2858,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private async Task OpenGlobalSearchResultAsync(GlobalSearchResult result)
     {
+        var query = IsGlobalSearchOpen ? SearchText : _workspaceSearchQuery ?? SearchText;
         IsGlobalSearchOpen = false;
         switch (result.Module)
         {
@@ -2845,7 +2866,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 ShowMailSearchResults(message);
                 break;
             case "People":
-                ModuleSearchText = SearchQuery.Parse(SearchText).Text;
+                ModuleSearchText = SearchQuery.Parse(query).Text;
                 await ShowWorkspaceModuleAsync("People");
                 break;
             case "Calendar":
@@ -2859,7 +2880,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 await ShowWorkspaceModuleAsync("To Do");
                 if (TasksWorkspace is not null)
                 {
-                    TasksWorkspace.SearchText = SearchQuery.Parse(SearchText).Text;
+                    TasksWorkspace.SearchText = SearchQuery.Parse(query).Text;
                     TasksWorkspace.SearchCommand.Execute(null);
                 }
                 break;
@@ -2867,7 +2888,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 await ShowWorkspaceModuleAsync("Drive");
                 if (DriveWorkspace is not null)
                 {
-                    DriveWorkspace.SearchQuery = SearchQuery.Parse(SearchText).Text;
+                    DriveWorkspace.SearchQuery = SearchQuery.Parse(query).Text;
                     await ((AsyncCommand)DriveWorkspace.SearchCommand).ExecuteAsync();
                 }
                 break;
@@ -2875,11 +2896,52 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 await ShowWorkspaceModuleAsync("Notes");
                 if (NotesWorkspace is not null)
                 {
-                    NotesWorkspace.SearchText = SearchQuery.Parse(SearchText).Text;
+                    NotesWorkspace.SearchText = SearchQuery.Parse(query).Text;
                     await ((AsyncCommand)NotesWorkspace.SearchCommand).ExecuteAsync();
                 }
                 break;
         }
+    }
+
+    private async Task SubmitGlobalSearchAsync()
+    {
+        if (!IsGlobalSearchOpen || _isGlobalSearchDebouncing)
+        {
+            await StartGlobalSearchAsync(debounce: false, forceOpen: true);
+            return;
+        }
+        if (IsGlobalSearchRunning || GlobalSearchResults.FirstOrDefault(result => result.Value is not null) is not { } first)
+        {
+            return;
+        }
+        switch (first.Module)
+        {
+            case "Mail":
+                await OpenAllGlobalMailResultsAsync();
+                break;
+            case "Drive":
+                if (_workspaceProvider is not null && CanOpenWorkspaceModule())
+                {
+                    var terms = SearchQuery.Parse(SearchText).Text;
+                    IsGlobalSearchOpen = false;
+                    GetOrCreateDriveWorkspace(_workspaceProvider).ShowGlobalSearchResults(terms, _latestDriveSearchResults);
+                    await ShowWorkspaceModuleAsync("Drive");
+                }
+                break;
+            default:
+                var results = GlobalSearchResults
+                    .Where(result => result.Module == first.Module && result.Value is not null)
+                    .ToArray();
+                IsGlobalSearchOpen = false;
+                await ShowWorkspaceModuleAsync(first.Module, results);
+                break;
+        }
+    }
+
+    private Task OpenAllGlobalMailResultsAsync()
+    {
+        ShowMailSearchResults(null);
+        return Task.CompletedTask;
     }
 
     private Task CloseGlobalSearchAsync()
@@ -2914,6 +2976,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         MailMessage? selected,
         IReadOnlyList<MailMessage>? results = null)
     {
+        _messageLoadCancellation?.Cancel();
+        ++_messageLoadVersion;
+        _messagePageCursor = null;
+        IsLoadingMessages = false;
         IsGlobalSearchOpen = false;
         IsSettingsOpen = false;
         ActiveModule = "Mail";
@@ -2933,13 +2999,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         RaisePropertyChanged(nameof(SearchResultSummary));
         IsSearchResultsView = true;
         Replace(Messages, (results ?? _latestMailSearchResults)
+            .Select(message => _store is null || message.Body is null ? message : message with { Body = null })
             .OrderByDescending(static message => message.ReceivedAt)
             .ThenByDescending(static message => message.ProviderId, StringComparer.Ordinal));
         SelectedMessages.Clear();
-        SelectedMessage = selected is null
-            ? Messages.FirstOrDefault()
-            : Messages.FirstOrDefault(candidate => SameMessage(candidate, selected)) ?? Messages.FirstOrDefault();
+        SelectedMessage = selected is not null && Messages.Any(candidate => SameMessage(candidate, selected))
+            ? selected
+            : Messages.FirstOrDefault();
         RaisePropertyChanged(nameof(CurrentFolderName));
+        RaisePropertyChanged(nameof(HasMoreMessages));
+        ((AsyncCommand)LoadMoreMessagesCommand).Refresh();
         RaiseMessageState();
     }
 
@@ -3273,7 +3342,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 ? TasksWorkspace is null ? LoadTasksWorkspaceAsync() : ((AsyncCommand)TasksWorkspace.RefreshCommand).ExecuteAsync()
             : LoadPeopleAsync();
 
-    private async Task ShowWorkspaceModuleAsync(string module)
+    private async Task ShowWorkspaceModuleAsync(string module, IReadOnlyList<GlobalSearchResult>? searchResults = null)
     {
         if (_workspaceProvider is null || !CanOpenWorkspaceModule())
         {
@@ -3282,6 +3351,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
         IsSettingsOpen = false;
         ActiveModule = module;
+        _workspaceSearchQuery = searchResults is null ? null : SearchText;
+        WorkspaceSearchResults = searchResults ?? [];
         if (module == "Calendar")
         {
             Error = null;
@@ -3496,15 +3567,22 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        if (DriveWorkspace is null)
+        var drive = GetOrCreateDriveWorkspace(_workspaceProvider);
+        await drive.UpdateAccountsAsync(AccountsWith(ProviderCapabilities.Files));
+        await drive.InitializeAsync();
+    }
+
+    private DriveWorkspaceViewModel GetOrCreateDriveWorkspace(IWorkspaceProvider provider)
+    {
+        if (DriveWorkspace is { } existing)
         {
-            DriveWorkspace = new DriveWorkspaceViewModel(
-                _workspaceProvider, AccountsWith(ProviderCapabilities.Files), _store);
-            DriveWorkspace.ItemChosen += HandleDriveItemChosen;
-            DriveWorkspace.LinkChosen += HandleDriveLinkChosen;
+            return existing;
         }
-        await DriveWorkspace.UpdateAccountsAsync(AccountsWith(ProviderCapabilities.Files));
-        await DriveWorkspace.InitializeAsync();
+        var drive = new DriveWorkspaceViewModel(provider, AccountsWith(ProviderCapabilities.Files), _store);
+        drive.ItemChosen += HandleDriveItemChosen;
+        drive.LinkChosen += HandleDriveLinkChosen;
+        DriveWorkspace = drive;
+        return drive;
     }
 
     private Task LoadTasksWorkspaceAsync() => LoadWorkspaceOnceAsync("Tasks", LoadTasksWorkspaceCoreAsync);
@@ -4377,19 +4455,20 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         try
         {
             var wasSelected = IsCurrentMessage(original);
+            var row = _store is not null && updated.Body is not null ? updated with { Body = null } : updated;
             var selectedIndex = SelectedMessages.ToList().FindIndex(message => SameMessage(message, original));
             var index = Messages.ToList().FindIndex(message => SameMessage(message, original));
-            if (index >= 0)
+            if (index >= 0 && !Messages[index].HasSameContent(row))
             {
-                Messages[index] = updated;
+                Messages[index] = row;
             }
             if (wasSelected)
             {
                 SelectedMessage = updated;
             }
-            if (selectedIndex >= 0)
+            if (selectedIndex >= 0 && !SelectedMessages[selectedIndex].HasSameContent(row))
             {
-                SelectedMessages[selectedIndex] = updated;
+                SelectedMessages[selectedIndex] = row;
             }
         }
         finally
@@ -4427,10 +4506,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             for (var index = 0; index < updated.Count; index++)
             {
                 var message = updated[index];
-                if (SameMessage(selected, message) && selected?.Body is not null && message.Body is null)
-                {
-                    message = message with { Body = selected.Body };
-                }
                 if (index >= Messages.Count)
                 {
                     Messages.Add(message);
@@ -5210,11 +5285,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private async Task ReplyToAsync(MailMessage message, Action? accepted = null)
     {
-        var attachments = await LoadComposeSourceAttachmentsAsync(message, includeFiles: false);
-        if (attachments is null)
+        if (await LoadComposeSourceAsync(message, includeFiles: false) is not { } source)
         {
             return;
         }
+        (message, var attachments) = source;
         var (accountId, mailboxId) = ReplySender(message);
         await RequestComposeAsync(new ComposeRequest(
             message.From.Address,
@@ -5245,11 +5320,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        var attachments = await LoadComposeSourceAttachmentsAsync(message, includeFiles: false);
-        if (attachments is null)
+        if (await LoadComposeSourceAsync(message, includeFiles: false) is not { } source)
         {
             return;
         }
+        (message, var attachments) = source;
         var (accountId, mailboxId) = ReplySender(message);
         await RequestComposeAsync(new ComposeRequest(
             recipients[0],
@@ -5271,11 +5346,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private async Task ForwardMessageAsync(MailMessage message, Action? accepted = null)
     {
-        var attachments = await LoadComposeSourceAttachmentsAsync(message, includeFiles: true);
-        if (attachments is null)
+        if (await LoadComposeSourceAsync(message, includeFiles: true) is not { } source)
         {
             return;
         }
+        (message, var attachments) = source;
         var subject = PrefixSubject(message.Subject, "Fwd:");
         await RequestComposeAsync(new ComposeRequest(
             Subject: subject,
@@ -5290,6 +5365,37 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             IsHtml: true,
             Intent: ComposeIntent.Forward,
             ConversationIdentity: BetterMail.Core.ConversationThread.ThreadIdentity(message)), accepted);
+    }
+
+    private async Task<(MailMessage Message, IReadOnlyList<MailAttachment> Attachments)?> LoadComposeSourceAsync(
+        MailMessage message,
+        bool includeFiles)
+    {
+        if (message.Body is null && _store is not null)
+        {
+            try
+            {
+                var full = await GetCachedMessageAsync(message);
+                if (full?.Body is null && _provider is not null && TryGetMessageContext(message, out var account, out var mailbox))
+                {
+                    full = await _provider.GetMessageAsync(account, mailbox, message.ProviderId);
+                }
+                if (full is null || (full.Body is null && !string.IsNullOrEmpty(full.Preview)))
+                {
+                    Error = "The original message body is unavailable.";
+                    return null;
+                }
+                message = full;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                Error = $"The original message could not be loaded: {exception.Message}";
+                return null;
+            }
+        }
+
+        var attachments = await LoadComposeSourceAttachmentsAsync(message, includeFiles);
+        return attachments is null ? null : (message, attachments);
     }
 
     private async Task<IReadOnlyList<MailAttachment>?> LoadComposeSourceAttachmentsAsync(
@@ -5334,7 +5440,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             return Task.CompletedTask;
         }
-        var index = Messages.IndexOf(SelectedMessage);
+        var index = IndexOfMessage(SelectedMessage, startIndex: 0);
         if (index < 0)
         {
             return Task.CompletedTask;

@@ -105,6 +105,47 @@ public sealed class DriveWorkspaceViewModelTests
     }
 
     [Fact]
+    public async Task GlobalResultsSurviveOlderDirectoryLoadsAndAccountFilterChanges()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var first = Account("good", "good@example.com");
+        var second = Account("other", "other@example.com");
+        var provider = new FakeFilesProvider(first, second)
+        {
+            ReleaseFolderLoad = new(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        var vm = new DriveWorkspaceViewModel(provider, [first, second]);
+        await vm.InitializeAsync(token);
+        var root = vm.Roots[0];
+        var folder = Assert.Single(root.Children);
+        var navigation = vm.SelectDirectoryAsync(folder, token);
+        try
+        {
+            Assert.True(vm.IsNavigating);
+            vm.ShowGlobalSearchResults("Budget",
+                [new("budget", "Budget.docx", 100, null, first.AccountId, first.ProviderId, "Projects")]);
+            Assert.False(vm.IsNavigating);
+
+            vm.SelectedAccountFilter = vm.AccountFilters.Single(filter => filter.Account == second);
+            Assert.Empty(vm.SearchResults);
+            vm.SelectedAccountFilter = vm.AccountFilters.Single(filter => filter.Account == first);
+            Assert.Equal("budget", Assert.Single(vm.SearchResults).File.ProviderId);
+            Assert.Equal(0, provider.SearchCalls);
+        }
+        finally
+        {
+            provider.ReleaseFolderLoad.SetResult();
+            await navigation;
+        }
+
+        Assert.Same(root, vm.SelectedDirectory);
+        Assert.True(vm.IsSearchMode);
+        await vm.SelectDirectoryAsync(folder, token);
+        Assert.Same(folder, vm.SelectedDirectory);
+        Assert.False(vm.IsSearchMode);
+    }
+
+    [Fact]
     public async Task SupportsDriveOperationsAndProviderRelativeSelection()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -192,6 +233,8 @@ public sealed class DriveWorkspaceViewModelTests
         public bool Uploaded { get; private set; }
         public bool Renamed { get; private set; }
         public bool Deleted { get; private set; }
+        public int SearchCalls { get; private set; }
+        public TaskCompletionSource? ReleaseFolderLoad { get; init; }
 
         public FakeFilesProvider(params MailAccount[] healthyAccounts)
         {
@@ -211,19 +254,19 @@ public sealed class DriveWorkspaceViewModelTests
             ];
         }
 
-        public Task<IReadOnlyList<CloudDriveItem>> GetDriveItemsAsync(
+        public async Task<IReadOnlyList<CloudDriveItem>> GetDriveItemsAsync(
             MailAccount account,
             CloudDriveItem? parent = null,
             CancellationToken cancellationToken = default)
         {
             if (!_healthy.Contains(account.AccountId))
             {
-                return Task.FromException<IReadOnlyList<CloudDriveItem>>(
-                    new InvalidOperationException("Drive consent expired."));
+                throw new InvalidOperationException("Drive consent expired.");
             }
+            if (parent is not null && ReleaseFolderLoad is { } release)
+                await release.Task.WaitAsync(cancellationToken);
             var key = parent?.ProviderId ?? "root";
-            IReadOnlyList<CloudDriveItem> result = _items.TryGetValue(key, out var items) ? items.ToArray() : [];
-            return Task.FromResult(result);
+            return _items.TryGetValue(key, out var items) ? items.ToArray() : [];
         }
 
         public Task<IReadOnlyList<CloudFile>> SearchFilesAsync(
@@ -231,6 +274,7 @@ public sealed class DriveWorkspaceViewModelTests
             string query,
             CancellationToken cancellationToken = default)
         {
+            SearchCalls++;
             if (!_healthy.Contains(account.AccountId))
             {
                 return Task.FromException<IReadOnlyList<CloudFile>>(
