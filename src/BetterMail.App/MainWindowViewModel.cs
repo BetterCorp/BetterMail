@@ -105,6 +105,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private int _selectionVersion;
     private CancellationTokenSource? _selectionWorkCancellation;
     private CancellationTokenSource? _globalSearchCancellation;
+    private bool _isGlobalSearchDebouncing;
     private CancellationTokenSource? _signInCancellation;
     // ponytail: one small shared result set; use UI-thread dispatch if search mutation grows.
     private readonly object _globalSearchResultsGate = new();
@@ -2111,6 +2112,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         _globalSearchCancellation?.Dispose();
         _globalSearchCancellation = new CancellationTokenSource();
         var source = _globalSearchCancellation;
+        var token = source.Token;
+        _isGlobalSearchDebouncing = false;
         var rawQuery = SearchText.Trim();
         var query = rawQuery;
         SearchError = null;
@@ -2161,13 +2164,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
+        _isGlobalSearchDebouncing = debounce;
         IsGlobalSearchRunning = true;
         IsGlobalSearchOpen = true;
         try
         {
             if (debounce)
             {
-                await Task.Delay(300, source.Token);
+                await Task.Delay(300, token);
+                token.ThrowIfCancellationRequested();
+                _isGlobalSearchDebouncing = false;
             }
 
             var searches = new List<Task>();
@@ -2175,17 +2181,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             {
                 var localMailSearch = AddGlobalResultsAsync(
                     "Mail",
-                    SearchCachedMailGloballyAsync(parsed, searchFolders, source.Token),
+                    SearchCachedMailGloballyAsync(parsed, searchFolders, token),
                     source);
                 searches.Add(localMailSearch);
                 if (!parsed.HasMailFilters && query.Length > 0)
-                    searches.Add(EnrichMailSearchFromProviderAsync(query, localMailSearch, source));
+                    searches.Add(EnrichMailSearchFromProviderAsync(query, localMailSearch, token));
             }
-            AddSearch("People", () => SearchPeopleGloballyAsync(query, source.Token));
-            AddSearch("Calendar", () => SearchCalendarGloballyAsync(query, source.Token));
-            AddSearch("To Do", () => SearchTasksGloballyAsync(query, source.Token));
-            AddSearch("Drive", () => SearchDriveGloballyAsync(query, source.Token, parsed));
-            AddSearch("Notes", () => SearchNotesGloballyAsync(query, source.Token));
+            AddSearch("People", () => SearchPeopleGloballyAsync(query, token));
+            AddSearch("Calendar", () => SearchCalendarGloballyAsync(query, token));
+            AddSearch("To Do", () => SearchTasksGloballyAsync(query, token));
+            AddSearch("Drive", () => SearchDriveGloballyAsync(query, token, parsed));
+            AddSearch("Notes", () => SearchNotesGloballyAsync(query, token));
             await Task.WhenAll(searches);
 
             void AddSearch(string category, Func<Task<IReadOnlyList<GlobalSearchResult>>> search)
@@ -2204,6 +2210,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             if (ReferenceEquals(_globalSearchCancellation, source))
             {
+                _isGlobalSearchDebouncing = false;
                 IsGlobalSearchRunning = false;
             }
         }
@@ -2279,11 +2286,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private async Task EnrichMailSearchFromProviderAsync(
         string query,
         Task localResultsAdded,
-        CancellationTokenSource source)
+        CancellationToken token)
     {
         await localResultsAdded;
-        if (_provider is null || _store is null || source.IsCancellationRequested ||
-            !ReferenceEquals(_globalSearchCancellation, source))
+        if (_provider is null || _store is null || token.IsCancellationRequested)
         {
             return;
         }
@@ -2291,8 +2297,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         var remoteMessages = new List<MailMessage>();
         foreach (var mailbox in Mailboxes.Where(MailboxMatchesSearchFilters))
         {
-            source.Token.ThrowIfCancellationRequested();
-            if (await IsMailboxSearchCoverageCompleteAsync(mailbox, source.Token))
+            token.ThrowIfCancellationRequested();
+            if (await IsMailboxSearchCoverageCompleteAsync(mailbox, token))
             {
                 continue;
             }
@@ -2305,7 +2311,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
             try
             {
-                var found = await _provider.SearchMessagesAsync(account, mailbox, query, 250, source.Token);
+                var found = await _provider.SearchMessagesAsync(account, mailbox, query, 250, token);
                 if (found.Count == 0)
                 {
                     continue;
@@ -2313,10 +2319,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 await _store.ApplySyncPageAsync(
                     $"search-import:{mailbox.Id}",
                     new MailSyncPage(found, null, false),
-                    source.Token);
+                    token);
                 foreach (var message in found)
                 {
-                    var local = await _store.GetMessageSummaryAsync(message.MailboxId, message.ProviderId, source.Token);
+                    var local = await _store.GetMessageSummaryAsync(message.MailboxId, message.ProviderId, token);
                     if (local is not null && IsSearchableMail(local)) remoteMessages.Add(local);
                 }
             }
@@ -2326,8 +2332,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             }
         }
 
-        if (remoteMessages.Count == 0 || source.IsCancellationRequested ||
-            !ReferenceEquals(_globalSearchCancellation, source))
+        if (remoteMessages.Count == 0 || token.IsCancellationRequested)
         {
             return;
         }
@@ -2900,7 +2905,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private async Task SubmitGlobalSearchAsync()
     {
-        if (!IsGlobalSearchOpen)
+        if (!IsGlobalSearchOpen || _isGlobalSearchDebouncing)
         {
             await StartGlobalSearchAsync(debounce: false, forceOpen: true);
             return;

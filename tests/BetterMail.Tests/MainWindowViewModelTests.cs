@@ -1625,7 +1625,8 @@ public sealed class MainWindowViewModelTests
             // Isolate mail fallback: other workspace searches can reorder the result
             // collection while this headless test inspects the blocked mail search.
             viewModel.SearchText = "type:mail Needle";
-            viewModel.SearchCommand.Execute(null);
+            var firstSubmit = ((AsyncCommand)viewModel.SubmitGlobalSearchCommand).ExecuteAsync();
+            Assert.False(firstSubmit.IsCompleted);
             await WaitUntilAsync(
                 () => provider.SearchCalls == 1 &&
                     viewModel.GlobalSearchResults.Any(result => result.Title == local.Subject),
@@ -1643,6 +1644,7 @@ public sealed class MainWindowViewModelTests
             Assert.True(viewModel.IsGlobalSearchOpen);
             await WaitUntilAsync(() => provider.SearchCalls == 2, cancellationToken);
             provider.SearchRelease.SetResult();
+            await firstSubmit.WaitAsync(cancellationToken);
             await WaitUntilAsync(() => !viewModel.IsGlobalSearchRunning, cancellationToken);
 
             Assert.Contains(viewModel.GlobalSearchResults, result => result.Title == remote.Subject);
