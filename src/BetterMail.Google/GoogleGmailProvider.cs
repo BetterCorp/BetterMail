@@ -746,22 +746,28 @@ public sealed class GoogleGmailProvider(
         string? json,
         CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(method, ApiBase + path);
-        request.Headers.Authorization = new AuthenticationHeaderValue(
-            "Bearer", await authentication.GetAccessTokenAsync(account.AccountId, cancellationToken).ConfigureAwait(false));
-        if (json is not null)
+        var accessToken = await authentication.GetAccessTokenAsync(account.AccountId, cancellationToken).ConfigureAwait(false);
+        for (var attempt = 0; ; attempt++)
         {
-            request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var request = new HttpRequestMessage(method, ApiBase + path);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            if (json is not null) request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+            var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.Unauthorized && attempt == 0)
+            {
+                response.Dispose();
+                // A server rejection overrides the local expiry estimate. Concurrent rejections
+                // reuse a newer saved token instead of forcing separate refreshes.
+                accessToken = await authentication.RefreshRejectedAccessTokenAsync(account.AccountId, accessToken, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+            if (response.IsSuccessStatusCode) return response;
+            using (response)
+            {
+                var error = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                throw new GoogleApiException(response.StatusCode, ErrorMessage(error));
+            }
         }
-        var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-        if (response.IsSuccessStatusCode)
-        {
-            return response;
-        }
-        var error = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        var status = response.StatusCode;
-        response.Dispose();
-        throw new GoogleApiException(status, ErrorMessage(error));
     }
 
     private IReadOnlyDictionary<string, string> LabelNames(string accountId) =>
