@@ -605,9 +605,9 @@ public sealed partial class MainWindow : Window
             args.Handled = true;
             return;
         }
-        if (args.Key == Key.Enter && _viewModel?.SearchCommand.CanExecute(null) == true)
+        if (args.Key == Key.Enter && _viewModel?.SubmitGlobalSearchCommand.CanExecute(null) == true)
         {
-            _viewModel.SearchCommand.Execute(null);
+            _viewModel.SubmitGlobalSearchCommand.Execute(null);
             args.Handled = true;
         }
     }

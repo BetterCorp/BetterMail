@@ -14,6 +14,22 @@ public sealed partial class MainWindowViewModel
     private IReadOnlyList<MailFolderKey> _latestMailFolders = [];
     private SearchQuery? _displayedMailQuery;
     private IReadOnlyList<MailFolderKey> _displayedMailFolders = [];
+    private IReadOnlyList<CloudFile> _latestDriveSearchResults = [];
+    private string? _workspaceSearchQuery;
+    private IReadOnlyList<GlobalSearchResult> _workspaceSearchResults = [];
+    public IReadOnlyList<GlobalSearchResult> WorkspaceSearchResults
+    {
+        get => _workspaceSearchResults;
+        private set
+        {
+            if (value.Count == 0) _workspaceSearchQuery = null;
+            if (SetProperty(ref _workspaceSearchResults, value))
+            {
+                RaisePropertyChanged(nameof(HasWorkspaceSearchResults));
+            }
+        }
+    }
+    public bool HasWorkspaceSearchResults => WorkspaceSearchResults.Count > 0;
     private string _mailSearchSummary = "";
     private string? _searchError;
     private string _searchNotice = "";

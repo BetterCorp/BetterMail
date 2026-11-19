@@ -57,6 +57,12 @@ public sealed class MessageReadTests
                 }
                 await WaitForBodyAsync().WaitAsync(TimeSpan.FromSeconds(5), token);
                 Assert.Equal(body, vm.SelectedMessage!.Body);
+                Assert.Null(vm.Messages[0].Body);
+                vm.Messages.Add(reply with { Body = null });
+                vm.SelectedMessage = vm.Messages[1];
+                await WaitForBodyAsync().WaitAsync(TimeSpan.FromSeconds(5), token);
+                Assert.Equal(reply.ProviderId, vm.SelectedMessage!.ProviderId);
+                Assert.All(vm.Messages, item => Assert.Null(item.Body));
                 TestContext.Current.TestOutputHelper!.WriteLine($"Full body, thread and reading pane while writer/folder gates held: {clock.ElapsedMilliseconds} ms");
                 await transaction.CommitAsync(token);
             }

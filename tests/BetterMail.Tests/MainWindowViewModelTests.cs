@@ -1484,9 +1484,51 @@ public sealed class MainWindowViewModelTests
             Assert.DoesNotContain(account.EmailAddress, mailResult.Subtitle);
             Assert.True(mailResult.StartsAccountGroup);
 
+            await ((AsyncCommand)viewModel.SubmitGlobalSearchCommand).ExecuteAsync();
+            Assert.False(viewModel.IsGlobalSearchOpen);
+            Assert.Equal("Drive", viewModel.ActiveModule);
+            Assert.True(viewModel.DriveWorkspace!.IsSearchMode);
+            Assert.Equal(2, viewModel.DriveWorkspace.SearchResults.Count);
+
+            await ((AsyncCommand)viewModel.SearchCommand).ExecuteAsync();
             await ((AsyncCommand<GlobalSearchResult>)viewModel.OpenGlobalSearchGroupCommand).ExecuteAsync(mailResult);
             Assert.Single(viewModel.Messages);
             Assert.Equal(mailbox.Id, viewModel.Messages[0].MailboxId);
+
+            await ((AsyncCommand)viewModel.SearchCommand).ExecuteAsync();
+            await ((AsyncCommand)viewModel.OpenAllGlobalMailResultsCommand).ExecuteAsync();
+            Assert.False(viewModel.IsGlobalSearchOpen);
+            Assert.True(viewModel.IsSearchResultsView);
+            Assert.Equal(2, viewModel.Messages.Count);
+            Assert.Equal(new[] { mailbox.Id, secondMailbox.Id }.Order(), viewModel.Messages.Select(message => message.MailboxId).Order());
+
+            await ((AsyncCommand)viewModel.SearchCommand).ExecuteAsync();
+            await ((AsyncCommand)viewModel.SubmitGlobalSearchCommand).ExecuteAsync();
+            Assert.Equal("Mail", viewModel.ActiveModule);
+            Assert.Equal(2, viewModel.Messages.Count);
+
+            viewModel.SearchText = "type:calendar Planning";
+            await ((AsyncCommand)viewModel.SearchCommand).ExecuteAsync();
+            var calendarMatches = viewModel.GlobalSearchResults.ToArray();
+            await ((AsyncCommand)viewModel.SubmitGlobalSearchCommand).ExecuteAsync();
+            Assert.False(viewModel.IsGlobalSearchOpen);
+            Assert.Equal("Calendar", viewModel.ActiveModule);
+            Assert.NotEmpty(calendarMatches);
+            Assert.Equal(calendarMatches, viewModel.WorkspaceSearchResults);
+
+            var driveMatches = Enumerable.Range(0, 45).Select(index => new CloudFile(
+                $"active-{index}", $"Planning {index}.docx", 1024, null, account.AccountId, ParentPath: "/Projects/Active")).ToArray();
+            await store.UpsertWorkspaceItemsAsync("drive-file", account.AccountId, "index",
+                driveMatches.Append(new("old", "Planning old.docx", 1024, null, account.AccountId, ParentPath: "/Projects/Old")).ToArray(),
+                static file => file.ProviderId, static file => file.Name, cancellationToken);
+            viewModel.SearchText = "type:drive Planning account:account in:Projects notin:{Projects/Old}";
+            await ((AsyncCommand)viewModel.SearchCommand).ExecuteAsync();
+            Assert.Equal(40, viewModel.GlobalSearchResults.Count);
+            await ((AsyncCommand)viewModel.SubmitGlobalSearchCommand).ExecuteAsync();
+            Assert.Equal("Drive", viewModel.ActiveModule);
+            Assert.Empty(viewModel.WorkspaceSearchResults);
+            Assert.Equal(driveMatches.Select(file => file.ProviderId).Order(),
+                viewModel.DriveWorkspace.SearchResults.Select(result => result.File.ProviderId).Order());
         }
         finally
         {
@@ -1545,6 +1587,9 @@ public sealed class MainWindowViewModelTests
 
             Assert.True(viewModel.IsGlobalSearchRunning);
             Assert.DoesNotContain(viewModel.GlobalSearchResults, result => result.Title == remote.Subject);
+            await ((AsyncCommand)viewModel.SubmitGlobalSearchCommand).ExecuteAsync();
+            Assert.True(viewModel.IsGlobalSearchOpen);
+            Assert.Equal(1, provider.SearchCalls);
             viewModel.CloseGlobalSearchCommand.Execute(null);
             Assert.False(viewModel.IsGlobalSearchOpen);
             Assert.True(viewModel.SearchCommand.CanExecute(null));
@@ -1555,6 +1600,8 @@ public sealed class MainWindowViewModelTests
             await WaitUntilAsync(() => !viewModel.IsGlobalSearchRunning, cancellationToken);
 
             Assert.Contains(viewModel.GlobalSearchResults, result => result.Title == remote.Subject);
+            Assert.All(viewModel.GlobalSearchResults, result => Assert.Null(Assert.IsType<MailMessage>(result.Value).Body));
+            Assert.Equal(remote.Body, (await store.GetMessageAsync(mailbox.Id, remote.ProviderId, cancellationToken))?.Body);
             Assert.Contains(await store.SearchAsync("Needle", cancellationToken: cancellationToken),
                 message => message.ProviderId == remote.ProviderId);
         }
@@ -1689,7 +1736,8 @@ public sealed class MainWindowViewModelTests
             Assert.True(viewModel.SelectedMessage?.IsRead);
             Assert.Equal("<b>Body</b>", viewModel.SelectedMessage?.Body);
             Assert.Contains("Body", viewModel.ConversationThread.SelectedMessage!.BodyHtml);
-            Assert.Same(viewModel.Messages.Single(), viewModel.SelectedMessage);
+            Assert.Equal(viewModel.Messages.Single().ProviderId, viewModel.SelectedMessage?.ProviderId);
+            Assert.Null(viewModel.Messages.Single().Body);
             Assert.True(viewModel.DeleteCommand.CanExecute(null));
             Assert.Single(viewModel.Attachments);
             Assert.Equal(0, bodyRefreshes);

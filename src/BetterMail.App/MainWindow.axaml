@@ -135,12 +135,16 @@
                   <ListBox.ItemTemplate>
                     <DataTemplate x:DataType="app:GlobalSearchResult" x:CompileBindings="True">
                       <StackPanel>
-                        <TextBlock Text="{Binding Category}"
-                                   IsVisible="{Binding StartsCategory}"
-                                   Margin="16,10,12,4"
-                                   FontSize="11"
-                                   FontWeight="SemiBold"
-                                   Opacity="0.64" />
+                        <Grid IsVisible="{Binding StartsCategory}"
+                              Margin="16,10,12,4"
+                              ColumnDefinitions="*,Auto">
+                          <TextBlock Text="{Binding Category}" FontSize="11" FontWeight="SemiBold"
+                                     VerticalAlignment="Center" Opacity="0.64" />
+                          <Button Grid.Column="1" Classes="command" Content="View all mail"
+                                  Padding="5,2" MinHeight="0" FontSize="11"
+                                  IsVisible="{Binding IsMail}"
+                                  Command="{ReflectionBinding $parent[Window].DataContext.OpenAllGlobalMailResultsCommand}" />
+                        </Grid>
                         <Grid IsVisible="{Binding StartsAccountGroup}"
                               Margin="18,7,12,3"
                               ColumnDefinitions="*,Auto">
@@ -943,7 +947,8 @@
     <Border x:Name="WorkspaceSurface" Grid.Row="1" Grid.RowSpan="2" Grid.Column="1" Grid.ColumnSpan="3"
             Background="{DynamicResource BetterMailSurfaceBrush}"
             IsVisible="{Binding ShowWorkspaceSurface}">
-      <Grid RowDefinitions="Auto,*">
+      <Grid>
+      <Grid RowDefinitions="Auto,*" IsVisible="{Binding !HasWorkspaceSearchResults}">
         <Border Padding="22,12" BorderBrush="{DynamicResource BetterMailDividerBrush}" BorderThickness="0,0,0,1"
                 IsVisible="{Binding IsGenericWorkspaceModule}">
           <Grid x:Name="ModuleHeader" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="10" RowSpacing="8">
@@ -1186,6 +1191,31 @@
             <TextBlock Text="Contacts appear automatically as accounts sync. Try changing your search or add a contact." Opacity="0.62" />
           </StackPanel>
         </Grid>
+      </Grid>
+      <Grid IsVisible="{Binding HasWorkspaceSearchResults}" RowDefinitions="Auto,*">
+        <Grid ColumnDefinitions="*,Auto" Margin="16,12">
+          <TextBlock Text="{Binding ActiveModule, StringFormat='{}{0} search results'}"
+                     FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
+          <Button Grid.Column="1" Classes="command" Content="Clear results"
+                  Command="{Binding ClearWorkspaceSearchResultsCommand}" />
+        </Grid>
+        <ListBox Grid.Row="1" ItemsSource="{Binding WorkspaceSearchResults}"
+                 Classes="workspaceList" AutomationProperties.Name="Workspace search results">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="app:GlobalSearchResult">
+              <Button Classes="searchResult" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                      Command="{ReflectionBinding $parent[Window].DataContext.OpenGlobalSearchResultCommand}"
+                      CommandParameter="{Binding}">
+                <StackPanel Spacing="2">
+                  <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding Subtitle}" FontSize="11" Opacity="0.7" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding AccountGroup}" FontSize="11" Opacity="0.7" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+              </Button>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </Grid>
       </Grid>
     </Border>
 
