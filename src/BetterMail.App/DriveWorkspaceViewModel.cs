@@ -255,7 +255,7 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         }
         if (Roots.Count > 0)
         {
-            await SelectDirectoryAsync(Roots[0], cancellationToken);
+            await SelectDirectoryAsync(Roots[0], preserveGlobalSearch: true, cancellationToken);
         }
     }
 
@@ -300,11 +300,15 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
         }
         if (SelectedDirectory is null && Roots.Count > 0)
         {
-            await SelectDirectoryAsync(Roots[0], cancellationToken);
+            await SelectDirectoryAsync(Roots[0], preserveGlobalSearch: true, cancellationToken);
         }
     }
 
-    public async Task SelectDirectoryAsync(DriveTreeNode node, CancellationToken cancellationToken = default)
+    public Task SelectDirectoryAsync(DriveTreeNode node, CancellationToken cancellationToken = default) =>
+        SelectDirectoryAsync(node, preserveGlobalSearch: false, cancellationToken);
+
+    private async Task SelectDirectoryAsync(
+        DriveTreeNode node, bool preserveGlobalSearch, CancellationToken cancellationToken)
     {
         if (node.IsPlaceholder || node.Item?.IsFolder == false)
         {
@@ -319,9 +323,12 @@ public sealed class DriveWorkspaceViewModel : ViewModelBase
             SelectedDirectory = node;
             CollectionUpdates.Reconcile(CurrentItems, Entries(node), static entry => entry.Identity);
             SelectedItem = null;
-            SelectedSearchResult = null;
-            _globalSearchFiles = null;
-            IsSearchMode = false;
+            if (!preserveGlobalSearch || _globalSearchFiles is null)
+            {
+                SelectedSearchResult = null;
+                _globalSearchFiles = null;
+                IsSearchMode = false;
+            }
         }
         finally
         {

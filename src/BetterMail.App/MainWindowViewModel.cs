@@ -254,7 +254,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         SelectFolderCommand = new AsyncCommand<MailFolderItem>(SelectFolderAsync, allowConcurrent: true);
         LoadMoreMessagesCommand = new AsyncCommand(LoadMoreMessagesAsync, () => HasMoreMessages && !_isLoadingMoreMessages);
         SearchCommand = new AsyncCommand(() => StartGlobalSearchAsync(debounce: false, forceOpen: true), () => _store is not null, allowConcurrent: true);
-        SubmitGlobalSearchCommand = new AsyncCommand(SubmitGlobalSearchAsync, () => _store is not null);
+        SubmitGlobalSearchCommand = new AsyncCommand(SubmitGlobalSearchAsync, () => _store is not null, allowConcurrent: true);
         OpenGlobalSearchResultCommand = new AsyncCommand<GlobalSearchResult>(OpenGlobalSearchResultAsync);
         OpenGlobalSearchGroupCommand = new AsyncCommand<GlobalSearchResult>(OpenGlobalSearchGroupAsync);
         OpenAllGlobalMailResultsCommand = new AsyncCommand(OpenAllGlobalMailResultsAsync, () =>
@@ -2915,13 +2915,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 await OpenAllGlobalMailResultsAsync();
                 break;
             case "Drive":
-                var query = SearchText.Trim();
-                var files = _latestDriveSearchResults;
-                IsGlobalSearchOpen = false;
-                await ShowWorkspaceModuleAsync("Drive");
-                if (IsFilesModule && !IsGlobalSearchOpen && SearchText.Trim() == query)
+                if (_workspaceProvider is not null && CanOpenWorkspaceModule())
                 {
-                    DriveWorkspace?.ShowGlobalSearchResults(SearchQuery.Parse(query).Text, files);
+                    var terms = SearchQuery.Parse(SearchText).Text;
+                    IsGlobalSearchOpen = false;
+                    GetOrCreateDriveWorkspace(_workspaceProvider).ShowGlobalSearchResults(terms, _latestDriveSearchResults);
+                    await ShowWorkspaceModuleAsync("Drive");
                 }
                 break;
             default:
@@ -3563,15 +3562,22 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        if (DriveWorkspace is null)
+        var drive = GetOrCreateDriveWorkspace(_workspaceProvider);
+        await drive.UpdateAccountsAsync(AccountsWith(ProviderCapabilities.Files));
+        await drive.InitializeAsync();
+    }
+
+    private DriveWorkspaceViewModel GetOrCreateDriveWorkspace(IWorkspaceProvider provider)
+    {
+        if (DriveWorkspace is { } existing)
         {
-            DriveWorkspace = new DriveWorkspaceViewModel(
-                _workspaceProvider, AccountsWith(ProviderCapabilities.Files), _store);
-            DriveWorkspace.ItemChosen += HandleDriveItemChosen;
-            DriveWorkspace.LinkChosen += HandleDriveLinkChosen;
+            return existing;
         }
-        await DriveWorkspace.UpdateAccountsAsync(AccountsWith(ProviderCapabilities.Files));
-        await DriveWorkspace.InitializeAsync();
+        var drive = new DriveWorkspaceViewModel(provider, AccountsWith(ProviderCapabilities.Files), _store);
+        drive.ItemChosen += HandleDriveItemChosen;
+        drive.LinkChosen += HandleDriveLinkChosen;
+        DriveWorkspace = drive;
+        return drive;
     }
 
     private Task LoadTasksWorkspaceAsync() => LoadWorkspaceOnceAsync("Tasks", LoadTasksWorkspaceCoreAsync);

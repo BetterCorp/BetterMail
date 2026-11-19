@@ -1542,6 +1542,51 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task CompletedDriveSearchOpensWhileTheFirstDirectoryLoads()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"bettermail-drive-search-{Guid.NewGuid():N}");
+        var releaseDirectory = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            await using var store = new EncryptedMailStore(Path.Combine(directory, "mail.db"), new string('D', 64));
+            await store.InitializeAsync(token);
+            var account = new MailAccount("microsoft365", "drive", "tenant", "drive@example.test", "Drive", ProviderCapabilities.Files);
+            await store.SaveAccountAsync(account, token);
+            var file = new CloudFile("cached-budget", "Budget.xlsx", 100, null, account.AccountId, account.ProviderId, "/Projects");
+            await store.UpsertWorkspaceItemsAsync("drive-file", account.AccountId, "index", [file],
+                static item => item.ProviderId, static item => item.Name, token);
+            var provider = new FakeWorkspaceProvider { DriveRootRelease = releaseDirectory };
+            var vm = new MainWindowViewModel(store, directory, _ => { }, _ => { }, null, workspaceProvider: provider);
+            vm.Accounts.Add(account);
+            vm.SearchText = "type:drive in:Projects Budget";
+            await ((AsyncCommand)vm.SearchCommand).ExecuteAsync();
+
+            var submit = ((AsyncCommand)vm.SubmitGlobalSearchCommand).ExecuteAsync();
+            DriveWorkspaceViewModel drive;
+            try
+            {
+                Assert.False(submit.IsCompleted);
+                Assert.False(vm.IsGlobalSearchOpen);
+                Assert.Equal("Drive", vm.ActiveModule);
+                drive = Assert.IsType<DriveWorkspaceViewModel>(vm.DriveWorkspace);
+                Assert.True(drive.IsNavigating);
+                Assert.True(drive.IsSearchMode);
+                Assert.Equal(file, Assert.Single(drive.SearchResults).File);
+            }
+            finally
+            {
+                releaseDirectory.TrySetResult();
+                await submit.WaitAsync(token);
+            }
+            Assert.True(drive.IsSearchMode);
+            Assert.NotNull(drive.SelectedDirectory);
+            Assert.Equal(file, Assert.Single(drive.SearchResults).File);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
+    }
+
+    [Fact]
     public async Task MailSearchShowsLocalResultsBeforeIncompleteCacheFallbackFinishes()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -3241,27 +3286,36 @@ public sealed class MainWindowViewModelTests
             Task.FromResult<IReadOnlyList<CloudFile>>(
                 [new("planning-file", "Planning.docx", 1024, null, account.AccountId, account.ProviderId, "Documents")]);
 
-        public Task<IReadOnlyList<CloudDriveItem>> GetDriveItemsAsync(
+        public TaskCompletionSource? DriveRootRelease { get; init; }
+
+        public async Task<IReadOnlyList<CloudDriveItem>> GetDriveItemsAsync(
             MailAccount account,
             CloudDriveItem? parent = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<CloudDriveItem>>(
-                parent is null
-                    ?
-                    [
-                        new(
-                            $"file-{account.AccountId}",
-                            "plan.txt",
-                            4,
-                            false,
-                            null,
-                            null,
-                            account.AccountId,
-                            account.ProviderId,
-                            "text/plain",
-                            "Documents")
-                    ]
-                    : []);
+            CancellationToken cancellationToken = default)
+        {
+            if (parent is not null)
+            {
+                return [];
+            }
+            if (DriveRootRelease is { } release)
+            {
+                await release.Task.WaitAsync(cancellationToken);
+            }
+            return
+            [
+                new(
+                    $"file-{account.AccountId}",
+                    "plan.txt",
+                    4,
+                    false,
+                    null,
+                    null,
+                    account.AccountId,
+                    account.ProviderId,
+                    "text/plain",
+                    "Documents")
+            ];
+        }
 
         public async Task DownloadFileAsync(
             MailAccount account,
